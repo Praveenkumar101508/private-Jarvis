@@ -1,5 +1,5 @@
 # =============================================================================
-# SupraCloud Jarvis — docker-compose.yml
+# SupraCloud IRA — docker-compose.yml
 # Phase 2: Core Infrastructure + FastAPI + LangGraph Multi-Agent System
 #
 # GPU Target : NVIDIA RTX A4500 (20GB VRAM)
@@ -8,12 +8,12 @@
 # Combined   : 0.95 × 20GB = 19GB — leaves 1GB for OS/driver overhead
 #
 # Network topology:
-#   jarvis-external  → nginx, livekit (internet-facing)
-#   jarvis-internal  → all services (isolated, no external routing)
-#   jarvis-api       → both networks (proxied by nginx, calls internal services)
+#   ira-external  → nginx, livekit (internet-facing)
+#   ira-internal  → all services (isolated, no external routing)
+#   ira-api       → both networks (proxied by nginx, calls internal services)
 # =============================================================================
 
-name: supracloud-jarvis
+name: supracloud-ira
 
 # ── Reusable fragments ────────────────────────────────────────────────────────
 x-logging: &default-logging
@@ -48,7 +48,7 @@ x-vllm-common: &vllm-common
             capabilities: [gpu]
   logging: *default-logging
   networks:
-    - jarvis-internal
+    - ira-internal
 
 # ─────────────────────────────────────────────────────────────────────────────
 services:
@@ -58,7 +58,7 @@ services:
   #         security events, business events, registered agents.
   postgres:
     image: pgvector/pgvector:pg16
-    container_name: jarvis-postgres
+    container_name: ira-postgres
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-jarvis}
@@ -90,14 +90,14 @@ services:
       start_period: 20s
     logging: *default-logging
     networks:
-      - jarvis-internal
+      - ira-internal
 
   # ── Redis 7 ───────────────────────────────────────────────────────────────
   # Stores: session cache, response cache, rate-limit counters,
   #         pub/sub for proactive agent events, task queues.
   redis:
     image: redis:7.4-alpine
-    container_name: jarvis-redis
+    container_name: ira-redis
     restart: unless-stopped
     command: >
       redis-server
@@ -122,7 +122,7 @@ services:
       start_period: 10s
     logging: *default-logging
     networks:
-      - jarvis-internal
+      - ira-internal
 
   # ── vLLM Fast Path ────────────────────────────────────────────────────────
   # Model  : Llama 3.1 8B Instruct (AWQ-INT4, Marlin kernels)
@@ -131,7 +131,7 @@ services:
   # VRAM   : ~7GB (gpu_memory_utilization=0.35 × 20GB)
   vllm-fast:
     <<: *vllm-common
-    container_name: jarvis-vllm-fast
+    container_name: ira-vllm-fast
     volumes:
       - hf_cache:/root/.cache/huggingface
       - vllm_fast_cache:/tmp/vllm_fast
@@ -181,7 +181,7 @@ services:
   #          during simultaneous model loading
   vllm-deep:
     <<: *vllm-common
-    container_name: jarvis-vllm-deep
+    container_name: ira-vllm-deep
     volumes:
       - hf_cache:/root/.cache/huggingface
       - vllm_deep_cache:/tmp/vllm_deep
@@ -229,7 +229,7 @@ services:
   # Works with: Faster-Whisper (STT) + Kokoro TTS (Phase 3)
   livekit:
     image: livekit/livekit-server:v1.7
-    container_name: jarvis-livekit
+    container_name: ira-livekit
     restart: unless-stopped
     command: --config /etc/livekit/livekit.yaml
     volumes:
@@ -250,23 +250,23 @@ services:
       start_period: 15s
     logging: *default-logging
     networks:
-      - jarvis-internal
-      - jarvis-external
+      - ira-internal
+      - ira-external
 
-  # ── Jarvis API (FastAPI + LangGraph) ─────────────────────────────────────
+  # ── IRA API (FastAPI + LangGraph) ────────────────────────────────────────
   # The intelligence layer — routes requests through the multi-agent graph.
   # Runs on CPU for API/orchestration; LLM inference is offloaded to vLLM.
-  jarvis-api:
+  ira-api:
     build:
-      context: ./jarvis
+      context: ./ira
       dockerfile: Dockerfile
-    container_name: jarvis-api
+    container_name: ira-api
     restart: unless-stopped
     environment:
       # Database
-      POSTGRES_USER: ${POSTGRES_USER:-jarvis}
+      POSTGRES_USER: ${POSTGRES_USER:-ira}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_DB: ${POSTGRES_DB:-jarvis_db}
+      POSTGRES_DB: ${POSTGRES_DB:-ira_db}
       POSTGRES_HOST: postgres
       # Redis
       REDIS_PASSWORD: ${REDIS_PASSWORD}
@@ -276,10 +276,10 @@ services:
       VLLM_FAST_URL: http://vllm-fast:8001/v1
       VLLM_DEEP_URL: http://vllm-deep:8002/v1
       # Auth
-      JARVIS_SECRET_KEY: ${JARVIS_SECRET_KEY}
-      JARVIS_ADMIN_USERNAME: ${JARVIS_ADMIN_USERNAME:-admin}
-      JARVIS_ADMIN_PASSWORD: ${JARVIS_ADMIN_PASSWORD}
-      JARVIS_DOMAIN: ${JARVIS_DOMAIN:-jarvis.local}
+      IRA_SECRET_KEY: ${IRA_SECRET_KEY}
+      IRA_ADMIN_USERNAME: ${IRA_ADMIN_USERNAME:-admin}
+      IRA_ADMIN_PASSWORD: ${IRA_ADMIN_PASSWORD}
+      IRA_DOMAIN: ${IRA_DOMAIN:-ira.local}
       # Embeddings (CPU)
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-BAAI/bge-large-en-v1.5}
       EMBEDDING_DEVICE: cpu
@@ -303,14 +303,58 @@ services:
       start_period: 60s
     logging: *default-logging
     networks:
-      - jarvis-internal
-      - jarvis-external
+      - ira-internal
+      - ira-external
+
+  # ── IRA Voice Agent (LiveKit + Faster-Whisper STT + Kokoro TTS) ──────────
+  # Phase 3: Full voice pipeline — multilingual, warm Indian female voice
+  #
+  # STT: Faster-Whisper large-v3 on CPU (~0.8–1.5s latency for short utterances)
+  # TTS: Kokoro af_bella (24kHz → 48kHz, ~200–400ms synthesis latency)
+  # VAD: Silero (real-time voice activity detection)
+  # Languages: English + Hindi + Tamil + Telugu + Kannada + Malayalam + DE/FR/IT + more
+  ira-voice:
+    build:
+      context: ./ira
+      dockerfile: voice/Dockerfile
+    container_name: ira-voice
+    restart: unless-stopped
+    environment:
+      # LiveKit connection
+      LIVEKIT_URL: ws://livekit:7880
+      LIVEKIT_API_KEY: ${LIVEKIT_API_KEY}
+      LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET}
+      # IRA API — voice agent calls ira-api to process transcripts
+      IRA_API_URL: http://ira-api:8000
+      IRA_API_TOKEN: ${IRA_VOICE_API_TOKEN:-}
+      # Model selection
+      WHISPER_MODEL: ${WHISPER_MODEL:-large-v3}
+      # HuggingFace cache (shared)
+      HF_HOME: /home/ira/.cache/huggingface
+    volumes:
+      - hf_cache:/home/ira/.cache/huggingface
+      - kokoro_cache:/home/ira/.cache/kokoro
+      - whisper_cache:/home/ira/.cache/whisper
+    depends_on:
+      livekit:
+        condition: service_healthy
+      ira-api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "python -c 'import faster_whisper, kokoro_onnx; print(\"ok\")' || exit 1"]
+      interval: 60s
+      timeout: 30s
+      retries: 5
+      start_period: 120s
+    logging: *default-logging
+    networks:
+      - ira-internal
 
   # ── Nginx (TLS Termination + Reverse Proxy) ───────────────────────────────
-  # Routes: HTTPS → jarvis-api
+  # Routes: HTTPS → ira-api
   nginx:
     image: nginx:1.27-alpine
-    container_name: jarvis-nginx
+    container_name: ira-nginx
     restart: unless-stopped
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
@@ -321,7 +365,7 @@ services:
       - "443:443"
     depends_on:
       - livekit
-      - jarvis-api
+      - ira-api
     healthcheck:
       test: ["CMD-SHELL", "nginx -t && wget -qO- http://localhost/health || exit 1"]
       interval: 30s
@@ -330,8 +374,8 @@ services:
       start_period: 10s
     logging: *default-logging
     networks:
-      - jarvis-internal
-      - jarvis-external
+      - ira-internal
+      - ira-external
 
 # ── Named Volumes ─────────────────────────────────────────────────────────────
 volumes:
@@ -343,6 +387,10 @@ volumes:
     driver: local
   vllm_fast_cache:
     driver: local
+  kokoro_cache:
+    driver: local
+  whisper_cache:
+    driver: local
   vllm_deep_cache:
     driver: local
   nginx_logs:
@@ -350,14 +398,14 @@ volumes:
 
 # ── Networks ──────────────────────────────────────────────────────────────────
 networks:
-  jarvis-internal:
+  ira-internal:
     driver: bridge
     internal: true    # Strictly isolated — cannot reach internet directly
     ipam:
       config:
         - subnet: 172.20.0.0/24
 
-  jarvis-external:
+  ira-external:
     driver: bridge    # Internet-facing (nginx, livekit only)
     ipam:
       config:

@@ -105,13 +105,13 @@ async def chat_stream(
     use_deep = should_use_deep(req.message)
 
     # Build the system + user messages (simplified — no full graph for streaming path)
-    from agents.conversational import JARVIS_SYSTEM
+    from agents.conversational import IRA_SYSTEM
     from memory.store import retrieve
 
     memories = await retrieve(req.message)
     memory_ctx = "\n".join(m["content"] for m in memories) if memories else ""
 
-    messages = [{"role": "system", "content": JARVIS_SYSTEM}]
+    messages = [{"role": "system", "content": IRA_SYSTEM}]
     if memory_ctx:
         messages.append({"role": "system", "content": f"Relevant memory:\n{memory_ctx}"})
 

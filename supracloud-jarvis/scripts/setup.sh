@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# SupraCloud Jarvis — One-Command Setup Script
+# SupraCloud IRA — One-Command Setup Script
 # Run this ONCE before the first docker compose up.
 #
 # Usage: bash scripts/setup.sh
@@ -31,7 +31,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 cd "${ROOT_DIR}"
 
-header "SupraCloud Jarvis — Setup"
+header "SupraCloud IRA — Setup"
 
 # =============================================================================
 # 1. PREREQUISITES CHECK
@@ -82,7 +82,7 @@ else
 
     # Auto-generate secrets
     VLLM_KEY=$(openssl rand -hex 32)
-    JARVIS_SECRET=$(openssl rand -hex 32)
+    IRA_SECRET=$(openssl rand -hex 32)
     LIVEKIT_KEY=$(openssl rand -hex 16)
     LIVEKIT_SECRET=$(openssl rand -hex 32)
 
@@ -101,19 +101,19 @@ else
     [[ -z "${HF_TOKEN}" ]] && warn "HF_TOKEN is empty — required for Llama 3.1 (gated model). Set it in .env before starting."
 
     read -rp "Your domain (or IP, e.g. 192.168.1.100 or jarvis.yourdomain.com): " DOMAIN; echo ""
-    DOMAIN="${DOMAIN:-jarvis.local}"
+    DOMAIN="${DOMAIN:-ira.local}"
 
     # Patch .env with generated + user-provided values
     sed -i "s|CHANGE_ME_strong_password_here|${PG_PASS}|g"           .env
     sed -i "s|CHANGE_ME_redis_password_here|${REDIS_PASS}|g"         .env
-    sed -i "s|CHANGE_ME_generate_with_openssl_rand_hex_32|${JARVIS_SECRET}|g" .env
+    sed -i "s|CHANGE_ME_generate_with_openssl_rand_hex_32|${IRA_SECRET}|g" .env
     sed -i "s|CHANGE_ME_livekit_api_key|${LIVEKIT_KEY}|g"            .env
     sed -i "s|CHANGE_ME_livekit_api_secret|${LIVEKIT_SECRET}|g"      .env
     sed -i "s|hf_CHANGE_ME|${HF_TOKEN}|g"                            .env
     sed -i "s|VLLM_API_KEY=.*|VLLM_API_KEY=${VLLM_KEY}|g"            .env
-    sed -i "s|JARVIS_DOMAIN=.*|JARVIS_DOMAIN=${DOMAIN}|g"            .env
+    sed -i "s|IRA_DOMAIN=.*|JARVIS_DOMAIN=${DOMAIN}|g"            .env
     # Second occurrence of the jarvis secret (JARVIS_SECRET_KEY line)
-    sed -i "s|JARVIS_SECRET_KEY=.*|JARVIS_SECRET_KEY=${JARVIS_SECRET}|g" .env
+    sed -i "s|IRA_SECRET_KEY=.*|IRA_SECRET_KEY=${IRA_SECRET}|g" .env
 
     chmod 600 .env
     ok ".env created and secrets auto-generated."
@@ -129,24 +129,24 @@ fi
 # =============================================================================
 header "Step 3: TLS Certificate"
 
-if [[ -f "nginx/certs/jarvis.crt" && -f "nginx/certs/jarvis.key" ]]; then
+if [[ -f "nginx/certs/ira.crt" && -f "nginx/certs/ira.key" ]]; then
     ok "TLS certs already exist — skipping."
 else
     mkdir -p nginx/certs
 
     # Read domain from .env for SAN
-    DOMAIN=$(grep "JARVIS_DOMAIN=" .env | cut -d= -f2 | tr -d '"' || echo "jarvis.local")
+    DOMAIN=$(grep "IRA_DOMAIN=" .env | cut -d= -f2 | tr -d '"' || echo "ira.local")
 
     openssl req -x509 -nodes -days 3650 \
         -newkey rsa:4096 \
-        -keyout nginx/certs/jarvis.key \
-        -out nginx/certs/jarvis.crt \
-        -subj "/C=US/ST=Private/L=Private/O=SupraCloud Jarvis/CN=${DOMAIN}" \
+        -keyout nginx/certs/ira.key \
+        -out nginx/certs/ira.crt \
+        -subj "/C=US/ST=Private/L=Private/O=SupraCloud IRA/CN=${DOMAIN}" \
         -addext "subjectAltName=DNS:${DOMAIN},DNS:localhost,IP:127.0.0.1" \
         2>/dev/null
 
-    chmod 600 nginx/certs/jarvis.key
-    chmod 644 nginx/certs/jarvis.crt
+    chmod 600 nginx/certs/ira.key
+    chmod 644 nginx/certs/ira.crt
     ok "Self-signed TLS cert generated for ${DOMAIN} (valid 10 years)."
     warn "Replace with a real cert from Let's Encrypt for production."
 fi
@@ -204,4 +204,4 @@ echo -e "Monitor startup logs:"
 echo ""
 echo -e "  ${BOLD}docker compose logs -f${NC}"
 echo ""
-echo -e "${GREEN}${BOLD}SupraCloud Jarvis is ready to be awakened.${NC}"
+echo -e "${GREEN}${BOLD}SupraCloud IRA is ready to be awakened.${NC}"

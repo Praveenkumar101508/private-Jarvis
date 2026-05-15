@@ -13,12 +13,12 @@ import uuid
 
 from langchain_core.messages import AIMessage
 
-from agents.state import JarvisState
+from agents.state import IRAState
 from utils.llm import chat_complete
 from utils.db import acquire
 
 _SYSTEM = """\
-You are the Meta Agent Creator module of Jarvis — an expert LangGraph engineer.
+You are the Meta Agent Creator module of IRA — an expert LangGraph engineer.
 
 When a user describes a new agent, you produce:
 
@@ -70,7 +70,7 @@ Format your response as:
 """
 
 
-async def meta_agent_creator(state: JarvisState) -> JarvisState:
+async def meta_agent_creator(state: IRAState) -> IRAState:
     t0 = time.monotonic()
 
     messages = [{"role": "system", "content": _SYSTEM}]

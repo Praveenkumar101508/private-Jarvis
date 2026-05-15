@@ -11,12 +11,12 @@ import time
 
 from langchain_core.messages import AIMessage
 
-from agents.state import JarvisState
+from agents.state import IRAState
 from utils.llm import chat_complete
 from utils.db import acquire
 
 _SYSTEM = """\
-You are the Business Manager module of Jarvis — responsible for SupraCloud's web presence and business operations.
+You are the Business Manager module of IRA — responsible for SupraCloud's web presence and business operations.
 
 Your scope:
 - Summarise incoming leads and bookings with priority ranking
@@ -55,7 +55,7 @@ async def _fetch_business_summary() -> dict:
     }
 
 
-async def website_manager(state: JarvisState) -> JarvisState:
+async def website_manager(state: IRAState) -> IRAState:
     t0 = time.monotonic()
 
     summary = await _fetch_business_summary()

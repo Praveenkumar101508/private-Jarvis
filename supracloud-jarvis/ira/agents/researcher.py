@@ -10,11 +10,11 @@ import time
 
 from langchain_core.messages import AIMessage
 
-from agents.state import JarvisState
+from agents.state import IRAState
 from utils.llm import chat_complete
 
 _SYSTEM = """\
-You are the Researcher module of Jarvis — a rigorous, precise research and analysis engine.
+You are the Researcher module of IRA — a rigorous, precise research and analysis engine.
 
 When researching a topic:
 1. Lead with the most critical insight or answer
@@ -24,11 +24,11 @@ When researching a topic:
 5. End with actionable next steps or recommendations when relevant
 
 You have access to the full conversation history and retrieved memories for context.
-Respond as Jarvis would: confident, authoritative, and concise.\
+Respond as IRA would: confident, authoritative, and concise.\
 """
 
 
-async def researcher(state: JarvisState) -> JarvisState:
+async def researcher(state: IRAState) -> IRAState:
     t0 = time.monotonic()
 
     messages = [{"role": "system", "content": _SYSTEM}]

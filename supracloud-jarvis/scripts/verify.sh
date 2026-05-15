@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# SupraCloud Jarvis — Health Verification Script
+# SupraCloud IRA — Health Verification Script
 # Run after: docker compose up -d
 #
 # Checks every service and reports a clear pass/fail status.
@@ -34,7 +34,7 @@ fi
 
 echo ""
 echo -e "${BOLD}${BLUE}╔═══════════════════════════════════════╗${NC}"
-echo -e "${BOLD}${BLUE}║   SupraCloud Jarvis — Health Check    ║${NC}"
+echo -e "${BOLD}${BLUE}║   SupraCloud IRA — Health Check    ║${NC}"
 echo -e "${BOLD}${BLUE}╚═══════════════════════════════════════╝${NC}"
 
 # =============================================================================
@@ -43,12 +43,13 @@ echo -e "${BOLD}${BLUE}╚══════════════════
 header "Container Status"
 
 CONTAINERS=(
-    "jarvis-postgres"
-    "jarvis-redis"
-    "jarvis-vllm-fast"
-    "jarvis-vllm-deep"
-    "jarvis-livekit"
-    "jarvis-nginx"
+    "ira-postgres"
+    "ira-redis"
+    "ira-vllm-fast"
+    "ira-vllm-deep"
+    "ira-livekit"
+    "ira-nginx"
+    "ira-voice"
 )
 
 for container in "${CONTAINERS[@]}"; do
@@ -75,11 +76,11 @@ done
 # =============================================================================
 header "PostgreSQL"
 
-if docker exec jarvis-postgres pg_isready -U "${POSTGRES_USER:-jarvis}" -d "${POSTGRES_DB:-jarvis_db}" &>/dev/null; then
+if docker exec ira-postgres pg_isready -U "${POSTGRES_USER:-jarvis}" -d "${POSTGRES_DB:-jarvis_db}" &>/dev/null; then
     ok "PostgreSQL accepting connections"
 
     # Check pgvector extension
-    EXT=$(docker exec jarvis-postgres psql -U "${POSTGRES_USER:-jarvis}" -d "${POSTGRES_DB:-jarvis_db}" -tAc "SELECT extname FROM pg_extension WHERE extname='vector';" 2>/dev/null)
+    EXT=$(docker exec ira-postgres psql -U "${POSTGRES_USER:-jarvis}" -d "${POSTGRES_DB:-jarvis_db}" -tAc "SELECT extname FROM pg_extension WHERE extname='vector';" 2>/dev/null)
     if [[ "${EXT}" == "vector" ]]; then
         ok "pgvector extension installed"
     else
@@ -87,7 +88,7 @@ if docker exec jarvis-postgres pg_isready -U "${POSTGRES_USER:-jarvis}" -d "${PO
     fi
 
     # Check tables exist
-    TABLES=$(docker exec jarvis-postgres psql -U "${POSTGRES_USER:-jarvis}" -d "${POSTGRES_DB:-jarvis_db}" -tAc "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='public';" 2>/dev/null || echo "0")
+    TABLES=$(docker exec ira-postgres psql -U "${POSTGRES_USER:-jarvis}" -d "${POSTGRES_DB:-jarvis_db}" -tAc "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='public';" 2>/dev/null || echo "0")
     if [[ "${TABLES}" -ge 5 ]]; then
         ok "Schema initialized (${TABLES} tables)"
     else
@@ -102,10 +103,10 @@ fi
 # =============================================================================
 header "Redis"
 
-PONG=$(docker exec jarvis-redis redis-cli --no-auth-warning -a "${REDIS_PASSWORD}" ping 2>/dev/null || echo "")
+PONG=$(docker exec ira-redis redis-cli --no-auth-warning -a "${REDIS_PASSWORD}" ping 2>/dev/null || echo "")
 if [[ "${PONG}" == "PONG" ]]; then
     ok "Redis responding to PING"
-    MEM=$(docker exec jarvis-redis redis-cli --no-auth-warning -a "${REDIS_PASSWORD}" info memory 2>/dev/null | grep "used_memory_human" | cut -d: -f2 | tr -d '\r')
+    MEM=$(docker exec ira-redis redis-cli --no-auth-warning -a "${REDIS_PASSWORD}" info memory 2>/dev/null | grep "used_memory_human" | cut -d: -f2 | tr -d '\r')
     ok "Redis memory in use: ${MEM}"
 else
     fail "Redis not responding"
@@ -126,7 +127,7 @@ if [[ "${FAST_HEALTH}" == *"ok"* ]] || curl -sf "http://localhost:8001/health" &
         ok "Model 'llama-fast' loaded"
     else
         fail "Model 'llama-fast' not yet available (still loading?)"
-        info "Run: docker logs jarvis-vllm-fast --tail 20"
+        info "Run: docker logs ira-vllm-fast --tail 20"
     fi
 
     # Quick inference test
@@ -134,17 +135,17 @@ if [[ "${FAST_HEALTH}" == *"ok"* ]] || curl -sf "http://localhost:8001/health" &
     RESPONSE=$(curl -sf -X POST \
         -H "Authorization: Bearer ${VLLM_API_KEY}" \
         -H "Content-Type: application/json" \
-        -d '{"model":"llama-fast","messages":[{"role":"user","content":"Reply with exactly: JARVIS_ONLINE"}],"max_tokens":10,"temperature":0}' \
+        -d '{"model":"llama-fast","messages":[{"role":"user","content":"Reply with exactly: IRA_ONLINE"}],"max_tokens":10,"temperature":0}' \
         "http://localhost:8001/v1/chat/completions" 2>/dev/null || echo "")
 
-    if [[ "${RESPONSE}" == *"JARVIS_ONLINE"* ]] || [[ "${RESPONSE}" == *"content"* ]]; then
+    if [[ "${RESPONSE}" == *"IRA_ONLINE"* ]] || [[ "${RESPONSE}" == *"content"* ]]; then
         ok "Fast path inference test PASSED"
     else
         fail "Fast path inference test FAILED (check logs)"
     fi
 else
     fail "vLLM fast path not responding on :8001"
-    info "Check: docker logs jarvis-vllm-fast --tail 30"
+    info "Check: docker logs ira-vllm-fast --tail 30"
 fi
 
 # =============================================================================
@@ -160,11 +161,11 @@ if curl -sf "http://localhost:8002/health" &>/dev/null; then
         ok "Model 'qwen-deep' loaded"
     else
         fail "Model 'qwen-deep' not yet available (still loading?)"
-        info "Run: docker logs jarvis-vllm-deep --tail 20"
+        info "Run: docker logs ira-vllm-deep --tail 20"
     fi
 else
     fail "vLLM deep path not responding on :8002"
-    info "Check: docker logs jarvis-vllm-deep --tail 30"
+    info "Check: docker logs ira-vllm-deep --tail 30"
 fi
 
 # =============================================================================
@@ -231,7 +232,7 @@ echo -e "${BOLD}${BLUE}═══════════════════
 TOTAL=$((PASS + FAIL))
 if [[ "${FAIL}" -eq 0 ]]; then
     echo -e "${BOLD}${GREEN}  ✓ All checks passed (${PASS}/${TOTAL})${NC}"
-    echo -e "${GREEN}  SupraCloud Jarvis is ONLINE and healthy.${NC}"
+    echo -e "${GREEN}  SupraCloud IRA is ONLINE and healthy.${NC}"
     EXIT_CODE=0
 else
     echo -e "${BOLD}${RED}  ✗ ${FAIL} check(s) failed (${PASS}/${TOTAL} passed)${NC}"

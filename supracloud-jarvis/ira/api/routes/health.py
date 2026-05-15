@@ -75,7 +75,7 @@ async def health():
 
     return HealthResponse(
         status=overall,
-        version=cfg.jarvis_version,
+        version=cfg.ira_version,
         services={
             "postgres":  pg,
             "redis":     rd,

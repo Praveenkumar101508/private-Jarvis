@@ -12,12 +12,12 @@ import json
 
 from langchain_core.messages import AIMessage
 
-from agents.state import JarvisState
+from agents.state import IRAState
 from utils.llm import chat_complete
 from utils.db import acquire
 
 _SYSTEM = """\
-You are the Security Guardian module of Jarvis — an elite cybersecurity analyst and incident responder.
+You are the Security Guardian module of IRA — an elite cybersecurity analyst and incident responder.
 
 Your responsibilities:
 - Analyse security logs and events for anomalies, intrusion attempts, and policy violations
@@ -60,7 +60,7 @@ async def _fetch_recent_events(limit: int = 20) -> list[dict]:
     ]
 
 
-async def security_guardian(state: JarvisState) -> JarvisState:
+async def security_guardian(state: IRAState) -> IRAState:
     t0 = time.monotonic()
 
     recent_events = await _fetch_recent_events()

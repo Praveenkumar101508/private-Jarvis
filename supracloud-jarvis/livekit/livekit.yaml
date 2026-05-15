@@ -57,5 +57,5 @@ logging:
 # Webhook (Phase 2: Jarvis API will receive LiveKit room events)
 # webhook:
 #   urls:
-#     - http://jarvis-api:8000/webhooks/livekit
+#     - http://ira-api:8000/webhooks/livekit
 #   api_key: ${LIVEKIT_API_KEY}
