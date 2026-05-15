@@ -1,0 +1,183 @@
+version: "3.9"
+
+# ============================================================
+# IRA (Intelligent Responsive Assistant) — Docker Compose
+# Run: docker compose up -d
+# ============================================================
+
+x-common-env: &common-env
+  env_file: .env
+  restart: unless-stopped
+  networks:
+    - ira-net
+
+services:
+
+  # ── Backend (FastAPI + LangGraph) ───────────────────────────
+  backend:
+    <<: *common-env
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend:/app
+      - ira-uploads:/app/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      chromadb:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  # ── Voice Worker (LiveKit Agent) ────────────────────────────
+  voice-worker:
+    <<: *common-env
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.voice
+    command: python -m voice.livekit_agent
+    depends_on:
+      - backend
+      - livekit
+
+  # ── Proactive Worker (Phase 4) ──────────────────────────────
+  proactive-worker:
+    <<: *common-env
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    command: python -m workers.proactive
+    depends_on:
+      - backend
+      - redis
+
+  # ── Frontend (Next.js) ──────────────────────────────────────
+  frontend:
+    <<: *common-env
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8000
+      NEXT_PUBLIC_LIVEKIT_URL: ws://localhost:7880
+
+  # ── SupraCloud Website ──────────────────────────────────────
+  supracloud-website:
+    <<: *common-env
+    build:
+      context: ./supracloud-website
+      dockerfile: Dockerfile
+    ports:
+      - "3001:80"
+
+  # ── Nginx Reverse Proxy ─────────────────────────────────────
+  nginx:
+    <<: *common-env
+    image: nginx:1.25-alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/certs:/etc/nginx/certs:ro
+    depends_on:
+      - backend
+      - frontend
+
+  # ── LiveKit Server ───────────────────────────────────────────
+  livekit:
+    <<: *common-env
+    image: livekit/livekit-server:latest
+    ports:
+      - "7880:7880"
+      - "7881:7881"
+      - "7882:7882/udp"
+    volumes:
+      - ./livekit/livekit.yaml:/etc/livekit.yaml
+    command: --config /etc/livekit.yaml
+
+  # ── Redis ───────────────────────────────────────────────────
+  redis:
+    <<: *common-env
+    image: redis:7.2-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+      - ./redis/redis.conf:/etc/redis/redis.conf
+    command: redis-server /etc/redis/redis.conf
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── PostgreSQL ──────────────────────────────────────────────
+  postgres:
+    <<: *common-env
+    image: postgres:16-alpine
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-ira_db}
+      POSTGRES_USER: ${POSTGRES_USER:-ira}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ira_pass}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./backend/db/init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-ira}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── ChromaDB (Vector Memory) ────────────────────────────────
+  chromadb:
+    <<: *common-env
+    image: chromadb/chroma:latest
+    ports:
+      - "8001:8000"
+    volumes:
+      - chroma-data:/chroma/chroma
+    environment:
+      IS_PERSISTENT: "TRUE"
+      ANONYMIZED_TELEMETRY: "FALSE"
+
+  # ── Ollama (Local LLM fallback) ─────────────────────────────
+  ollama:
+    <<: *common-env
+    image: ollama/ollama:latest
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama-data:/root/.ollama
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+volumes:
+  postgres-data:
+  redis-data:
+  chroma-data:
+  ollama-data:
+  ira-uploads:
+
+networks:
+  ira-net:
+    driver: bridge
