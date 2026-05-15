@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import time
 
-from agents.state import JarvisState
+from agents.state import IRAState
 from utils.llm import should_use_deep
 
 # ── Keyword maps for agent selection ─────────────────────────────────────────
@@ -38,7 +38,7 @@ _AGENT_RULES: list[tuple[frozenset[str], str]] = [
 ]
 
 
-def classify(state: JarvisState) -> JarvisState:
+def classify(state: IRAState) -> IRAState:
     """
     Classify the query and set active_agent + use_deep_model.
     This is the first node in every graph traversal.
@@ -58,6 +58,6 @@ def classify(state: JarvisState) -> JarvisState:
     }
 
 
-def route_after_classify(state: JarvisState) -> str:
+def route_after_classify(state: IRAState) -> str:
     """Conditional edge: returns the name of the next node to visit."""
     return state["active_agent"]

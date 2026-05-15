@@ -19,7 +19,7 @@ from datetime import datetime
 
 from langchain_core.messages import AIMessage
 
-from agents.state import JarvisState
+from agents.state import IRAState
 from utils.llm import chat_complete
 from utils.db import acquire
 
@@ -31,7 +31,7 @@ _ALLOWLIST = frozenset({
 })
 
 _SYSTEM = """\
-You are the Executor module of Jarvis — a careful, security-first command executor.
+You are the Executor module of IRA — a careful, security-first command executor.
 
 Rules you must ALWAYS follow:
 1. Before executing anything, explain exactly what the command will do and why
@@ -64,7 +64,7 @@ async def _log_exec_attempt(command: str, allowed: bool, session_id: str) -> Non
         )
 
 
-async def executor(state: JarvisState) -> JarvisState:
+async def executor(state: IRAState) -> IRAState:
     t0 = time.monotonic()
     query = state["user_query"]
 

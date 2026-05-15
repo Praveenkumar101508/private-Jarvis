@@ -1,5 +1,5 @@
 """
-SupraCloud Jarvis — FastAPI application entry point.
+SupraCloud IRA — FastAPI application entry point.
 
 Startup sequence:
   1. Connect to PostgreSQL pool
@@ -50,7 +50,7 @@ limiter = Limiter(key_func=get_remote_address)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     cfg = get_settings()
-    logger.info(f"Jarvis {cfg.jarvis_version} starting up...")
+    logger.info(f"Jarvis {cfg.ira_version} starting up...")
 
     # Initialise connections
     await init_pool()
@@ -67,13 +67,13 @@ async def lifespan(app: FastAPI):
     get_graph()
     logger.info("LangGraph agent graph compiled")
 
-    logger.info("Jarvis is online. Good morning, sir.")
+    logger.info("IRA is online. Good morning.")
     yield
 
     # Graceful shutdown
     await close_pool()
     await close_redis()
-    logger.info("Jarvis shutting down. Goodbye.")
+    logger.info("IRA shutting down. Goodbye.")
 
 
 async def _warm_embeddings():
@@ -92,9 +92,9 @@ def create_app() -> FastAPI:
     cfg = get_settings()
 
     app = FastAPI(
-        title="SupraCloud Jarvis",
+        title="SupraCloud IRA",
         description="Private sovereign AI assistant — fully self-hosted.",
-        version=cfg.jarvis_version,
+        version=cfg.ira_version,
         docs_url="/docs",
         redoc_url="/redoc",
         lifespan=lifespan,
@@ -107,7 +107,7 @@ def create_app() -> FastAPI:
     # CORS — restrict to your domain in production
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=[f"https://{cfg.jarvis_domain}", "http://localhost:3000"],
+        allow_origins=[f"https://{cfg.ira_domain}", "http://localhost:3000"],
         allow_credentials=True,
         allow_methods=["GET", "POST", "DELETE"],
         allow_headers=["Authorization", "Content-Type"],
@@ -137,7 +137,7 @@ def create_app() -> FastAPI:
         logger.error(f"Unhandled error: {exc}", exc_info=True)
         return JSONResponse(
             status_code=500,
-            content={"detail": "An internal error occurred. Jarvis is investigating."},
+            content={"detail": "An internal error occurred. IRA is investigating."},
         )
 
     return app

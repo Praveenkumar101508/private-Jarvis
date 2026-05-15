@@ -55,7 +55,7 @@ def create_token(username: str) -> TokenResponse:
     cfg = get_settings()
     expire = datetime.now(timezone.utc) + timedelta(hours=cfg.token_expire_hours)
     payload = {"sub": username, "exp": expire}
-    token = jwt.encode(payload, cfg.jarvis_secret_key, algorithm=ALGORITHM)
+    token = jwt.encode(payload, cfg.ira_secret_key, algorithm=ALGORITHM)
     return TokenResponse(
         access_token=token,
         expires_in=cfg.token_expire_hours * 3600,
@@ -65,7 +65,7 @@ def create_token(username: str) -> TokenResponse:
 def decode_token(token: str) -> TokenPayload:
     cfg = get_settings()
     try:
-        data = jwt.decode(token, cfg.jarvis_secret_key, algorithms=[ALGORITHM])
+        data = jwt.decode(token, cfg.ira_secret_key, algorithms=[ALGORITHM])
         return TokenPayload(**data)
     except JWTError:
         raise HTTPException(
@@ -96,7 +96,7 @@ async def require_auth(
 def authenticate_user(username: str, password: str) -> bool:
     """Validate credentials against the configured admin account."""
     cfg = get_settings()
-    if username != cfg.jarvis_admin_username:
+    if username != cfg.ira_admin_username:
         return False
     # Compare against the plaintext password from env (acceptable for single-user self-hosted)
-    return password == cfg.jarvis_admin_password
+    return password == cfg.ira_admin_password

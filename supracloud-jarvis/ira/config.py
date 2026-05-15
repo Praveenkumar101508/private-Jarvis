@@ -16,13 +16,13 @@ class Settings(BaseSettings):
     )
 
     # ── Identity ──────────────────────────────────────────────────────────────
-    jarvis_version: str = "0.2.0"
-    jarvis_domain: str = "jarvis.local"
+    ira_version: str = "0.2.0"
+    ira_domain: str = "jarvis.local"
 
     # ── Auth ──────────────────────────────────────────────────────────────────
-    jarvis_secret_key: str
-    jarvis_admin_username: str = "admin"
-    jarvis_admin_password: str
+    ira_secret_key: str
+    ira_admin_username: str = "admin"
+    ira_admin_password: str
     # JWT tokens expire after 24 hours
     token_expire_hours: int = 24
 

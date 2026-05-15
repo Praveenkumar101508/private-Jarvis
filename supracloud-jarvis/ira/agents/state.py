@@ -11,7 +11,7 @@ from langgraph.graph.message import add_messages
 from langchain_core.messages import BaseMessage
 
 
-class JarvisState(TypedDict):
+class IRAState(TypedDict):
     # Full message history (LangGraph manages appending via add_messages)
     messages: Annotated[list[BaseMessage], add_messages]
 

@@ -22,7 +22,7 @@ from langgraph.graph import StateGraph, START, END
 from langgraph.checkpoint.memory import MemorySaver
 from langchain_core.messages import HumanMessage
 
-from agents.state import JarvisState
+from agents.state import IRAState
 from agents.supervisor import classify, route_after_classify
 from agents.conversational import conversational
 from agents.researcher import researcher
@@ -35,7 +35,7 @@ from memory.store import retrieve, ensure_conversation, save_message
 
 # ── Memory retrieval node ──────────────────────────────────────────────────────
 
-async def retrieve_memory(state: JarvisState) -> JarvisState:
+async def retrieve_memory(state: IRAState) -> IRAState:
     """Fetch top-K relevant memories and format them for prompt injection."""
     memories = await retrieve(state["user_query"])
     if not memories:
@@ -52,7 +52,7 @@ async def retrieve_memory(state: JarvisState) -> JarvisState:
 
 # ── Interaction persistence node ───────────────────────────────────────────────
 
-async def store_interaction(state: JarvisState) -> JarvisState:
+async def store_interaction(state: IRAState) -> IRAState:
     """
     Persist the user message and Jarvis response.
     Embeddings are stored asynchronously — this node returns immediately.
@@ -79,7 +79,7 @@ async def store_interaction(state: JarvisState) -> JarvisState:
 # ── Graph construction ────────────────────────────────────────────────────────
 
 def build_graph() -> StateGraph:
-    g = StateGraph(JarvisState)
+    g = StateGraph(IRAState)
 
     # Nodes
     g.add_node("retrieve_memory", retrieve_memory)
@@ -135,14 +135,14 @@ async def run_graph(
     conversation_id: str,
     user_query: str,
     message_history: list | None = None,
-) -> JarvisState:
+) -> IRAState:
     """
     Execute the full agent graph for a single user turn.
     Returns the completed state with final_response populated.
     """
     graph = get_graph()
 
-    initial_state: JarvisState = {
+    initial_state: IRAState = {
         "messages": [HumanMessage(content=user_query)] if not message_history else message_history,
         "session_id": session_id,
         "conversation_id": conversation_id,
