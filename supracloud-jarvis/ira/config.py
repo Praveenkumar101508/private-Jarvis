@@ -79,10 +79,31 @@ class Settings(BaseSettings):
     rag_top_k: int = 5                # Top-K memories to retrieve per query
 
     # ── Agent behaviour ───────────────────────────────────────────────────────
-    # Maximum tool calls per agent turn (safety limit)
     max_tool_calls: int = 10
-    # Conversation context window injected into prompts (token estimate)
     max_context_messages: int = 20
+
+    # ── Proactive Intelligence (Phase 4) ──────────────────────────────────────
+    # Hour (UTC) to send the morning briefing (default 08:00)
+    briefing_hour_utc: int = 8
+
+    # ── Notifications: Telegram ───────────────────────────────────────────────
+    telegram_bot_token: str = ""
+    telegram_chat_id: str = ""
+
+    # ── Notifications: Email (SMTP) ───────────────────────────────────────────
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_user: str = ""
+    smtp_password: str = ""
+    smtp_to: str = ""          # Recipient — defaults to smtp_user if blank
+
+    # ── Calendar: Cal.com ─────────────────────────────────────────────────────
+    calcom_api_key: str = ""
+    calcom_api_url: str = "https://api.cal.com"
+
+    # ── Calendar: Google ──────────────────────────────────────────────────────
+    google_calendar_id: str = ""
+    google_service_account_json: str = ""  # Path to service account JSON file
 
 
 @lru_cache(maxsize=1)

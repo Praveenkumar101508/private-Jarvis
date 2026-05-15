@@ -306,6 +306,72 @@ services:
       - ira-internal
       - ira-external
 
+  # ── IRA Worker (Proactive Intelligence — APScheduler) ────────────────────
+  # Phase 4: Background intelligence — briefings, monitors, reminders, alerts
+  #
+  # Jobs:
+  #   08:00 UTC daily  — Morning briefing (business + security + calendar + tasks)
+  #   20:00 UTC daily  — Evening summary
+  #   Every 60s        — Security scan (nginx logs + system health)
+  #   Every 5 min      — Business scan (new leads, bookings)
+  #   Every 15 min     — Reminder delivery check
+  ira-worker:
+    build:
+      context: ./ira
+      dockerfile: Dockerfile.worker
+    container_name: ira-worker
+    restart: unless-stopped
+    environment:
+      # Database
+      POSTGRES_USER: ${POSTGRES_USER:-ira}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-ira_db}
+      POSTGRES_HOST: postgres
+      # Redis
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      REDIS_HOST: redis
+      # vLLM (for briefing generation)
+      VLLM_API_KEY: ${VLLM_API_KEY}
+      VLLM_FAST_URL: http://vllm-fast:8001/v1
+      VLLM_DEEP_URL: http://vllm-deep:8002/v1
+      # Auth
+      IRA_SECRET_KEY: ${IRA_SECRET_KEY}
+      IRA_ADMIN_PASSWORD: ${IRA_ADMIN_PASSWORD}
+      # Scheduler config
+      BRIEFING_HOUR_UTC: ${BRIEFING_HOUR_UTC:-8}
+      # Notifications
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_TO: ${SMTP_TO:-}
+      # Calendar
+      CALCOM_API_KEY: ${CALCOM_API_KEY:-}
+      CALCOM_API_URL: ${CALCOM_API_URL:-https://api.cal.com}
+      # Security monitor
+      NGINX_LOG_PATH: /var/log/nginx/access.log
+    volumes:
+      # Read nginx logs for security analysis
+      - nginx_logs:/var/log/nginx:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      ira-api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "python -c 'import apscheduler; print(\"ok\")' || exit 1"]
+      interval: 60s
+      timeout: 15s
+      retries: 5
+      start_period: 30s
+    logging: *default-logging
+    networks:
+      - ira-internal
+
   # ── IRA Voice Agent (LiveKit + Faster-Whisper STT + Kokoro TTS) ──────────
   # Phase 3: Full voice pipeline — multilingual, warm Indian female voice
   #
