@@ -1,0 +1,37 @@
+# ── Web framework ──────────────────────────────────────────────────────────────
+fastapi==0.115.5
+uvicorn[standard]==0.32.1
+python-multipart==0.0.12
+
+# ── LLM / Agent framework ──────────────────────────────────────────────────────
+openai==1.54.4                  # OpenAI-compatible client for vLLM
+langgraph==0.2.53               # Hierarchical multi-agent graph
+langchain==0.3.7
+langchain-openai==0.2.9
+langchain-core==0.3.19
+
+# ── Data layer ─────────────────────────────────────────────────────────────────
+asyncpg==0.30.0                 # Async PostgreSQL
+redis[asyncio]==5.2.0           # Async Redis
+
+# ── Embeddings / RAG ──────────────────────────────────────────────────────────
+sentence-transformers==3.3.0    # BGE-large-en-v1.5 (CPU)
+numpy==1.26.4
+torch==2.4.1+cpu                # CPU-only torch for embeddings (keeps image small)
+--extra-index-url https://download.pytorch.org/whl/cpu
+
+# ── Auth & Security ────────────────────────────────────────────────────────────
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+slowapi==0.1.9                  # Rate limiting for FastAPI
+
+# ── Streaming ─────────────────────────────────────────────────────────────────
+sse-starlette==2.1.3            # Server-Sent Events for streaming responses
+
+# ── Utilities ─────────────────────────────────────────────────────────────────
+pydantic==2.9.2
+pydantic-settings==2.6.1
+httpx==0.27.2
+psutil==6.1.0
+python-dateutil==2.9.0
+tenacity==9.0.0                 # Retry logic for LLM calls
