@@ -1,23 +1,50 @@
-# Environment
+# Environment — never commit real secrets
 .env
 .env.local
 .env.*.local
 
-# Dependencies
-node_modules/
+# Python
 __pycache__/
-*.pyc
-
-# Build outputs
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
 dist/
 build/
-.next/
+*.egg
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
 
-# OS
-.DS_Store
-Thumbs.db
+# Node / Next.js
+node_modules/
+.next/
+out/
+npm-debug.log*
+
+# Docker local volumes
+postgres-data/
+redis-data/
+chroma-data/
+ollama-data/
+uploads/
 
 # IDE
 .vscode/
 .idea/
 *.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Certs
+nginx/certs/
+*.pem
+*.key
+*.crt
+
+# Logs
+*.log
+logs/
