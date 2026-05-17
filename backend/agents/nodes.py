@@ -1,5 +1,9 @@
 """
-LangGraph node functions for IRA's reasoning pipeline
+LangGraph node functions for IRA's reasoning pipeline.
+
+LLM routing strategy (sovereign mode):
+  Fast model  (llama3.1:8b  on thin client)  — classify, chat, calendar
+  Heavy model (qwen2.5-coder:32b on Shadow PC via Tailscale) — TASK, code, analysis
 """
 import structlog
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -14,20 +18,47 @@ from agents.tools.calendar import get_calendar_events
 
 log = structlog.get_logger()
 
+# Intents that warrant the heavy Shadow PC model
+_HEAVY_INTENTS = {"TASK", "QUESTION_ANSWER"}
 
-def _get_llm():
+
+def _make_ollama_llm(model: str, base_url: str):
+    from langchain_ollama import ChatOllama
+    return ChatOllama(model=model, base_url=base_url)
+
+
+def _get_fast_llm():
+    """Low-latency model on the thin client (MacBook Air M1)."""
+    if settings.llm_provider == "ollama":
+        return _make_ollama_llm(settings.ollama_fast_model, settings.ollama_base_url)
+    return _get_cloud_llm()
+
+
+def _get_heavy_llm():
+    """Heavy reasoning model on Shadow PC, reached via Tailscale mesh."""
+    if settings.llm_provider == "ollama":
+        return _make_ollama_llm(settings.ollama_heavy_model, settings.ollama_heavy_url)
+    return _get_cloud_llm()
+
+
+def _get_cloud_llm():
     if settings.llm_provider == "anthropic":
         from langchain_anthropic import ChatAnthropic
         return ChatAnthropic(model=settings.anthropic_model, api_key=settings.anthropic_api_key)
-    elif settings.llm_provider == "groq":
+    if settings.llm_provider == "groq":
         from langchain_groq import ChatGroq
         return ChatGroq(model=settings.groq_model, api_key=settings.groq_api_key)
-    elif settings.llm_provider == "ollama":
-        from langchain_ollama import ChatOllama
-        return ChatOllama(model=settings.ollama_model, base_url=settings.ollama_base_url)
-    else:
-        from langchain_openai import ChatOpenAI
-        return ChatOpenAI(model=settings.openai_model, api_key=settings.openai_api_key)
+    from langchain_openai import ChatOpenAI
+    return ChatOpenAI(model=settings.openai_model, api_key=settings.openai_api_key)
+
+
+def _get_llm_for_intent(intent: str):
+    """Route to the appropriate model based on intent complexity."""
+    if intent in _HEAVY_INTENTS:
+        log.debug("llm_routing", model="heavy", intent=intent)
+        return _get_heavy_llm()
+    log.debug("llm_routing", model="fast", intent=intent)
+    return _get_fast_llm()
 
 
 async def detect_language_node(state: IRAState) -> IRAState:
@@ -38,18 +69,27 @@ async def detect_language_node(state: IRAState) -> IRAState:
         detected = lang_map.get(detected, detected)
     except LangDetectException:
         detected = state.get("language", "en")
-
     return {**state, "detected_language": detected}
 
 
 async def load_memory_node(state: IRAState) -> IRAState:
     store = MemoryStore()
-    context = await store.get_context(state["session_id"])
-    return {**state, "memory_context": context}
+    query = state["messages"][-1].content if state["messages"] else ""
+
+    # Short-term: recent conversation turns from Redis
+    short_term = await store.get_context(state["session_id"])
+
+    # Long-term: semantically relevant past exchanges from ChromaDB
+    semantic = await store.semantic_recall(query)
+
+    parts = [p for p in [semantic, short_term] if p]
+    memory_context = "\n\n".join(parts) if parts else ""
+
+    return {**state, "memory_context": memory_context}
 
 
 async def classify_intent_node(state: IRAState) -> IRAState:
-    llm = _get_llm()
+    llm = _get_fast_llm()  # classification always uses fast model
     last_msg = state["messages"][-1].content if state["messages"] else ""
 
     classification_prompt = f"""Classify the user's intent into ONE of these categories:
@@ -94,7 +134,8 @@ async def calendar_node(state: IRAState) -> IRAState:
 
 
 async def generate_response_node(state: IRAState) -> IRAState:
-    llm = _get_llm()
+    intent = state.get("user_intent", "GENERAL_CHAT")
+    llm = _get_llm_for_intent(intent)
 
     system = get_system_prompt("chat")
     messages = [SystemMessage(content=system)]
@@ -110,7 +151,9 @@ async def generate_response_node(state: IRAState) -> IRAState:
 
     detected = state.get("detected_language", "en")
     if detected != "en":
-        messages.append(SystemMessage(content=f"The user is writing in language code '{detected}'. Respond in the same language."))
+        messages.append(SystemMessage(
+            content=f"The user is writing in language code '{detected}'. Respond in the same language."
+        ))
 
     response = await llm.ainvoke(messages)
 
@@ -128,6 +171,6 @@ def route_after_classify(state: IRAState) -> str:
     intent = state.get("user_intent", "GENERAL_CHAT")
     if intent == "QUESTION_ANSWER":
         return "web_search"
-    elif intent == "CALENDAR":
+    if intent == "CALENDAR":
         return "calendar"
     return "generate_response"
