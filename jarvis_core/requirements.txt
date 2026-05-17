@@ -1,0 +1,13 @@
+fastapi==0.110.0
+uvicorn==0.28.0
+langchain==0.1.12
+langchain-openai==0.0.9
+langgraph==0.0.26
+psycopg2-binary==2.9.9
+livekit-agents==1.5.9
+livekit-api==0.4.0
+onnxruntime==1.17.1
+pydantic==2.6.4
+python-dotenv==1.0.1
+beautifulsoup4==4.12.3
+httpx==0.27.0
