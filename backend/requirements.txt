@@ -44,6 +44,12 @@ elevenlabs==1.12.0
 openai==1.57.4
 azure-cognitiveservices-speech==1.43.0
 
+# ── Sovereign / Local AI (faster-whisper STT + kokoro ONNX TTS) ──
+faster-whisper==1.1.1
+kokoro-onnx==0.4.9
+onnxruntime==1.17.1
+numpy>=1.24.0,<2.0
+
 # ── Web Search ───────────────────────────────────────────────
 tavily-python==0.5.0
 google-search-results==2.4.2
