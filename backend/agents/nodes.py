@@ -15,6 +15,7 @@ from memory.store import MemoryStore
 from agents.state import IRAState
 from agents.tools.web_search import web_search
 from agents.tools.calendar import get_calendar_events
+from agents.tools.reminders import set_reminder, list_reminders
 
 log = structlog.get_logger()
 
