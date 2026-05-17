@@ -34,27 +34,41 @@ async def morning_briefing():
 
 
 async def check_reminders():
-    """Check and fire any due reminders from Redis."""
-    import redis.asyncio as aioredis
-    import json
+    """Check and fire any due reminders from PostgreSQL reminders table."""
+    from db.connection import get_pool
 
-    r = aioredis.from_url(settings.redis_url, decode_responses=True)
-    now = datetime.now(tz).timestamp()
-
-    keys = await r.keys("ira:reminder:*")
-    for key in keys:
-        raw = await r.get(key)
-        if not raw:
-            continue
-        reminder = json.loads(raw)
-        if reminder.get("due_ts", float("inf")) <= now:
-            await _send_notification(
-                title=f"⏰ IRA Reminder",
-                body=reminder.get("message", "You have a reminder!"),
+    now = datetime.now(tz)
+    try:
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            # Fetch all pending reminders whose due_at has passed
+            rows = await conn.fetch(
+                """
+                SELECT id, message, due_at
+                FROM reminders
+                WHERE NOT notified AND due_at <= $1
+                ORDER BY due_at ASC
+                """,
+                now,
             )
-            await r.delete(key)
-
-    await r.aclose()
+            for row in rows:
+                await _send_notification(
+                    title="IRA Reminder",
+                    body=row["message"],
+                )
+                # Mark as notified so it won't fire again
+                await conn.execute(
+                    "UPDATE reminders SET notified = TRUE WHERE id = $1",
+                    row["id"],
+                )
+                log.info(
+                    "reminder_fired",
+                    id=str(row["id"]),
+                    message=row["message"],
+                    due_at=row["due_at"].isoformat(),
+                )
+    except Exception as exc:
+        log.error("check_reminders_failed", error=str(exc))
 
 
 async def periodic_health_check():

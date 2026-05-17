@@ -15,7 +15,7 @@ from memory.store import MemoryStore
 from agents.state import IRAState
 from agents.tools.web_search import web_search
 from agents.tools.calendar import get_calendar_events
-from agents.tools.reminders import set_reminder, list_reminders
+from agents.tools.reminders import set_reminder, list_reminders, delete_reminder
 
 log = structlog.get_logger()
 
@@ -96,7 +96,8 @@ async def classify_intent_node(state: IRAState) -> IRAState:
     classification_prompt = f"""Classify the user's intent into ONE of these categories:
 - GENERAL_CHAT: casual conversation, greetings, small talk
 - QUESTION_ANSWER: factual questions that need web search
-- CALENDAR: scheduling, reminders, events, meetings
+- CALENDAR: viewing or reading calendar events and meetings
+- REMINDER: setting a reminder, asking to be reminded about something at a future time ("remind me", "set a reminder", "alert me at")
 - TASK: writing, coding, analysis, summarization
 - MEMORY: asking about past conversations
 
@@ -107,7 +108,7 @@ Respond with ONLY the category name."""
     result = await llm.ainvoke([HumanMessage(content=classification_prompt)])
     intent = result.content.strip().upper()
 
-    valid_intents = {"GENERAL_CHAT", "QUESTION_ANSWER", "CALENDAR", "TASK", "MEMORY"}
+    valid_intents = {"GENERAL_CHAT", "QUESTION_ANSWER", "CALENDAR", "REMINDER", "TASK", "MEMORY"}
     if intent not in valid_intents:
         intent = "GENERAL_CHAT"
 
@@ -116,6 +117,7 @@ Respond with ONLY the category name."""
         "user_intent": intent,
         "should_search": intent == "QUESTION_ANSWER",
         "should_use_calendar": intent == "CALENDAR",
+        "should_set_reminder": intent == "REMINDER",
     }
 
 
@@ -132,6 +134,48 @@ async def calendar_node(state: IRAState) -> IRAState:
         return state
     events = await get_calendar_events()
     return {**state, "tool_results": events}
+
+
+async def reminder_node(state: IRAState) -> IRAState:
+    """
+    Handle REMINDER intent: extract time + message from the user's request,
+    create the reminder in PostgreSQL, and surface the result as tool_results.
+    """
+    if not state.get("should_set_reminder"):
+        return state
+
+    last_msg = state["messages"][-1].content if state["messages"] else ""
+
+    # Use the fast LLM to extract structured reminder fields
+    llm = _get_fast_llm()
+    extract_prompt = (
+        "Extract the reminder details from the following message.\n"
+        "Return ONLY a JSON object with two keys:\n"
+        '  "message": the reminder text (what to be reminded about)\n'
+        '  "due": the time expression exactly as stated (e.g. "3pm", "tomorrow at 9am", "in 2 hours")\n'
+        "If you cannot determine one of the fields, use null.\n\n"
+        f"User message: {last_msg}\n\n"
+        "JSON:"
+    )
+
+    tool_results: list[dict] = []
+    try:
+        import json as _json
+        raw = await llm.ainvoke([HumanMessage(content=extract_prompt)])
+        # Strip markdown fences if present
+        text = raw.content.strip().strip("```json").strip("```").strip()
+        parsed = _json.loads(text)
+        reminder_msg = parsed.get("message") or last_msg
+        due_expr = parsed.get("due") or "in 1 hour"
+    except Exception as exc:
+        log.warning("reminder_extract_failed", error=str(exc))
+        reminder_msg = last_msg
+        due_expr = "in 1 hour"
+
+    result = await set_reminder(message=reminder_msg, due_iso=due_expr)
+    tool_results.append(result)
+    log.info("reminder_node_done", result=result)
+    return {**state, "tool_results": tool_results}
 
 
 async def generate_response_node(state: IRAState) -> IRAState:
@@ -174,4 +218,6 @@ def route_after_classify(state: IRAState) -> str:
         return "web_search"
     if intent == "CALENDAR":
         return "calendar"
+    if intent == "REMINDER":
+        return "reminder"
     return "generate_response"
