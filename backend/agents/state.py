@@ -16,4 +16,5 @@ class IRAState(TypedDict):
     output: str
     should_search: bool
     should_use_calendar: bool
+    should_set_reminder: bool
     memory_context: str

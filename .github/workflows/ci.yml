@@ -26,6 +26,15 @@ jobs:
           python -m py_compile jarvis_core/app/agents/swarm.py
           python -m py_compile jarvis_core/app/agents/sandbox.py
           python -m py_compile jarvis_core/app/main.py
+          python -m py_compile backend/db/connection.py
+          python -m py_compile backend/agents/tools/reminders.py
+          python -m py_compile backend/startup_check.py
+          python -m py_compile backend/config.py
+          python -m py_compile backend/main.py
+          python -m py_compile backend/workers/proactive.py
+          python -m py_compile backend/agents/nodes.py
+          python -m py_compile backend/agents/graph.py
+          python -m py_compile backend/routers/auth.py
           echo "All source files passed syntax check."
 
       - name: Verify monorepo structure

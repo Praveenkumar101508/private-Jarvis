@@ -66,6 +66,7 @@ celery==5.4.0
 # ── Multilingual ─────────────────────────────────────────────
 langdetect==1.0.9
 deep-translator==1.11.4
+dateparser==1.2.0
 
 # ── Notifications ────────────────────────────────────────────
 python-telegram-bot==21.10

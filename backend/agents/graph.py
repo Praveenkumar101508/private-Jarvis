@@ -14,6 +14,7 @@ from agents.nodes import (
     classify_intent_node,
     web_search_node,
     calendar_node,
+    reminder_node,
     generate_response_node,
     route_after_classify,
 )
@@ -28,6 +29,7 @@ def build_graph() -> StateGraph:
     g.add_node("classify_intent", classify_intent_node)
     g.add_node("web_search", web_search_node)
     g.add_node("calendar", calendar_node)
+    g.add_node("reminder", reminder_node)
     g.add_node("generate_response", generate_response_node)
 
     g.set_entry_point("detect_language")
@@ -40,12 +42,14 @@ def build_graph() -> StateGraph:
         {
             "web_search": "web_search",
             "calendar": "calendar",
+            "reminder": "reminder",
             "generate_response": "generate_response",
         },
     )
 
     g.add_edge("web_search", "generate_response")
     g.add_edge("calendar", "generate_response")
+    g.add_edge("reminder", "generate_response")
     g.add_edge("generate_response", END)
 
     return g.compile()
@@ -76,6 +80,7 @@ class IRAGraph:
             output="",
             should_search=False,
             should_use_calendar=False,
+            should_set_reminder=False,
             memory_context="",
         )
         result = await self.graph.ainvoke(state)

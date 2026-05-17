@@ -12,6 +12,8 @@ from fastapi.responses import JSONResponse
 
 from config import settings
 from routers import chat, voice, health, auth
+from startup_check import run_startup_checks
+from db.connection import close_pool
 
 log = structlog.get_logger()
 
@@ -21,7 +23,9 @@ async def lifespan(app: FastAPI):
     log.info("IRA starting", env=settings.app_env)
     if settings.sentry_dsn:
         sentry_sdk.init(dsn=settings.sentry_dsn, traces_sample_rate=0.2)
+    await run_startup_checks()
     yield
+    await close_pool()
     log.info("IRA shutting down")
 
 
