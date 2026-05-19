@@ -6,6 +6,11 @@ Classification strategy:
   2. LLM fallback       — fast model (llama-fast), <2s, for queries longer than
                           15 words that match no keywords. Prevents misrouting
                           of ambiguous complex requests.
+
+Biometric gate:
+  `is_restricted_domain()` is a pure function exported for use by both the
+  LangGraph biometric_gate node and the streaming SSE endpoint. It returns
+  True when a query touches any domain gated behind owner authentication.
 """
 
 from __future__ import annotations
@@ -42,7 +47,45 @@ _AGENT_RULES: list[tuple[frozenset[str], str]] = [
 
 _VALID_AGENTS = {"conversational", "researcher", "security", "website", "creator", "executor"}
 
-# One-shot system prompt for the LLM router — reply with a single word only
+# ── Restricted domain classification ─────────────────────────────────────────
+# ANY query containing one of these keywords is gated behind biometric auth.
+# Non-owners receive a polite refusal; the underlying data is never exposed.
+_RESTRICTED_KEYWORDS: frozenset[str] = frozenset({
+    # Security & system internals
+    "security log", "system log", "audit log", "error log", "health log",
+    "nginx log", "access log", "event log",
+    "admin password", "database password", "db password",
+    "secret key", "api key", "env file", ".env",
+    "credentials", "private key", "ssl cert",
+    "system health", "server metrics", "cpu usage", "memory usage",
+    "show logs", "show errors", "show config",
+    # Personal / owner data
+    "schedule", "my calendar", "my appointment", "my meeting",
+    "personal", "private", "swetha", "owner",
+    "my email", "my phone", "my address",
+    # Financial
+    "financial", "revenue", "invoice", "payment", "bank",
+    "company finances", "profit", "loss",
+    # Core architecture / source code
+    "agent code", "source code", "internal architecture",
+    "codebase", "internal code", "show me the code",
+    "database schema", "db schema", "table structure",
+    # Admin actions
+    "create user", "delete user", "reset password", "change password",
+    "grant access", "revoke access",
+})
+
+
+def is_restricted_domain(query: str) -> bool:
+    """
+    Return True if the query touches any owner-gated restricted domain.
+    Pure function — no I/O, safe to call anywhere.
+    """
+    q = query.lower()
+    return any(kw in q for kw in _RESTRICTED_KEYWORDS)
+
+
+# ── LLM fallback router ───────────────────────────────────────────────────────
 _LLM_ROUTER_SYSTEM = """\
 Classify the user query into exactly one routing category. Reply with ONE word only.
 
@@ -102,4 +145,5 @@ async def classify(state: IRAState) -> IRAState:
 
 def route_after_classify(state: IRAState) -> str:
     """Conditional edge: returns the name of the next node to visit."""
-    return state["active_agent"]
+    # Always route through the biometric gate after classification
+    return "biometric_gate"

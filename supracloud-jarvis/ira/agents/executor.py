@@ -71,7 +71,7 @@ async def _run_command(command: str, timeout: int = 30) -> tuple[str, int]:
     """
     try:
         parts = shlex.split(command)
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         result: subprocess.CompletedProcess = await loop.run_in_executor(
             None,
             lambda: subprocess.run(

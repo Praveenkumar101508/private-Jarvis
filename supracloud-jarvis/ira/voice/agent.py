@@ -92,6 +92,7 @@ class IRALLMAdapter(llm.LLM):
             session_id=self._session_id,
             user_message=user_msg,
             http=self._http,
+            is_owner=False,   # biometric check happens inside _run() using raw audio
         )
 
     async def aclose(self):
@@ -107,15 +108,29 @@ class IRALLMStream(llm.LLMStream):
         session_id: str,
         user_message: str,
         http: httpx.AsyncClient,
+        is_owner: bool = False,
+        audio_bytes: bytes = b"",
     ):
         super().__init__(llm=llm, chat_ctx=llm.ChatContext(), tools=[])
         self._session_id = session_id
         self._user_message = user_message
         self._http = http
+        self._is_owner = is_owner
+        self._audio_bytes = audio_bytes
 
     async def _run(self) -> None:
         if not self._user_message.strip():
             return
+
+        # Run biometric verification against the audio that produced this transcript
+        owner_verified = self._is_owner
+        if not owner_verified and self._audio_bytes:
+            try:
+                from voice.biometrics import is_owner_authenticated
+                owner_verified = await is_owner_authenticated(self._audio_bytes)
+            except Exception as e:
+                logger.warning(f"Biometric check failed gracefully: {e}")
+                owner_verified = False
 
         try:
             async with self._http.stream(
@@ -125,6 +140,7 @@ class IRALLMStream(llm.LLMStream):
                     "message": self._user_message,
                     "session_id": self._session_id,
                     "stream": True,
+                    "is_voice_owner": owner_verified,
                 },
             ) as resp:
                 resp.raise_for_status()

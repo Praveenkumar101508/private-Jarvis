@@ -79,6 +79,8 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./postgres/init.sql:/docker-entrypoint-initdb.d/01_init.sql:ro
+      - ./postgres/002_phase4.sql:/docker-entrypoint-initdb.d/02_phase4.sql:ro
+      - ./postgres/003_biometrics.sql:/docker-entrypoint-initdb.d/03_biometrics.sql:ro
     ports:
       # Bind to localhost only — never expose DB directly to the internet
       - "127.0.0.1:5432:5432"
@@ -264,9 +266,9 @@ services:
     restart: unless-stopped
     environment:
       # Database
-      POSTGRES_USER: ${POSTGRES_USER:-ira}
+      POSTGRES_USER: ${POSTGRES_USER:-jarvis}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_DB: ${POSTGRES_DB:-ira_db}
+      POSTGRES_DB: ${POSTGRES_DB:-jarvis_db}
       POSTGRES_HOST: postgres
       # Redis
       REDIS_PASSWORD: ${REDIS_PASSWORD}
@@ -280,6 +282,15 @@ services:
       IRA_ADMIN_USERNAME: ${IRA_ADMIN_USERNAME:-admin}
       IRA_ADMIN_PASSWORD: ${IRA_ADMIN_PASSWORD}
       IRA_DOMAIN: ${IRA_DOMAIN:-ira.local}
+      # LiveKit (for voice token generation)
+      LIVEKIT_API_KEY: ${LIVEKIT_API_KEY}
+      LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET}
+      LIVEKIT_ROOM_NAME: ${LIVEKIT_ROOM_NAME:-ira-voice}
+      # Webhooks
+      WEBHOOK_SECRET: ${WEBHOOK_SECRET:-}
+      # Owner identity (biometric gate)
+      OWNER_NAME: ${OWNER_NAME:-Swetha Devisetty}
+      BIOMETRIC_THRESHOLD: ${BIOMETRIC_THRESHOLD:-0.75}
       # Embeddings (CPU)
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-BAAI/bge-large-en-v1.5}
       EMBEDDING_DEVICE: cpu
@@ -323,9 +334,9 @@ services:
     restart: unless-stopped
     environment:
       # Database
-      POSTGRES_USER: ${POSTGRES_USER:-ira}
+      POSTGRES_USER: ${POSTGRES_USER:-jarvis}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_DB: ${POSTGRES_DB:-ira_db}
+      POSTGRES_DB: ${POSTGRES_DB:-jarvis_db}
       POSTGRES_HOST: postgres
       # Redis
       REDIS_PASSWORD: ${REDIS_PASSWORD}
@@ -337,6 +348,9 @@ services:
       # Auth
       IRA_SECRET_KEY: ${IRA_SECRET_KEY}
       IRA_ADMIN_PASSWORD: ${IRA_ADMIN_PASSWORD}
+      # Owner identity (biometric gate)
+      OWNER_NAME: ${OWNER_NAME:-Swetha Devisetty}
+      BIOMETRIC_THRESHOLD: ${BIOMETRIC_THRESHOLD:-0.75}
       # Scheduler config
       BRIEFING_HOUR_UTC: ${BRIEFING_HOUR_UTC:-8}
       # Notifications

@@ -111,7 +111,7 @@ else
     sed -i "s|CHANGE_ME_livekit_api_secret|${LIVEKIT_SECRET}|g"      .env
     sed -i "s|hf_CHANGE_ME|${HF_TOKEN}|g"                            .env
     sed -i "s|VLLM_API_KEY=.*|VLLM_API_KEY=${VLLM_KEY}|g"            .env
-    sed -i "s|IRA_DOMAIN=.*|JARVIS_DOMAIN=${DOMAIN}|g"            .env
+    sed -i "s|IRA_DOMAIN=.*|IRA_DOMAIN=${DOMAIN}|g"               .env
     # Second occurrence of the jarvis secret (JARVIS_SECRET_KEY line)
     sed -i "s|IRA_SECRET_KEY=.*|IRA_SECRET_KEY=${IRA_SECRET}|g" .env
 

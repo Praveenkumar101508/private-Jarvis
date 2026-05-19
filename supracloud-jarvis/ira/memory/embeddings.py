@@ -33,7 +33,7 @@ def _embed_sync(texts: list[str]) -> list[list[float]]:
 
 async def embed(texts: list[str]) -> list[list[float]]:
     """Embed a list of texts asynchronously (offloaded to thread pool)."""
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     return await loop.run_in_executor(_executor, _embed_sync, texts)
 
 

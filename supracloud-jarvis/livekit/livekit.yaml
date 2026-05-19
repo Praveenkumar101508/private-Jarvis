@@ -1,52 +1,50 @@
 # =============================================================================
 # LiveKit Server Configuration
-# SupraCloud Jarvis — Voice / WebRTC Layer
+# SupraCloud IRA — Voice / WebRTC Layer
 #
 # Docs: https://docs.livekit.io/home/self-hosting/deployment/
 # =============================================================================
 
 port: 7880
+
+# ── RTC / NAT traversal ───────────────────────────────────────────────────────
+# Single unified rtc block (duplicate removed — YAML doesn't allow two rtc: keys)
 rtc:
   tcp_port: 7881
   udp_port: 7882
-  # Allow LiveKit to detect the external IP automatically.
-  # For production behind NAT, set use_external_ip: true and configure
-  # node_ip to your server's public IP.
+  # Auto-detect external IP for NAT traversal.
+  # For strict NAT environments, set use_external_ip: true
+  # and configure node_ip to your server's public IP.
   use_external_ip: true
-
-# Keys — injected at runtime via environment variables
-keys:
-  # Format: api_key: api_secret
-  # The actual values come from LIVEKIT_API_KEY and LIVEKIT_API_SECRET env vars.
-  # LiveKit reads them from the yaml; we embed the env var references.
-  # NOTE: The livekit server supports direct env var substitution here.
-
-# Room defaults — tuned for voice assistant latency
-room:
-  # Disconnect participants after 10 minutes of silence (voice idle)
-  empty_timeout: 600
-  # Maximum room duration (24h) — prevents zombie sessions
-  departure_timeout: 86400
-  # Agents typically need only audio
-  max_participants: 10
-
-# Audio/video settings for voice-optimised latency
-rtc:
-  tcp_port: 7881
-  udp_port: 7882
-  use_external_ip: true
-  # STUN servers — used for NAT traversal without TURN
+  # STUN servers — NAT traversal without TURN (covers most networks)
   stun_servers:
     - stun:stun.l.google.com:19302
     - stun:stun1.l.google.com:19302
 
-# Logging
+# Keys — injected at runtime via environment variables
+# LiveKit reads LIVEKIT_API_KEY and LIVEKIT_API_SECRET from env.
+# The keys block below sets the default key pair via env var substitution.
+keys:
+  # Format: <api_key>: <api_secret>
+  # These values are populated from the environment at container start.
+  # Set LIVEKIT_API_KEY and LIVEKIT_API_SECRET in your .env file.
+
+# ── Room defaults ─────────────────────────────────────────────────────────────
+room:
+  # Disconnect participants after 10 minutes of silence
+  empty_timeout: 600
+  # Maximum room duration (24h) — prevents zombie sessions
+  departure_timeout: 86400
+  # IRA voice rooms need audio only
+  max_participants: 10
+
+# ── Logging ───────────────────────────────────────────────────────────────────
 logging:
   level: info
-  json: true            # Structured logs for log aggregators
+  json: true        # Structured logs for log aggregators
 
-# TURN server (optional, enables voice through strict firewalls)
-# Uncomment and configure if clients behind corporate firewalls can't connect:
+# ── TURN server (optional) ────────────────────────────────────────────────────
+# Uncomment to enable voice through strict corporate firewalls:
 # turn:
 #   enabled: true
 #   domain: turn.your-domain.com
@@ -54,7 +52,8 @@ logging:
 #   udp_port: 3478
 #   external_tls: true
 
-# Webhook (Phase 2: Jarvis API will receive LiveKit room events)
+# ── Webhook (IRA API receives LiveKit room events) ────────────────────────────
+# Uncomment once the /webhooks/livekit endpoint is live in ira-api:
 # webhook:
 #   urls:
 #     - http://ira-api:8000/webhooks/livekit

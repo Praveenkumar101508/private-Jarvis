@@ -75,10 +75,10 @@ async def mark_read(notif_id: str, _user: str = Depends(require_auth)):
 @router.delete("/notifications/read")
 async def clear_read(_user: str = Depends(require_auth)):
     async with acquire() as conn:
-        deleted = await conn.fetchval(
-            "DELETE FROM notifications WHERE read=TRUE RETURNING COUNT(*)"
-        ) or 0
-    return {"deleted": deleted}
+        rows = await conn.fetch(
+            "DELETE FROM notifications WHERE read=TRUE RETURNING id"
+        )
+    return {"deleted": len(rows)}
 
 
 # ── WebSocket real-time stream ────────────────────────────────────────────────

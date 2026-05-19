@@ -33,3 +33,11 @@ class IRAState(TypedDict):
     latency_ms: int
     model_used: str
     error: str | None         # Set if any node encounters a recoverable error
+
+    # ── Biometric / Access control ─────────────────────────────────────────────
+    # True when request originates from the authenticated system owner.
+    # Set by: chat.py (admin JWT check) or voice/agent.py (biometric match).
+    # Read by: biometric_gate node in graph.py.
+    is_owner: bool
+    # "admin" → full access, "public" → restricted domains blocked
+    clearance_level: str

@@ -94,7 +94,8 @@ async def update_task(task_id: str, **kwargs) -> dict | None:
     if not updates:
         return await get_task(task_id)
 
-    set_clause = ", ".join(f"{k}=${i+1}" for i, k in enumerate(updates))
+    # $1 is reserved for the WHERE id clause — SET params start at $2
+    set_clause = ", ".join(f"{k}=${i+2}" for i, k in enumerate(updates))
     values = list(updates.values())
     if "status" in updates and updates["status"] == "done":
         set_clause += f", completed_at=NOW()"

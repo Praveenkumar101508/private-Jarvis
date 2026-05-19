@@ -7,6 +7,7 @@ import StatusBar from "@/components/StatusBar";
 
 export default function Home() {
   const [token, setToken] = useState<string>("");
+  const [livekitToken, setLivekitToken] = useState<string>("");
   const [sessionId] = useState<string>(() =>
     typeof crypto !== "undefined" ? crypto.randomUUID() : Math.random().toString(36).slice(2)
   );
@@ -22,8 +23,25 @@ export default function Home() {
     if (stored) {
       setToken(stored);
       setIsAuthenticated(true);
+      fetchLivekitToken(stored);
     }
   }, []);
+
+  /** Fetch a signed LiveKit access token from ira-api after login. */
+  const fetchLivekitToken = async (authToken: string) => {
+    try {
+      const res = await fetch("/api/v1/voice/token", {
+        headers: { Authorization: `Bearer ${authToken}` },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setLivekitToken(data.token ?? "");
+      }
+    } catch {
+      // Voice unavailable — degrade gracefully, chat still works
+      console.warn("[IRA] LiveKit token fetch failed — voice disabled");
+    }
+  };
 
   const login = async () => {
     if (!password.trim()) return;
@@ -40,9 +58,12 @@ export default function Home() {
         return;
       }
       const data = await res.json();
-      localStorage.setItem("ira_token", data.access_token);
-      setToken(data.access_token);
+      const authToken = data.access_token;
+      localStorage.setItem("ira_token", authToken);
+      setToken(authToken);
       setIsAuthenticated(true);
+      // Fetch LiveKit token immediately after successful login
+      await fetchLivekitToken(authToken);
     } catch {
       setLoginError("Connection failed — is IRA running?");
     } finally {
@@ -53,6 +74,7 @@ export default function Home() {
   const logout = () => {
     localStorage.removeItem("ira_token");
     setToken("");
+    setLivekitToken("");
     setIsAuthenticated(false);
     setPassword("");
   };
@@ -130,8 +152,10 @@ export default function Home() {
 
         <div className="flex items-center gap-3">
           <StatusBar token={token} />
+          {/* livekitToken is fetched from /api/v1/voice/token after login */}
           <VoiceButton
             livekitUrl={process.env.NEXT_PUBLIC_LIVEKIT_URL || "ws://localhost:7880"}
+            livekitToken={livekitToken}
           />
           <button
             onClick={logout}

@@ -105,6 +105,18 @@ class Settings(BaseSettings):
     google_calendar_id: str = ""
     google_service_account_json: str = ""  # Path to service account JSON file
 
+    # ── LiveKit (for voice token generation) ──────────────────────────────────
+    livekit_api_key: str = ""
+    livekit_api_secret: str = ""
+    livekit_room_name: str = "ira-voice"
+
+    # ── Webhooks ──────────────────────────────────────────────────────────────
+    webhook_secret: str = ""    # Shared secret for validating inbound webhooks
+
+    # ── Owner / Biometric Gate ────────────────────────────────────────────────
+    owner_name: str = "Swetha Devisetty"
+    biometric_threshold: float = 0.75   # Cosine similarity floor for voice auth
+
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:

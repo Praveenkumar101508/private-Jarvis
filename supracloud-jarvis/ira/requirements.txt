@@ -40,3 +40,10 @@ httpx==0.27.2
 psutil==6.1.0
 python-dateutil==2.9.0
 tenacity==9.0.0                 # Retry logic for LLM calls
+
+# ── Voice token generation ─────────────────────────────────────────────────────
+livekit-api==0.7.1              # LiveKit AccessToken factory for /voice/token
+
+# ── Biometric voice verification ──────────────────────────────────────────────
+# ECAPA-TDNN speaker embedding model (~100MB download on first run)
+speechbrain==1.0.0
