@@ -37,6 +37,7 @@ class ChatRequest(BaseModel):
     message: str = Field(..., min_length=1, max_length=32_000)
     session_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     stream: bool = False
+    is_voice_owner: bool = False   # Set True by voice agent after ECAPA-TDNN biometric verification
 
 
 class ChatResponse(BaseModel):
@@ -84,7 +85,7 @@ async def chat(
         session_id=req.session_id,
         conversation_id=conv_id,
         user_query=req.message,
-        is_owner=_is_owner(_user),
+        is_owner=_is_owner(_user) or req.is_voice_owner,
     )
 
     result = ChatResponse(
@@ -118,7 +119,7 @@ async def chat_stream(
     Client receives: data: {"token": "..."} events, then data: {"done": true, "agent": "..."}.
     """
     conv_id = await ensure_conversation(req.session_id)
-    owner = _is_owner(_user)
+    owner = _is_owner(_user) or req.is_voice_owner
 
     # Classify the query through the supervisor (keyword fast-path + LLM fallback)
     from agents.state import IRAState

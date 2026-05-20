@@ -130,7 +130,8 @@ INSERT INTO monitor_state (key, value)
 VALUES
     ('nginx_log_offset', '0'),
     ('last_security_scan', NOW()::TEXT),
-    ('last_briefing_sent', '1970-01-01T00:00:00Z')
+    ('last_briefing_sent', '1970-01-01T00:00:00Z'),
+    ('last_business_check', '1970-01-01T00:00:00Z')
 ON CONFLICT (key) DO NOTHING;
 
 -- =============================================================================

@@ -236,4 +236,18 @@ async def is_owner_authenticated(audio_bytes: bytes) -> bool:
         f"threshold={cfg.biometric_threshold} "
         f"result={'PASS' if authenticated else 'FAIL'}"
     )
+
+    # Persist every check to biometric_audit for security auditing
+    try:
+        from utils.db import acquire
+        async with acquire() as conn:
+            await conn.execute(
+                """INSERT INTO biometric_audit
+                   (session_id, similarity, threshold, result, source)
+                   VALUES ($1, $2, $3, $4, 'voice')""",
+                "unknown", float(similarity), float(cfg.biometric_threshold), authenticated,
+            )
+    except Exception as audit_err:
+        logger.debug(f"Biometric audit write failed (non-fatal): {audit_err}")
+
     return authenticated

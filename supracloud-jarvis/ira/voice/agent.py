@@ -271,7 +271,7 @@ async def _wait_for_participant(ctx: JobContext, timeout: float = 30.0):
         return participants[0]
 
     # Wait for someone to join
-    future: asyncio.Future = asyncio.get_event_loop().create_future()
+    future: asyncio.Future = asyncio.get_running_loop().create_future()
 
     def on_participant_connected(participant: rtc.RemoteParticipant):
         if not participant.identity.startswith("ira-") and not future.done():

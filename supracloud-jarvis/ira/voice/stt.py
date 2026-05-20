@@ -124,7 +124,7 @@ class IRAFasterWhisperSTT(stt.STT):
         model = self._get_model()
         lang_hint = language or self._language
 
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         transcript, detected_lang, confidence = await loop.run_in_executor(
             _STT_EXECUTOR,
             _transcribe_sync,

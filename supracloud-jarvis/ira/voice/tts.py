@@ -149,7 +149,7 @@ class IRAChunkedStream(tts.ChunkedStream):
 
         model = _load_kokoro(self._voice)
 
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         audio_24k = await loop.run_in_executor(
             _TTS_EXECUTOR,
             _synthesise_sync,

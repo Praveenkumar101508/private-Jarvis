@@ -134,10 +134,15 @@ async def enroll_voice(
 
     for f in audio_files:
         audio_bytes = await f.read()
-        # Strip WAV header if present (look for 'RIFF' magic bytes)
+        # Strip WAV header robustly using the wave module (handles variable-length headers)
         if audio_bytes[:4] == b"RIFF":
-            # Skip 44-byte WAV header to get to PCM data
-            audio_bytes = audio_bytes[44:]
+            import wave, io
+            try:
+                with wave.open(io.BytesIO(audio_bytes)) as wf:
+                    audio_bytes = wf.readframes(wf.getnframes())
+            except Exception:
+                # Fallback: skip standard 44-byte header
+                audio_bytes = audio_bytes[44:]
 
         embedding = await compute_embedding(audio_bytes)
         if embedding is not None:
