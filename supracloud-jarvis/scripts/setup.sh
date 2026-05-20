@@ -94,6 +94,9 @@ else
     read -rsp "PostgreSQL password: " PG_PASS; echo ""
     [[ -z "${PG_PASS}" ]] && err "PostgreSQL password cannot be empty."
 
+    read -rsp "Admin web UI password (for IRA dashboard login): " ADMIN_PASS; echo ""
+    [[ -z "${ADMIN_PASS}" ]] && err "Admin password cannot be empty."
+
     read -rsp "Redis password: " REDIS_PASS; echo ""
     [[ -z "${REDIS_PASS}" ]] && err "Redis password cannot be empty."
 
@@ -104,7 +107,10 @@ else
     DOMAIN="${DOMAIN:-ira.local}"
 
     # Patch .env with generated + user-provided values
-    sed -i "s|CHANGE_ME_strong_password_here|${PG_PASS}|g"           .env
+    # Use field-specific patterns so POSTGRES_PASSWORD and IRA_ADMIN_PASSWORD
+    # are set independently (they shared the same placeholder in .env.example).
+    sed -i "s|^POSTGRES_PASSWORD=CHANGE_ME_strong_password_here|POSTGRES_PASSWORD=${PG_PASS}|" .env
+    sed -i "s|^IRA_ADMIN_PASSWORD=CHANGE_ME_strong_password_here|IRA_ADMIN_PASSWORD=${ADMIN_PASS}|" .env
     sed -i "s|CHANGE_ME_redis_password_here|${REDIS_PASS}|g"         .env
     sed -i "s|CHANGE_ME_generate_with_openssl_rand_hex_32|${IRA_SECRET}|g" .env
     sed -i "s|CHANGE_ME_livekit_api_key|${LIVEKIT_KEY}|g"            .env

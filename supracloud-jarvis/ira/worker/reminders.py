@@ -15,7 +15,8 @@ async def check_due_reminders() -> None:
     """Find reminders due in the next 15 minutes and deliver them."""
     async with acquire() as conn:
         rows = await conn.fetch(
-            """SELECT r.id, r.title, r.body, r.channels, t.title AS task_title
+            """SELECT r.id, r.title, r.body, r.channels, r.repeat_cron,
+                      t.title AS task_title
                FROM reminders r
                LEFT JOIN tasks t ON r.task_id = t.id
                WHERE r.sent = FALSE AND r.remind_at <= NOW() + INTERVAL '15 minutes'
@@ -41,11 +42,15 @@ async def check_due_reminders() -> None:
             metadata={"reminder_id": str(row["id"])},
         )
 
-        async with acquire() as conn:
-            await conn.execute(
-                "UPDATE reminders SET sent=TRUE WHERE id=$1",
-                row["id"],
-            )
+        # One-shot reminders: mark sent so they never fire again.
+        # Recurring reminders (repeat_cron set): leave sent=FALSE so the
+        # scheduler picks them up again on the next cycle.
+        if not row.get("repeat_cron"):
+            async with acquire() as conn:
+                await conn.execute(
+                    "UPDATE reminders SET sent=TRUE WHERE id=$1",
+                    row["id"],
+                )
 
 
 async def create_reminder(

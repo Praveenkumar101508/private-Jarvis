@@ -10,6 +10,7 @@ Job schedule:
   Every 60s      — Security scan (nginx logs + system health)
   Every 5 min    — Business scan (new leads, bookings)
   Every 15 min   — Reminder check (due reminders)
+  Every 30 min   — Cal.com calendar sync
   Every 6 hours  — Security report summary
 """
 
@@ -27,6 +28,7 @@ from worker.briefing import generate_briefing
 from worker.security_monitor import run_security_scan
 from worker.business_monitor import run_business_scan
 from worker.reminders import check_due_reminders
+from tasks.calendar import sync_calcom_bookings
 
 logger = logging.getLogger("ira.scheduler")
 
@@ -127,6 +129,16 @@ def build_scheduler() -> AsyncIOScheduler:
         replace_existing=True,
     )
 
+    # Calendar sync — every 30 minutes (pulls Cal.com bookings into calendar_events)
+    scheduler.add_job(
+        _sync_calendar,
+        trigger="interval",
+        minutes=30,
+        id="calendar_sync",
+        name="Cal.com Calendar Sync",
+        replace_existing=True,
+    )
+
     return scheduler
 
 
@@ -150,6 +162,13 @@ async def _security_digest() -> None:
         await run_security_scan()
     except Exception as e:
         logger.error(f"Security digest failed: {e}", exc_info=True)
+
+
+async def _sync_calendar() -> None:
+    try:
+        await sync_calcom_bookings()
+    except Exception as e:
+        logger.error(f"Calendar sync failed: {e}", exc_info=True)
 
 
 def get_scheduler() -> AsyncIOScheduler:
