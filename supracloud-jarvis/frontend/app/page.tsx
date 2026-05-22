@@ -2,13 +2,14 @@
 
 import { useState, useEffect } from "react";
 import ChatInterface from "@/components/ChatInterface";
-import VoiceButton from "@/components/VoiceButton";
+import VoiceOrb from "@/components/VoiceOrb";
+import Sidebar, { type AppMode } from "@/components/Sidebar";
 import StatusBar from "@/components/StatusBar";
 
 export default function Home() {
   const [token, setToken] = useState<string>("");
   const [livekitToken, setLivekitToken] = useState<string>("");
-  const [sessionId] = useState<string>(() =>
+  const [sessionId, setSessionId] = useState<string>(() =>
     typeof crypto !== "undefined" ? crypto.randomUUID() : Math.random().toString(36).slice(2)
   );
   const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -16,8 +17,10 @@ export default function Home() {
   const [username, setUsername] = useState("admin");
   const [password, setPassword] = useState("");
   const [loggingIn, setLoggingIn] = useState(false);
+  const [mode, setMode] = useState<AppMode>("assistant");
+  // chatKey forces ChatInterface to remount (clears messages) on New Chat
+  const [chatKey, setChatKey] = useState(0);
 
-  // Restore token from localStorage on mount
   useEffect(() => {
     const stored = localStorage.getItem("ira_token");
     if (stored) {
@@ -27,7 +30,6 @@ export default function Home() {
     }
   }, []);
 
-  /** Fetch a signed LiveKit access token from ira-api after login. */
   const fetchLivekitToken = async (authToken: string) => {
     try {
       const res = await fetch("/api/v1/voice/token", {
@@ -38,7 +40,6 @@ export default function Home() {
         setLivekitToken(data.token ?? "");
       }
     } catch {
-      // Voice unavailable — degrade gracefully, chat still works
       console.warn("[IRA] LiveKit token fetch failed — voice disabled");
     }
   };
@@ -62,7 +63,6 @@ export default function Home() {
       localStorage.setItem("ira_token", authToken);
       setToken(authToken);
       setIsAuthenticated(true);
-      // Fetch LiveKit token immediately after successful login
       await fetchLivekitToken(authToken);
     } catch {
       setLoginError("Connection failed — is IRA running?");
@@ -79,11 +79,19 @@ export default function Home() {
     setPassword("");
   };
 
+  const handleNewChat = () => {
+    const newId =
+      typeof crypto !== "undefined"
+        ? crypto.randomUUID()
+        : Math.random().toString(36).slice(2);
+    setSessionId(newId);
+    setChatKey((k) => k + 1);
+  };
+
   if (!isAuthenticated) {
     return (
       <div className="min-h-screen bg-neutral-950 flex items-center justify-center px-4">
         <div className="w-full max-w-sm">
-          {/* Logo */}
           <div className="text-center mb-8">
             <div className="w-16 h-16 rounded-full bg-saffron-500/10 border border-saffron-500/30 flex items-center justify-center mx-auto mb-4">
               <span className="text-3xl select-none">✦</span>
@@ -92,7 +100,6 @@ export default function Home() {
             <p className="text-neutral-400 text-sm mt-1">Private Sovereign AI Assistant</p>
           </div>
 
-          {/* Login card */}
           <div className="bg-neutral-900 rounded-2xl p-6 border border-neutral-800 shadow-2xl">
             {loginError && (
               <div className="mb-4 p-3 rounded-lg bg-red-500/10 border border-red-500/30 text-red-400 text-sm">
@@ -139,37 +146,52 @@ export default function Home() {
   }
 
   return (
-    <div className="h-screen flex flex-col bg-neutral-950 overflow-hidden">
-      {/* Top bar */}
-      <header className="flex items-center justify-between px-4 py-2.5 border-b border-neutral-800 flex-shrink-0">
-        <div className="flex items-center gap-2">
-          <div className="w-7 h-7 rounded-full bg-saffron-500/20 border border-saffron-500/40 flex items-center justify-center select-none">
-            <span className="text-sm">✦</span>
+    <div className="h-screen flex bg-neutral-950 overflow-hidden">
+      {/* Collapsible sidebar */}
+      <Sidebar
+        mode={mode}
+        onModeChange={setMode}
+        onNewChat={handleNewChat}
+      />
+
+      {/* Main column: top bar + chat */}
+      <div className="flex-1 flex flex-col min-w-0">
+        {/* Slim top bar */}
+        <header className="flex items-center justify-between px-4 py-2 border-b border-neutral-800 flex-shrink-0">
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-semibold text-white tracking-tight hidden sm:block">
+              IRA
+            </span>
+            <span className="text-xs text-neutral-600 hidden md:block">
+              Intelligent Responsive Assistant
+            </span>
           </div>
-          <span className="text-sm font-semibold text-white tracking-tight">IRA</span>
-          <span className="text-xs text-neutral-500 hidden sm:block">Intelligent Responsive Assistant</span>
-        </div>
 
-        <div className="flex items-center gap-3">
-          <StatusBar token={token} />
-          {/* livekitToken is fetched from /api/v1/voice/token after login */}
-          <VoiceButton
-            livekitUrl={process.env.NEXT_PUBLIC_LIVEKIT_URL || "ws://localhost:7880"}
-            livekitToken={livekitToken}
+          <div className="flex items-center gap-3">
+            <StatusBar token={token} />
+            <VoiceOrb
+              livekitUrl={process.env.NEXT_PUBLIC_LIVEKIT_URL || "ws://localhost:7880"}
+              livekitToken={livekitToken}
+            />
+            <button
+              onClick={logout}
+              className="text-xs text-neutral-500 hover:text-neutral-300 transition-colors px-2 py-1 rounded-lg hover:bg-neutral-800"
+            >
+              Sign out
+            </button>
+          </div>
+        </header>
+
+        {/* Chat area */}
+        <main className="flex-1 overflow-hidden">
+          <ChatInterface
+            key={chatKey}
+            sessionId={sessionId}
+            token={token}
+            mode={mode}
           />
-          <button
-            onClick={logout}
-            className="text-xs text-neutral-500 hover:text-neutral-300 transition-colors px-2 py-1 rounded-lg hover:bg-neutral-800"
-          >
-            Sign out
-          </button>
-        </div>
-      </header>
-
-      {/* Main chat area */}
-      <main className="flex-1 overflow-hidden">
-        <ChatInterface sessionId={sessionId} token={token} />
-      </main>
+        </main>
+      </div>
     </div>
   );
 }

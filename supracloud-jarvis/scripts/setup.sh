@@ -80,9 +80,11 @@ if [[ -f ".env" ]]; then
 else
     cp .env.example .env
 
-    # Auto-generate secrets
+    # Auto-generate secrets — each one is unique
     VLLM_KEY=$(openssl rand -hex 32)
     IRA_SECRET=$(openssl rand -hex 32)
+    VOICE_TOKEN=$(openssl rand -hex 32)
+    WEBHOOK_SECRET_VAL=$(openssl rand -hex 32)
     LIVEKIT_KEY=$(openssl rand -hex 16)
     LIVEKIT_SECRET=$(openssl rand -hex 32)
 
@@ -109,17 +111,34 @@ else
     # Patch .env with generated + user-provided values
     # Use field-specific patterns so POSTGRES_PASSWORD and IRA_ADMIN_PASSWORD
     # are set independently (they shared the same placeholder in .env.example).
-    sed -i "s|^POSTGRES_PASSWORD=CHANGE_ME_strong_password_here|POSTGRES_PASSWORD=${PG_PASS}|" .env
-    sed -i "s|^IRA_ADMIN_PASSWORD=CHANGE_ME_strong_password_here|IRA_ADMIN_PASSWORD=${ADMIN_PASS}|" .env
-    sed -i "s|CHANGE_ME_redis_password_here|${REDIS_PASS}|g"         .env
-    sed -i "s|CHANGE_ME_generate_with_openssl_rand_hex_32|${IRA_SECRET}|g" .env
-    sed -i "s|CHANGE_ME_livekit_api_key|${LIVEKIT_KEY}|g"            .env
-    sed -i "s|CHANGE_ME_livekit_api_secret|${LIVEKIT_SECRET}|g"      .env
-    sed -i "s|hf_CHANGE_ME|${HF_TOKEN}|g"                            .env
-    sed -i "s|VLLM_API_KEY=.*|VLLM_API_KEY=${VLLM_KEY}|g"            .env
-    sed -i "s|IRA_DOMAIN=.*|IRA_DOMAIN=${DOMAIN}|g"               .env
-    # Second occurrence of the jarvis secret (JARVIS_SECRET_KEY line)
-    sed -i "s|IRA_SECRET_KEY=.*|IRA_SECRET_KEY=${IRA_SECRET}|g" .env
+    # Use Python for safe substitution — avoids sed breaking on passwords with special chars
+    python3 - <<PYEOF
+import re, sys
+
+with open('.env', 'r') as f:
+    content = f.read()
+
+replacements = {
+    r'^POSTGRES_PASSWORD=CHANGE_ME_strong_password_here':   f'POSTGRES_PASSWORD=${PG_PASS}',
+    r'^IRA_ADMIN_PASSWORD=CHANGE_ME_strong_password_here':  f'IRA_ADMIN_PASSWORD=${ADMIN_PASS}',
+    r'^REDIS_PASSWORD=CHANGE_ME_redis_password_here':        f'REDIS_PASSWORD=${REDIS_PASS}',
+    r'^VLLM_API_KEY=.*':                                     f'VLLM_API_KEY=${VLLM_KEY}',
+    r'^IRA_SECRET_KEY=.*':                                   f'IRA_SECRET_KEY=${IRA_SECRET}',
+    r'^IRA_VOICE_API_TOKEN=.*':                              f'IRA_VOICE_API_TOKEN=${VOICE_TOKEN}',
+    r'^WEBHOOK_SECRET=.*':                                   f'WEBHOOK_SECRET=${WEBHOOK_SECRET_VAL}',
+    r'^LIVEKIT_API_KEY=.*':                                  f'LIVEKIT_API_KEY=${LIVEKIT_KEY}',
+    r'^LIVEKIT_API_SECRET=.*':                               f'LIVEKIT_API_SECRET=${LIVEKIT_SECRET}',
+    r'^HF_TOKEN=.*':                                         f'HF_TOKEN=${HF_TOKEN}',
+    r'^IRA_DOMAIN=.*':                                       f'IRA_DOMAIN=${DOMAIN}',
+}
+
+for pattern, replacement in replacements.items():
+    content = re.sub(pattern, replacement, content, flags=re.MULTILINE)
+
+with open('.env', 'w') as f:
+    f.write(content)
+print("ok")
+PYEOF
 
     chmod 600 .env
     ok ".env created and secrets auto-generated."

@@ -1,11 +1,11 @@
 """
-LangGraph state definition for the Jarvis agent graph.
+LangGraph state definition for the IRA agent graph.
 All nodes read from and write to this shared state dict.
 """
 
 from __future__ import annotations
 
-from typing import Annotated, Any
+from typing import Annotated
 from typing_extensions import TypedDict
 from langgraph.graph.message import add_messages
 from langchain_core.messages import BaseMessage
@@ -21,6 +21,7 @@ class IRAState(TypedDict):
     user_query: str           # The raw current query
     active_agent: str         # Which specialist is handling this turn
     use_deep_model: bool      # Fast (False) or deep (True) vLLM endpoint
+    mode: str                 # "assistant" | "tutor" — persona override from frontend
 
     # Memory
     memory_context: str       # Formatted retrieved memories injected into prompt
@@ -32,7 +33,8 @@ class IRAState(TypedDict):
     # Metadata
     latency_ms: int
     model_used: str
-    error: str | None         # Set if any node encounters a recoverable error
+    is_voice: bool            # True when request originates from voice pipeline
+    error: str | None
 
     # ── Biometric / Access control ─────────────────────────────────────────────
     # True when request originates from the authenticated system owner.

@@ -6,6 +6,8 @@ python-multipart==0.0.12
 # ── LLM / Agent framework ──────────────────────────────────────────────────────
 openai==1.54.4                  # OpenAI-compatible client for vLLM
 langgraph==0.2.53               # Hierarchical multi-agent graph
+langgraph-checkpoint-postgres>=2.0.0  # Persistent graph state (AsyncPostgresSaver)
+psycopg[binary]>=3.1.0          # psycopg3 async driver required by AsyncPostgresSaver
 langchain==0.3.7
 langchain-openai==0.2.9
 langchain-core==0.3.19
@@ -47,3 +49,11 @@ livekit-api==0.7.1              # LiveKit AccessToken factory for /voice/token
 # ── Biometric voice verification ──────────────────────────────────────────────
 # ECAPA-TDNN speaker embedding model (~100MB download on first run)
 speechbrain==1.0.0
+
+# ── Phase 4: Career Automation ─────────────────────────────────────────────────
+PyGithub==2.3.0                 # GitHub API client for codebase analysis
+apify-client==1.8.1             # Apify job board scraper
+
+# ── Phase 6: Browser Automation ────────────────────────────────────────────────
+playwright==1.47.0              # Headless Chromium for browse_and_summarize_website
+requests==2.32.3                # Sync HTTP (used by security_alerts.py)

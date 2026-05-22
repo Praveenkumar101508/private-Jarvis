@@ -18,3 +18,6 @@ langdetect==1.0.9                       # Fast language identification
 numpy==1.26.4
 httpx==0.27.2                           # HTTP client to call ira-api
 python-dotenv==1.0.1
+
+# ── Phase 6: Browser Automation (used via career/digital tools in ira-api) ─────
+playwright==1.47.0

@@ -23,9 +23,31 @@ const config: Config = {
           950: "#431407",
         },
       },
+      keyframes: {
+        "pulse-ring": {
+          "0%":   { transform: "scale(1)",   opacity: "0.6" },
+          "100%": { transform: "scale(1.8)", opacity: "0"   },
+        },
+        "cursor-blink": {
+          "0%, 100%": { opacity: "1" },
+          "50%":      { opacity: "0" },
+        },
+        "fade-in": {
+          from: { opacity: "0", transform: "translateY(6px)" },
+          to:   { opacity: "1", transform: "translateY(0)"   },
+        },
+      },
+      animation: {
+        "pulse-ring":   "pulse-ring 1.5s ease-out infinite",
+        "pulse-ring-d": "pulse-ring 1.5s ease-out infinite 0.5s",
+        "cursor-blink": "cursor-blink 1s step-end infinite",
+        "fade-in":      "fade-in 0.2s ease-out",
+      },
     },
   },
-  plugins: [],
+  plugins: [
+    require("@tailwindcss/typography"),
+  ],
 };
 
 export default config;

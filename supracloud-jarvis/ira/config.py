@@ -117,6 +117,20 @@ class Settings(BaseSettings):
     owner_name: str = "Swetha Devisetty"
     biometric_threshold: float = 0.75   # Cosine similarity floor for voice auth
 
+    # ── Career Tools ──────────────────────────────────────────────────────────
+    github_token: str = ""
+    apify_api_token: str = ""
+
+    # ── Dev Mode (Shadow PC / local development) ──────────────────────────────
+    # DEV_MODE=true routes LLM calls to a local Ollama instance,
+    # bypasses biometric gate, and auto-authenticates as admin.
+    # NEVER enable in production.
+    dev_mode: bool = False
+    # Ollama base URL — host.docker.internal reaches Windows host from WSL2/Docker
+    ollama_base_url: str = "http://host.docker.internal:11434/v1"
+    # Ollama model to use for all requests in dev mode
+    dev_model: str = "llama3.2"
+
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:

@@ -12,6 +12,24 @@ const nextConfig = {
       { source: "/health",      destination: `${api}/health` },
     ];
   },
+  async headers() {
+    return [
+      {
+        source: "/manifest.json",
+        headers: [
+          { key: "Content-Type", value: "application/manifest+json" },
+          { key: "Cache-Control", value: "public, max-age=86400" },
+        ],
+      },
+      {
+        // Tell browsers this app can be installed (required for PWA prompt)
+        source: "/(.*)",
+        headers: [
+          { key: "X-Content-Type-Options", value: "nosniff" },
+        ],
+      },
+    ];
+  },
 };
 
 module.exports = nextConfig;

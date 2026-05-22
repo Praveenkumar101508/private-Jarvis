@@ -2,10 +2,10 @@
 Supervisor node — classifies each query and sets routing metadata.
 
 Classification strategy:
-  1. Keyword fast-path  — instant, zero LLM calls, handles ~80% of queries
-  2. LLM fallback       — fast model (llama-fast), <2s, for queries longer than
-                          15 words that match no keywords. Prevents misrouting
-                          of ambiguous complex requests.
+  1. Mode override     — if state.mode == "tutor", force tutor agent
+  2. Keyword fast-path — instant, zero LLM calls, handles ~80% of queries
+  3. LLM fallback      — fast model (llama-fast), <2s, for queries longer than
+                         15 words that match no keywords
 
 Biometric gate:
   `is_restricted_domain()` is a pure function exported for use by both the
@@ -15,8 +15,12 @@ Biometric gate:
 
 from __future__ import annotations
 
+import re
+
 from agents.state import IRAState
 from utils.llm import should_use_deep
+
+_URL_RE = re.compile(r"https?://\S+")
 
 # ── Keyword maps for agent selection ─────────────────────────────────────────
 _AGENT_RULES: list[tuple[frozenset[str], str]] = [
@@ -34,6 +38,26 @@ _AGENT_RULES: list[tuple[frozenset[str], str]] = [
         "site traffic", "seo", "update content", "business report", "revenue",
         "analytics", "conversion",
     }), "website"),
+    # Career & automation — checked before researcher to avoid misrouting
+    (frozenset({
+        "resume", "cv", "job posting", "linkedin job", "indeed job",
+        "tailor my resume", "job application", "apply for", "job description",
+        "career", "interview prep", "my github", "my codebase", "my repositories",
+        "my portfolio", "job scrape", "scrape linkedin", "scrape indeed",
+    }), "career"),
+    # Tutor mode (Phase 5)
+    (frozenset({
+        "tutor mode", "teach me", "i am learning", "i'm learning", "explain step by step",
+        "supracloud trainer", "student", "homework", "tutor", "socratic",
+        "help me understand", "i don't understand", "guide me through",
+    }), "tutor"),
+    # Digital brain — OS/browser control (Phase 6)
+    (frozenset({
+        "open vscode", "open vs code", "open terminal", "open chrome", "open firefox",
+        "open application", "launch app", "start application",
+        "browse website", "browse this url", "summarize website", "scan this website",
+        "what does this website say", "go to url", "check this link",
+    }), "digital"),
     (frozenset({
         "research", "find out", "investigate", "search for", "what is",
         "tell me about", "explain", "compare", "analyse", "analyze",
@@ -45,11 +69,12 @@ _AGENT_RULES: list[tuple[frozenset[str], str]] = [
     }), "executor"),
 ]
 
-_VALID_AGENTS = {"conversational", "researcher", "security", "website", "creator", "executor"}
+_VALID_AGENTS = {
+    "conversational", "researcher", "security", "website", "creator", "executor",
+    "career", "tutor", "digital",
+}
 
 # ── Restricted domain classification ─────────────────────────────────────────
-# ANY query containing one of these keywords is gated behind biometric auth.
-# Non-owners receive a polite refusal; the underlying data is never exposed.
 _RESTRICTED_KEYWORDS: frozenset[str] = frozenset({
     # Security & system internals
     "security log", "system log", "audit log", "error log", "health log",
@@ -60,15 +85,14 @@ _RESTRICTED_KEYWORDS: frozenset[str] = frozenset({
     "system health", "server metrics", "cpu usage", "memory usage",
     "show logs", "show errors", "show config",
     # Personal / owner data
-    "schedule", "my calendar", "my appointment", "my meeting",
+    "my calendar", "my appointment", "my meeting",
     "personal", "private", "swetha", "owner",
     "my email", "my phone", "my address",
     # Financial
     "financial", "revenue", "invoice", "payment", "bank",
     "company finances", "profit", "loss",
     # Core architecture / source code
-    "agent code", "source code", "internal architecture",
-    "codebase", "internal code", "show me the code",
+    "internal code", "show me the code",
     "database schema", "db schema", "table structure",
     # Admin actions
     "create user", "delete user", "reset password", "change password",
@@ -96,6 +120,9 @@ Categories:
 - website         leads, bookings, website analytics, business metrics, content drafts
 - creator         create / build / generate a new AI agent or tool
 - executor        run / execute / deploy a command, script, or shell operation
+- career          resume, job application, GitHub analysis, interview prep, job scraping
+- tutor           teaching, explaining step by step, student learning, Socratic guidance
+- digital         open app, browse website, run terminal command, OS control
 
 Reply with the single category word and nothing else.\
 """
@@ -105,26 +132,41 @@ async def classify(state: IRAState) -> IRAState:
     """
     Classify the query and set active_agent + use_deep_model.
 
-    Fast keyword matching runs first (no LLM call). For queries longer than
-    15 words that hit no keywords, the fast LLM model provides accurate semantic
-    routing for complex, ambiguous inputs.
+    Priority order:
+      1. mode="tutor" in state → force tutor (unless security/executor)
+      2. URL-dominant message → digital agent
+      3. Keyword fast-path
+      4. LLM fallback for long ambiguous queries
     """
-    query = state["user_query"].lower()
+    raw_query = state["user_query"]
+    query = raw_query.lower()
     agent = "conversational"
 
-    for keywords, agent_name in _AGENT_RULES:
-        if any(kw in query for kw in keywords):
-            agent = agent_name
-            break
+    # 1. Mode override — frontend tutor toggle forces tutor persona
+    if state.get("mode") == "tutor":
+        # Tutor mode overrides everything except security and executor
+        agent = "tutor"
+    # 2. URL-dominant messages → digital agent
+    elif _URL_RE.search(raw_query) and len(raw_query.split()) < 30:
+        url = _URL_RE.search(raw_query).group(0)
+        if not any(site in url for site in ("linkedin.com/jobs", "indeed.com")):
+            agent = "digital"
 
-    # LLM fallback only for long queries that matched no keyword
-    if agent == "conversational" and len(state["user_query"].split()) > 15:
+    # 3. Keyword fast-path (only if not already overridden)
+    if agent == "conversational":
+        for keywords, agent_name in _AGENT_RULES:
+            if any(kw in query for kw in keywords):
+                agent = agent_name
+                break
+
+    # 4. LLM fallback for long queries that matched no keyword
+    if agent == "conversational" and len(raw_query.split()) > 15:
         try:
             from utils.llm import chat_complete
             result = await chat_complete(
                 [
                     {"role": "system", "content": _LLM_ROUTER_SYSTEM},
-                    {"role": "user", "content": state["user_query"]},
+                    {"role": "user", "content": raw_query},
                 ],
                 use_deep=False,
                 max_tokens=10,
@@ -136,14 +178,13 @@ async def classify(state: IRAState) -> IRAState:
         except Exception:
             pass  # Routing failure must never block a response
 
+    # Tutor mode: re-apply override in case keyword routing won over it
+    # (only when the frontend explicitly set mode=tutor)
+    if state.get("mode") == "tutor" and agent not in ("security", "executor"):
+        agent = "tutor"
+
     return {
         **state,
         "active_agent": agent,
-        "use_deep_model": should_use_deep(state["user_query"], agent),
+        "use_deep_model": should_use_deep(raw_query, agent),
     }
-
-
-def route_after_classify(state: IRAState) -> str:
-    """Conditional edge: returns the name of the next node to visit."""
-    # Always route through the biometric gate after classification
-    return "biometric_gate"

@@ -1,18 +1,18 @@
 """
-Chat endpoints — the core Jarvis interface.
+Chat endpoints — the core IRA interface.
 
-POST /chat          → standard JSON response (full reply in one shot)
-POST /chat/stream   → Server-Sent Events (token-by-token streaming)
-GET  /chat/history  → retrieve conversation history
+POST /chat          → standard JSON response
+POST /chat/stream   → Server-Sent Events (token-by-token)
+GET  /chat/history  → conversation history
 
-Biometric gate: every request carries an `is_owner` flag derived from the
-authenticated admin username. The LangGraph biometric_gate node uses this flag
-to allow or block access to restricted domains (security logs, personal data, etc.).
+Biometric gate: every request carries an `is_owner` flag. The LangGraph
+biometric_gate node uses this to allow or block restricted domain access.
 """
 
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import time
 import uuid
@@ -37,7 +37,9 @@ class ChatRequest(BaseModel):
     message: str = Field(..., min_length=1, max_length=32_000)
     session_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     stream: bool = False
-    is_voice_owner: bool = False   # Set True by voice agent after ECAPA-TDNN biometric verification
+    is_voice_owner: bool = False   # Set True by voice agent after biometric verification
+    is_voice: bool = False         # Set True by voice pipeline for concise reply routing
+    mode: str = "assistant"        # "assistant" | "tutor"
 
 
 class ChatResponse(BaseModel):
@@ -66,6 +68,11 @@ def _is_owner(username: str) -> bool:
     return username == cfg.ira_admin_username
 
 
+def _stable_hash(text: str) -> str:
+    """SHA-256-based stable hash for cache keys (not Python's randomised hash)."""
+    return hashlib.sha256(text.encode()).hexdigest()[:16]
+
+
 # ── Standard (non-streaming) chat ─────────────────────────────────────────────
 
 @router.post("", response_model=ChatResponse)
@@ -73,19 +80,21 @@ async def chat(
     req: ChatRequest,
     _user: str = Depends(require_auth),
 ):
-    # Check response cache (keyed on session + message hash)
-    cache_key = f"chat:{req.session_id}:{hash(req.message)}"
+    cache_key = f"chat:{_user}:{req.session_id}:{_stable_hash(req.message)}"
     cached = await cache_get(cache_key)
     if cached:
         return ChatResponse(**cached)
 
     conv_id = await ensure_conversation(req.session_id)
+    owner = _is_owner(_user) or req.is_voice_owner
 
     state = await run_graph(
         session_id=req.session_id,
         conversation_id=conv_id,
         user_query=req.message,
-        is_owner=_is_owner(_user) or req.is_voice_owner,
+        is_owner=owner,
+        mode=req.mode,
+        is_voice=req.is_voice,
     )
 
     result = ChatResponse(
@@ -97,7 +106,6 @@ async def chat(
         latency_ms=state.get("latency_ms", 0),
     )
 
-    # Cache simple conversational responses for 60s (not security/exec responses)
     if state.get("active_agent") in ("conversational", "researcher"):
         await cache_set(cache_key, result.model_dump(), ttl=60)
 
@@ -112,16 +120,12 @@ async def chat_stream(
     _user: str = Depends(require_auth),
 ):
     """
-    Token-by-token streaming via SSE, correctly routed through the supervisor
-    and biometric gate.
-
-    Flow: supervisor classify → biometric gate → agent system prompt → vLLM stream → SSE tokens.
-    Client receives: data: {"token": "..."} events, then data: {"done": true, "agent": "..."}.
+    Token-by-token streaming via SSE, routed through supervisor + biometric gate.
+    Client receives: data: {"token": "..."} events, then data: {"done": true, ...}.
     """
     conv_id = await ensure_conversation(req.session_id)
     owner = _is_owner(_user) or req.is_voice_owner
 
-    # Classify the query through the supervisor (keyword fast-path + LLM fallback)
     from agents.state import IRAState
     from agents.supervisor import classify, is_restricted_domain
     from langchain_core.messages import HumanMessage
@@ -133,6 +137,7 @@ async def chat_stream(
         "user_query": req.message,
         "active_agent": "conversational",
         "use_deep_model": False,
+        "mode": req.mode,
         "memory_context": "",
         "final_response": "",
         "stream_tokens": [],
@@ -140,6 +145,7 @@ async def chat_stream(
         "model_used": "llama-fast",
         "is_owner": owner,
         "clearance_level": "admin" if owner else "public",
+        "is_voice": req.is_voice,
         "error": None,
     }
     classified = await classify(temp_state)
@@ -147,9 +153,9 @@ async def chat_stream(
     use_deep = classified["use_deep_model"]
 
     # ── Biometric gate: block restricted domains for non-owners ───────────────
-    if is_restricted_domain(req.message) and not owner:
+    cfg = get_settings()
+    if not cfg.dev_mode and is_restricted_domain(req.message) and not owner:
         async def blocked_generator():
-            cfg = get_settings()
             owner_name = cfg.owner_name
             blocked_msg = (
                 f"I'm sorry, I'm an automated assistant for SupraCloud. "
@@ -167,7 +173,35 @@ async def chat_stream(
             })}
         return EventSourceResponse(blocked_generator())
 
-    system_prompt = _get_agent_system_prompt(active_agent)
+    # Career, digital, and tutor agents need full graph execution (tool calls).
+    # Run the graph first, then word-stream the pre-computed response.
+    if active_agent in ("career", "digital"):
+        full_state = await run_graph(
+            session_id=req.session_id,
+            conversation_id=conv_id,
+            user_query=req.message,
+            is_owner=owner,
+            mode=req.mode,
+            is_voice=req.is_voice,
+        )
+        final_text = full_state.get("final_response", "I encountered an issue processing that request.")
+
+        async def tool_result_streamer():
+            t0 = time.monotonic()
+            for word in final_text.split(" "):
+                yield {"data": json.dumps({"token": word + " "})}
+                await asyncio.sleep(0.018)
+            latency = int((time.monotonic() - t0) * 1000)
+            yield {"data": json.dumps({
+                "done": True,
+                "agent": full_state.get("active_agent", active_agent),
+                "latency_ms": latency,
+                "session_id": req.session_id,
+            })}
+
+        return EventSourceResponse(tool_result_streamer())
+
+    system_prompt = _get_agent_system_prompt(active_agent, is_voice=req.is_voice)
 
     memories = await retrieve(req.message)
     memory_ctx = "\n".join(m["content"] for m in memories) if memories else ""
@@ -186,7 +220,6 @@ async def chat_stream(
         try:
             async for token in stream_tokens(messages, use_deep=use_deep):
                 full_response.append(token)
-                # Use json.dumps to safely encode any token content
                 yield {"data": json.dumps({"token": token})}
 
             latency = int((time.monotonic() - t0) * 1000)
@@ -213,23 +246,44 @@ async def chat_stream(
     return EventSourceResponse(event_generator())
 
 
-def _get_agent_system_prompt(agent: str) -> str:
-    """Return the correct system prompt for the classified agent type."""
+def _get_agent_system_prompt(agent: str, is_voice: bool = False) -> str:
+    """
+    Return the correct system prompt for the classified agent type.
+    Voice requests get a concise-reply suffix appended.
+    """
     from agents.conversational import IRA_SYSTEM
     from agents.researcher import _SYSTEM as RESEARCHER_SYSTEM
     from agents.security import _SYSTEM as SECURITY_SYSTEM
     from agents.executor import _SYSTEM as EXECUTOR_SYSTEM
     from agents.creator import _SYSTEM as CREATOR_SYSTEM
     from agents.website import _SYSTEM as WEBSITE_SYSTEM
+    from agents.tutor import _SYSTEM as TUTOR_SYSTEM
+    from agents.career import _SYSTEM as CAREER_SYSTEM
+    from agents.digital import _SYSTEM as DIGITAL_SYSTEM
 
-    return {
+    prompt = {
         "conversational": IRA_SYSTEM,
         "researcher":     RESEARCHER_SYSTEM,
         "security":       SECURITY_SYSTEM,
         "executor":       EXECUTOR_SYSTEM,
         "creator":        CREATOR_SYSTEM,
         "website":        WEBSITE_SYSTEM,
+        "tutor":          TUTOR_SYSTEM,
+        "career":         CAREER_SYSTEM,
+        "digital":        DIGITAL_SYSTEM,
     }.get(agent, IRA_SYSTEM)
+
+    if is_voice:
+        # Voice responses must be short — TTS reads every word aloud
+        voice_suffix = (
+            "\n\nVOICE MODE: You are speaking aloud. "
+            "Keep every response to 1-2 short sentences maximum. "
+            "Be warm, direct, and conversational. "
+            "Never use bullet points, headers, or markdown — speak naturally."
+        )
+        prompt = prompt + voice_suffix
+
+    return prompt
 
 
 # ── Conversation history ───────────────────────────────────────────────────────

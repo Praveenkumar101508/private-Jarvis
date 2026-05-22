@@ -7,27 +7,23 @@ Flow:
     → classify                 (route to the right specialist)
     → biometric_gate           (block restricted domains for non-owners)
     → [conversational | researcher | security | website | creator | executor
-       | access_denied]
+       | career | tutor | digital | access_denied]
     → store_interaction        (persist message + async embedding)
   END
 
-The biometric_gate node is the Context-Aware Security Guardrail:
-  - Public domain requests (anyone): pass straight through to the specialist
-  - Restricted domain + is_owner=True: full clearance, pass through
-  - Restricted domain + is_owner=False: block, set final_response to refusal
-    message, route to access_denied (skips specialist + store)
-
-The graph is compiled once at startup and reused for every request.
+DEV_MODE: biometric gate is bypassed entirely (all requests treated as owner).
 """
 
 from __future__ import annotations
 
-import asyncio
 import time
 
+import logging
+
 from langgraph.graph import StateGraph, START, END
-from langgraph.checkpoint.memory import MemorySaver
 from langchain_core.messages import HumanMessage
+
+_graph_logger = logging.getLogger("ira.graph")
 
 from agents.state import IRAState
 from agents.supervisor import classify, is_restricted_domain
@@ -37,6 +33,9 @@ from agents.security import security_guardian
 from agents.website import website_manager
 from agents.creator import meta_agent_creator
 from agents.executor import executor
+from agents.career import career_agent
+from agents.tutor import tutor_agent
+from agents.digital import digital_agent
 from memory.store import retrieve, ensure_conversation, save_message
 from config import get_settings
 
@@ -64,18 +63,16 @@ async def biometric_gate(state: IRAState) -> IRAState:
     """
     The Biometric Dual-Role Clearance Gate.
 
-    Checks whether the incoming query touches a restricted domain.
-    If it does, validates the owner identity flag (`is_owner`).
-
-    Two outcomes:
+    DEV_MODE: skipped entirely — all requests pass as owner.
+    Production:
       PASS  → is_owner=True, or query is not in a restricted domain
-              State passes unchanged to the specialist agent.
       BLOCK → is_owner=False AND query is in a restricted domain
-              State is modified: `final_response` is set to the polite
-              refusal message and `active_agent` is set to "access_denied".
-              The specialist agent node is bypassed entirely.
     """
     cfg = get_settings()
+
+    # Dev mode: bypass gate completely
+    if cfg.dev_mode:
+        return {**state, "is_owner": True, "clearance_level": "admin"}
 
     # Public query or owner — pass through
     if not is_restricted_domain(state["user_query"]) or state.get("is_owner", False):
@@ -105,30 +102,20 @@ async def biometric_gate(state: IRAState) -> IRAState:
 
 def route_after_gate(state: IRAState) -> str:
     """Route from biometric_gate to specialist or access_denied."""
-    agent = state["active_agent"]
-    if agent == "access_denied":
-        return "access_denied"
-    return agent
+    return state["active_agent"]
 
 
 # ── Access-denied terminal node ────────────────────────────────────────────────
 
 async def access_denied(state: IRAState) -> IRAState:
-    """
-    Terminal node for blocked requests.
-    The refusal message is already set by biometric_gate.
-    This node just returns state so store_interaction can persist the event.
-    """
+    """Terminal node for blocked requests. Refusal message already set."""
     return state
 
 
 # ── Interaction persistence node ───────────────────────────────────────────────
 
 async def store_interaction(state: IRAState) -> IRAState:
-    """
-    Persist the user message and IRA response.
-    Embeddings are stored asynchronously — this node returns immediately.
-    """
+    """Persist the user message and IRA response."""
     conv_id = state.get("conversation_id", "")
     if not conv_id:
         return state
@@ -154,22 +141,24 @@ def build_graph() -> StateGraph:
     g = StateGraph(IRAState)
 
     # Core nodes
-    g.add_node("retrieve_memory",  retrieve_memory)
-    g.add_node("classify",         classify)
-    g.add_node("biometric_gate",   biometric_gate)
-    g.add_node("access_denied",    access_denied)
-    g.add_node("conversational",   conversational)
-    g.add_node("researcher",       researcher)
-    g.add_node("security",         security_guardian)
-    g.add_node("website",          website_manager)
-    g.add_node("creator",          meta_agent_creator)
-    g.add_node("executor",         executor)
+    g.add_node("retrieve_memory",   retrieve_memory)
+    g.add_node("classify",          classify)
+    g.add_node("biometric_gate",    biometric_gate)
+    g.add_node("access_denied",     access_denied)
+    g.add_node("conversational",    conversational)
+    g.add_node("researcher",        researcher)
+    g.add_node("security",          security_guardian)
+    g.add_node("website",           website_manager)
+    g.add_node("creator",           meta_agent_creator)
+    g.add_node("executor",          executor)
+    g.add_node("career",            career_agent)
+    g.add_node("tutor",             tutor_agent)
+    g.add_node("digital",           digital_agent)
     g.add_node("store_interaction", store_interaction)
 
     # Entry → memory retrieval → classification → biometric gate
     g.add_edge(START, "retrieve_memory")
     g.add_edge("retrieve_memory", "classify")
-    # classify always routes to biometric_gate (see supervisor.route_after_classify)
     g.add_edge("classify", "biometric_gate")
 
     # Conditional routing from biometric_gate to specialist (or access_denied)
@@ -183,28 +172,74 @@ def build_graph() -> StateGraph:
             "website":        "website",
             "creator":        "creator",
             "executor":       "executor",
+            "career":         "career",
+            "tutor":          "tutor",
+            "digital":        "digital",
             "access_denied":  "access_denied",
         },
     )
 
     # All specialists + access_denied → store → END
     for node in ["conversational", "researcher", "security", "website",
-                 "creator", "executor", "access_denied"]:
+                 "creator", "executor", "career", "tutor", "digital", "access_denied"]:
         g.add_edge(node, "store_interaction")
     g.add_edge("store_interaction", END)
 
     return g
 
 
-# Compiled graph — singleton, initialised at app startup
-_checkpointer = MemorySaver()
+# Compiled graph — singleton, initialised at app startup via init_checkpointer()
+_checkpointer = None
 _compiled_graph = None
+_pg_checkpointer_ctx = None
+
+
+async def init_checkpointer(pg_conn_string: str) -> None:
+    """
+    Initialise the LangGraph checkpointer and compile the agent graph.
+
+    Uses AsyncPostgresSaver (psycopg3) so conversation state survives
+    container restarts. Falls back to in-memory MemorySaver if the
+    langgraph-checkpoint-postgres package is not installed.
+
+    Call this once from main.py lifespan startup, after the DB pool is ready.
+    """
+    global _checkpointer, _compiled_graph, _pg_checkpointer_ctx
+    try:
+        from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+        _pg_checkpointer_ctx = AsyncPostgresSaver.from_conn_string(pg_conn_string)
+        _checkpointer = await _pg_checkpointer_ctx.__aenter__()
+        await _checkpointer.setup()   # Creates checkpoint tables if they don't exist
+        _graph_logger.info("LangGraph checkpointer: AsyncPostgresSaver (persistent)")
+    except Exception as exc:
+        _graph_logger.warning(
+            f"AsyncPostgresSaver unavailable ({exc}); falling back to in-memory MemorySaver. "
+            "Install langgraph-checkpoint-postgres and psycopg[binary] for persistence."
+        )
+        from langgraph.checkpoint.memory import MemorySaver
+        _checkpointer = MemorySaver()
+
+    _compiled_graph = build_graph().compile(checkpointer=_checkpointer)
+
+
+async def close_checkpointer() -> None:
+    """Clean up the AsyncPostgresSaver connection pool on shutdown."""
+    global _pg_checkpointer_ctx
+    if _pg_checkpointer_ctx is not None:
+        try:
+            await _pg_checkpointer_ctx.__aexit__(None, None, None)
+        except Exception:
+            pass
+        _pg_checkpointer_ctx = None
 
 
 def get_graph():
     global _compiled_graph
     if _compiled_graph is None:
-        _compiled_graph = build_graph().compile(checkpointer=_checkpointer)
+        # Synchronous fallback: used only if init_checkpointer() was not called
+        from langgraph.checkpoint.memory import MemorySaver
+        _graph_logger.warning("get_graph() called before init_checkpointer(); using in-memory checkpointer")
+        _compiled_graph = build_graph().compile(checkpointer=MemorySaver())
     return _compiled_graph
 
 
@@ -214,14 +249,18 @@ async def run_graph(
     user_query: str,
     message_history: list | None = None,
     is_owner: bool = False,
+    mode: str = "assistant",
+    is_voice: bool = False,
 ) -> IRAState:
     """
     Execute the full agent graph for a single user turn.
     Returns the completed state with final_response populated.
 
     Args:
-        is_owner: True when the request comes from the authenticated admin user
-                  (text) or has passed biometric voice verification (voice).
+        is_owner:  True when the request comes from the authenticated admin user
+                   (text) or has passed biometric voice verification (voice).
+        mode:      "assistant" | "tutor" — persona override from the frontend.
+        is_voice:  True when the request originates from the voice pipeline.
     """
     graph = get_graph()
 
@@ -232,6 +271,7 @@ async def run_graph(
         "user_query": user_query,
         "active_agent": "conversational",
         "use_deep_model": False,
+        "mode": mode,
         "memory_context": "",
         "final_response": "",
         "stream_tokens": [],
@@ -239,11 +279,10 @@ async def run_graph(
         "model_used": "llama-fast",
         "is_owner": is_owner,
         "clearance_level": "admin" if is_owner else "public",
+        "is_voice": is_voice,
         "error": None,
     }
 
-    # thread_id scopes LangGraph's checkpointer to this conversation
     config = {"configurable": {"thread_id": session_id}}
-
     final_state = await graph.ainvoke(initial_state, config=config)
     return final_state

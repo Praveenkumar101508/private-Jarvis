@@ -52,8 +52,8 @@ IRA_API_URL = os.getenv("IRA_API_URL", "http://ira-api:8000")
 IRA_API_TOKEN = os.getenv("IRA_API_TOKEN", "")
 
 # Whisper model size — trade-off between accuracy and latency
-# large-v3: best accuracy (recommended)
-# medium   : ~30% faster, slightly lower accuracy on accents
+# large-v3: best accuracy (production recommended)
+# small    : fastest (~0.3-0.5s) — use on Shadow PC / low-memory hosts
 WHISPER_MODEL = os.getenv("WHISPER_MODEL", "large-v3")
 
 
@@ -127,7 +127,7 @@ class IRALLMStream(llm.LLMStream):
         if not owner_verified and self._audio_bytes:
             try:
                 from voice.biometrics import is_owner_authenticated
-                owner_verified = await is_owner_authenticated(self._audio_bytes)
+                owner_verified = await is_owner_authenticated(self._audio_bytes, session_id=self._session_id)
             except Exception as e:
                 logger.warning(f"Biometric check failed gracefully: {e}")
                 owner_verified = False
@@ -141,6 +141,7 @@ class IRALLMStream(llm.LLMStream):
                     "session_id": self._session_id,
                     "stream": True,
                     "is_voice_owner": owner_verified,
+                    "is_voice": True,  # Enforces concise 1-2 sentence voice replies
                 },
             ) as resp:
                 resp.raise_for_status()
@@ -205,9 +206,10 @@ async def entrypoint(ctx: JobContext) -> None:
     stt = IRAFasterWhisperSTT(model_size=WHISPER_MODEL, device="cpu", compute_type="int8")
     tts_engine = IRAKokoroTTS(voice="af_bella", speed=1.05)
     vad = silero.VAD.load(
-        min_silence_duration=0.4,   # 400ms silence = end of utterance
-        min_speech_duration=0.15,   # 150ms minimum — filters accidental sounds
-        activation_threshold=0.5,
+        min_silence_duration=0.3,   # 300ms — slightly longer pause before cutting off
+        min_speech_duration=0.1,    # 100ms — catches "wait", "stop", single words
+        activation_threshold=0.5,   # Standard sensitivity — reduces false triggers
+        max_buffered_speech=60.0,   # Allow up to 60s utterances
     )
     ira_llm = IRALLMAdapter(session_id=session_id)
 

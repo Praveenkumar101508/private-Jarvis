@@ -29,7 +29,7 @@ from config import get_settings
 from utils.db import init_pool, close_pool
 from utils.redis_client import init_redis, close_redis
 from memory.embeddings import preload_model
-from agents.graph import get_graph
+from agents.graph import get_graph, init_checkpointer, close_checkpointer
 
 from api.routes.chat import router as chat_router
 from api.routes.health import router as health_router
@@ -68,14 +68,15 @@ async def lifespan(app: FastAPI):
     import asyncio
     asyncio.create_task(_warm_embeddings())
 
-    # Compile agent graph (fast, just builds the graph object)
-    get_graph()
+    # Initialise LangGraph checkpointer (AsyncPostgresSaver → persistent state)
+    await init_checkpointer(cfg.database_dsn)
     logger.info("LangGraph agent graph compiled")
 
     logger.info("IRA is online. Good morning.")
     yield
 
     # Graceful shutdown
+    await close_checkpointer()
     await close_pool()
     await close_redis()
     logger.info("IRA shutting down. Goodbye.")

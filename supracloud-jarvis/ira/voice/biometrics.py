@@ -194,12 +194,13 @@ def invalidate_profile_cache() -> None:
 
 # ── Main verification entry point ─────────────────────────────────────────────
 
-async def is_owner_authenticated(audio_bytes: bytes) -> bool:
+async def is_owner_authenticated(audio_bytes: bytes, session_id: str = "unknown") -> bool:
     """
     Verify whether the speaker in the audio chunk is the system owner.
 
     Args:
         audio_bytes: Raw PCM audio data (16-bit signed, mono, 16kHz).
+        session_id:  Voice session identifier — written to biometric_audit table.
 
     Returns:
         True  → speaker matches owner profile with similarity ≥ threshold.
@@ -245,7 +246,7 @@ async def is_owner_authenticated(audio_bytes: bytes) -> bool:
                 """INSERT INTO biometric_audit
                    (session_id, similarity, threshold, result, source)
                    VALUES ($1, $2, $3, $4, 'voice')""",
-                "unknown", float(similarity), float(cfg.biometric_threshold), authenticated,
+                session_id, float(similarity), float(cfg.biometric_threshold), authenticated,
             )
     except Exception as audit_err:
         logger.debug(f"Biometric audit write failed (non-fatal): {audit_err}")

@@ -1,10 +1,12 @@
 """
-vLLM client with intelligent fast/deep routing.
+vLLM / Ollama client with intelligent fast/deep routing.
 
-Routing logic (no LLM call needed — pure heuristics for speed):
-  Fast path  → Llama 3.1 8B AWQ  — simple chat, quick lookups, light reasoning
-  Deep path  → Qwen 2.5 14B AWQ  — code gen, security analysis, agent creation,
-                                    long documents, complex multi-step reasoning
+Production:  routes to vLLM fast (Llama 8B) or deep (Qwen 14B)
+Dev mode:    routes both paths to local Ollama (llama3.2 or configured model)
+
+Routing logic (rule-based, no LLM call needed):
+  Fast path → simple chat, quick lookups, light reasoning
+  Deep path → code gen, security analysis, long docs, complex reasoning
 """
 
 from __future__ import annotations
@@ -41,23 +43,34 @@ def should_use_deep(query: str, agent: str | None = None) -> bool:
     q = query.lower()
     if any(kw in q for kw in _FAST_KEYWORDS):
         return False
-    # Long queries almost always need more reasoning capacity
     if len(query.split()) > 60:
         return True
     return any(kw in q for kw in _DEEP_KEYWORDS)
 
 
-def _make_client(base_url: str) -> AsyncOpenAI:
+def _make_vllm_client(base_url: str) -> AsyncOpenAI:
     cfg = get_settings()
     return AsyncOpenAI(api_key=cfg.vllm_api_key, base_url=base_url)
 
 
+def _make_ollama_client() -> AsyncOpenAI:
+    """Dev-mode client pointing at local Ollama (OpenAI-compatible)."""
+    cfg = get_settings()
+    return AsyncOpenAI(api_key="ollama", base_url=cfg.ollama_base_url)
+
+
 def get_fast_client() -> AsyncOpenAI:
-    return _make_client(get_settings().vllm_fast_url)
+    cfg = get_settings()
+    if cfg.dev_mode:
+        return _make_ollama_client()
+    return _make_vllm_client(cfg.vllm_fast_url)
 
 
 def get_deep_client() -> AsyncOpenAI:
-    return _make_client(get_settings().vllm_deep_url)
+    cfg = get_settings()
+    if cfg.dev_mode:
+        return _make_ollama_client()
+    return _make_vllm_client(cfg.vllm_deep_url)
 
 
 @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=1, max=8))
@@ -70,12 +83,17 @@ async def chat_complete(
     stream: bool = False,
 ) -> str | AsyncIterator:
     """
-    Send messages to the appropriate vLLM endpoint.
+    Send messages to the appropriate LLM endpoint.
     Returns the full response string (stream=False) or an async iterator (stream=True).
     """
     cfg = get_settings()
 
-    if use_deep:
+    if cfg.dev_mode:
+        client = _make_ollama_client()
+        model = cfg.dev_model
+        max_tokens = max_tokens or 2048
+        temperature = temperature if temperature is not None else 0.7
+    elif use_deep:
         client = get_deep_client()
         model = cfg.vllm_deep_model
         max_tokens = max_tokens or cfg.deep_max_tokens
@@ -95,7 +113,7 @@ async def chat_complete(
     )
 
     if stream:
-        return response   # caller iterates over chunks
+        return response
 
     return response.choices[0].message.content or ""
 

@@ -28,6 +28,7 @@ from datetime import datetime, timezone, timedelta
 import psutil
 
 from utils.db import acquire
+from utils.security_alerts import send_alert
 from worker.notifier import notify
 
 logger = logging.getLogger("ira.security")
@@ -50,8 +51,18 @@ _SCANNER_UA = re.compile(
 )
 _PATH_TRAVERSAL = re.compile(r"\.\./|%2e%2e/|%252e", re.I)
 
-# Nginx log path (shared volume mounted in worker container)
+# Log paths — volumes mounted in the worker container
 NGINX_LOG_PATH = os.getenv("NGINX_LOG_PATH", "/var/log/nginx/access.log")
+SSH_LOG_PATH = os.getenv("SSH_LOG_PATH", "/var/log/auth.log")  # /var/log/secure on RHEL
+
+_SSH_FAIL_RE = re.compile(
+    r"Failed password for (?:invalid user )?(\S+) from ([\d.]+) port \d+ ssh",
+    re.I,
+)
+_SSH_INVALID_RE = re.compile(
+    r"Invalid user (\S+) from ([\d.]+)",
+    re.I,
+)
 
 
 # ── Log analysis ──────────────────────────────────────────────────────────────
@@ -221,6 +232,16 @@ async def _check_system_health() -> list[dict]:
             "event_type": "high_cpu",
             "description": f"CPU usage critical: {cpu:.1f}%",
         })
+        # send_alert uses requests (sync) — run in executor to avoid blocking the event loop
+        alert_msg = (
+            f"Praveen, CPU usage is *{cpu:.1f}%* — potential cryptominer or runaway process.\n"
+            f"Say _\"IRA, scan threats\"_ to check active connections."
+        )
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(
+            None,
+            lambda: send_alert(alert_msg, priority="warning"),
+        )
     if mem.percent > 90:
         events.append({
             "severity": "warning",
@@ -233,6 +254,74 @@ async def _check_system_health() -> list[dict]:
             "event_type": "disk_pressure",
             "description": f"Disk usage at {disk.percent:.1f}% — action required",
         })
+    return events
+
+
+# ── SSH auth log monitoring ───────────────────────────────────────────────────
+
+async def _check_ssh_failures() -> list[dict]:
+    """Parse auth.log for failed SSH logins since last scan offset."""
+    if not os.path.exists(SSH_LOG_PATH):
+        return []
+
+    async with acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT value FROM monitor_state WHERE key='ssh_log_offset'"
+        )
+        offset = int(row["value"]) if row else 0
+
+    try:
+        with open(SSH_LOG_PATH, "r", errors="replace") as f:
+            f.seek(offset)
+            lines = f.readlines()
+            new_offset = f.tell()
+    except PermissionError:
+        logger.debug("No permission to read SSH log — mount with correct volume")
+        return []
+
+    if new_offset > offset:
+        async with acquire() as conn:
+            await conn.execute(
+                "UPDATE monitor_state SET value=$1, updated_at=NOW() WHERE key='ssh_log_offset'",
+                str(new_offset),
+            )
+
+    ip_failures: dict[str, int] = defaultdict(int)
+    ip_users: dict[str, set] = defaultdict(set)
+
+    for line in lines:
+        m = _SSH_FAIL_RE.search(line) or _SSH_INVALID_RE.search(line)
+        if m:
+            user, ip = m.group(1), m.group(2)
+            ip_failures[ip] += 1
+            ip_users[ip].add(user)
+
+    events = []
+    for ip, count in ip_failures.items():
+        if count >= 3:
+            users_tried = ", ".join(list(ip_users[ip])[:5])
+            events.append({
+                "severity": "high" if count >= 10 else "medium",
+                "event_type": "ssh_brute_force",
+                "source_ip": ip,
+                "description": (
+                    f"SSH brute-force: {count} failed attempts from {ip}. "
+                    f"Usernames tried: {users_tried}"
+                ),
+                "raw_log": "",
+            })
+            # Direct Telegram push for SSH attacks (time-critical)
+            if count >= 5:
+                ssh_msg = (
+                    f"Praveen, *{count} failed SSH logins* from `{ip}`.\n"
+                    f"Usernames tried: {users_tried}\n\n"
+                    f"Say _\"IRA, scan threats\"_ to investigate."
+                )
+                loop = asyncio.get_running_loop()
+                await loop.run_in_executor(
+                    None,
+                    lambda: send_alert(ssh_msg, priority="critical"),
+                )
     return events
 
 
@@ -258,10 +347,13 @@ async def run_security_scan() -> None:
     lines = await _read_new_log_lines()
     log_events = _analyse_lines(lines) if lines else []
 
-    # 2. Check system health
+    # 2. Check SSH auth failures
+    ssh_events = await _check_ssh_failures()
+
+    # 3. Check system health
     system_events = await _check_system_health()
 
-    all_events = log_events + [
+    all_events = log_events + ssh_events + [
         {**ev, "source_ip": None, "raw_log": ""}
         for ev in system_events
         if "source_ip" not in ev

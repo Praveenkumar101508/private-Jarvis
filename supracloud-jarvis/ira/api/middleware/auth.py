@@ -5,8 +5,8 @@ Two token types:
   - Bearer JWT  → standard API access (issued at /auth/token)
   - API Key     → for service-to-service calls (X-API-Key header)
 
-All chat and agent endpoints require a valid token.
-The /health endpoint is always public.
+Dev mode: when DEV_MODE=true, require_auth returns the admin username
+without checking any token. NEVER enable in production.
 """
 
 from __future__ import annotations
@@ -81,7 +81,16 @@ def decode_token(token: str) -> TokenPayload:
 async def require_auth(
     creds: HTTPAuthorizationCredentials | None = Depends(_bearer),
 ) -> str:
-    """Dependency: returns the authenticated username or raises 401."""
+    """
+    Dependency: returns the authenticated username or raises 401.
+    In DEV_MODE, skips token validation and auto-returns the admin username.
+    """
+    cfg = get_settings()
+
+    # Dev mode: bypass all auth — localhost only, never production
+    if cfg.dev_mode:
+        return cfg.ira_admin_username
+
     if creds is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -103,6 +112,8 @@ def _admin_password_hash() -> str:
 def authenticate_user(username: str, password: str) -> bool:
     """Validate credentials against the configured admin account."""
     cfg = get_settings()
+    if cfg.dev_mode:
+        return True  # Accept any credentials in dev mode
     if username != cfg.ira_admin_username:
         return False
     return verify_password(password, _admin_password_hash())
