@@ -42,6 +42,13 @@ from api.routes.webhooks import router as webhooks_router
 from api.routes.backup import router as backup_router
 from api.routes.image_gen import router as image_gen_router
 from api.routes.architect import router as architect_router
+from api.routes.video_gen import router as video_gen_router
+from api.routes.document_create import router as document_create_router
+from api.routes.design_tools import router as design_tools_router
+from api.routes.computer_use import router as computer_use_router
+from api.routes.audio_gen import router as audio_gen_router
+from api.routes.deep_research import router as deep_research_router
+from api.routes.multimodal import router as multimodal_router
 from api.middleware.auth import authenticate_user, create_token
 
 logging.basicConfig(
@@ -148,8 +155,15 @@ def create_app() -> FastAPI:
     app.include_router(voice_router, prefix="/api/v1")   # /voice/token + /voice/enroll
     app.include_router(webhooks_router)              # /webhooks/lead + /webhooks/booking
     app.include_router(backup_router, prefix="/api/v1")      # /backup/list + /backup/download + /backup/restore
-    app.include_router(image_gen_router, prefix="/api/v1")   # /image/generate + /image/edit
-    app.include_router(architect_router, prefix="/api/v1")  # /architect/propose + /implement + /apply
+    app.include_router(image_gen_router, prefix="/api/v1")       # /image/generate + /image/edit
+    app.include_router(architect_router, prefix="/api/v1")       # /architect/propose + /implement + /apply
+    app.include_router(video_gen_router, prefix="/api/v1")       # /video/generate + /video/understand
+    app.include_router(document_create_router, prefix="/api/v1") # /document/create + /document/download
+    app.include_router(design_tools_router, prefix="/api/v1")    # /design/generate + /design/download
+    app.include_router(computer_use_router, prefix="/api/v1")    # /computer/use + /computer/screenshot
+    app.include_router(audio_gen_router, prefix="/api/v1")       # /audio/generate + /audio/tts + /audio/transcribe
+    app.include_router(deep_research_router, prefix="/api/v1")   # /research/deep + /research/article + /research/report
+    app.include_router(multimodal_router, prefix="/api/v1")      # /multimodal/analyse
 
     # ── Global error handler ──────────────────────────────────────────────────
     @app.exception_handler(Exception)

@@ -1,25 +1,28 @@
 """
-IRA Architect / Evolution Agent — Self-Evolving Engineering Team.
+IRA Architect / Evolution Team — Self-Evolving Engineering System.
 
-A permanent team of 5 specialist agents that debates new features, compares
-IRA against Grok / Claude / Gemini / ChatGPT / DeepSeek, invents unique ideas,
-and auto-implements approved features with full git workflow.
+Runs 24/7 in the background (APScheduler every 12 hours) AND on-demand.
+Compares IRA vs Grok/Claude/Gemini/ChatGPT/DeepSeek continuously.
+Invents unique new features. Shows full 5-agent visible debate.
+Only implements after explicit user approval.
 
-Team structure:
-  Researcher → maps IRA capability gaps vs other AIs, gathers context
-  Critic     → argues against (risk, complexity, maintenance burden)
-  Executor   → assesses technical feasibility + writes implementation code
-  Creator    → invents unique features no other AI has yet
-  Supervisor → synthesises debate → polished proposal + ranked recommendations
+Team:
+  Researcher → maps capability gaps vs competing AIs
+  Critic     → challenges every idea (risk, complexity, maintenance)
+  Executor   → technical feasibility + implementation plan + code sketch
+  Creator    → unique features no other AI has yet
+  Supervisor → synthesises debate → clean proposal → asks for approval
 
-Activation: user says "architect", "propose new features", "evolution team"
-Approval:   user says "Approve", "Implement", "Go ahead with [feature]"
+Background cycle: stored in Redis (architect:latest_proposal)
+Notification: Telegram/email when proposal is ready
 """
 
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
+import re
 import time
 from typing import AsyncIterator
 
@@ -29,353 +32,450 @@ from utils.llm import chat_complete, stream_tokens
 logger = logging.getLogger("ira.architect")
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Feature Gap Database — what the major AIs have that IRA lacks (May 2026)
-# The Researcher agent references this to generate targeted proposals.
+# Feature state — what IRA has ✅ vs what is missing ❌
+# Updated each time a feature is implemented; Architect tracks this dynamically.
 # ─────────────────────────────────────────────────────────────────────────────
-FEATURE_GAP_DATABASE = """
-## VERIFIED FEATURE GAPS (IRA vs Leading AIs — May 2026)
-
-### Already at PARITY or SUPERIOR:
-- Multi-agent Expert Mode (5 parallel agents) ✅
-- Real-time X/Twitter search with country awareness ✅
-- Web search + DeepSearch (3-round iterative) ✅
-- Think Mode / reasoning chains ✅
-- Image generation (FLUX via Replicate) ✅
-- Image editing (InstructPix2Pix) ✅
-- Vision / image analysis ✅
-- PDF/DOCX/TXT document upload ✅
-- Voice interface (LiveKit + Whisper + Kokoro) ✅
-- Engineer Mode (4-step code workflow) ✅
-- Grok personality ✅
-- Self-healing with git commit ✅
-- Persistent memory + RAG ✅
-- Biometric voice verification ✅
-- Daily backup + restore ✅
-- Cloud-ready model config (Qwen3 / DeepSeek R1) ✅
-
-### MISSING (Priority Order):
-1. **Video Generation** (text→video, image→video) — Grok Imagine Video, Gemini Veo 3, Kling 2.6
-2. **Computer Use / Desktop Agent** — Claude Computer Use, Grok Computer, controlling mouse/keyboard/browser
-3. **Native Document Creation** — formatted PDF, PowerPoint, Excel from chat (Claude Artifacts-style)
-4. **Video Understanding** — upload and analyse video files (Gemini 1.5 Pro, GPT-4o)
-5. **Music / Audio Generation** — full song synthesis, voice cloning (Suno, Udio integrations)
-6. **Canvas / Design Mode** — Figma-style UI generation, Canva-like design, slide decks
-7. **Code Execution Sandbox** — run Python/JS code live in a sandboxed container (ChatGPT Code Interpreter)
-8. **Multi-modal Art Direction** — combine voice + image + text into creative projects
-9. **Persistent Agent Tasks** — background multi-step tasks that run for hours (Devin-style)
-10. **Real-time Voice Conversation** — sub-200ms latency voice-to-voice (GPT-4o Realtime API style)
-
-### UNIQUE IDEAS (nobody has these yet):
-- **Lifelong Memory Graph** — knowledge graph that connects all memories as a visual graph
-- **IRA Dashboard** — real-time Notion-like home screen IRA updates with your projects, tasks, health
-- **Silent Background Agent** — continuously monitors your email/GitHub/calendar and quietly acts
-- **IRA API Gateway** — expose IRA's capabilities as a public API with rate limits (monetise your AI)
-- **Context Compression** — ultra-long conversations compressed without losing facts (10M+ token context)
-"""
+IRA_CAPABILITY_MAP = {
+    "implemented": [
+        "Multi-agent Expert Mode (5 parallel agents)",
+        "Real-time X/Twitter search with country+celebrity awareness",
+        "Web search + DeepSearch (3-round iterative)",
+        "Think Mode (step-by-step reasoning chains)",
+        "Image generation (FLUX / Replicate)",
+        "Image editing (InstructPix2Pix)",
+        "Vision / image analysis (Qwen3-VL)",
+        "PDF/DOCX/TXT document upload + analysis",
+        "Voice interface (LiveKit + Whisper + Kokoro TTS)",
+        "Engineer Mode (4-step code workflow: analysis→plan→diff→verify)",
+        "Grok personality + wit mode",
+        "Self-healing with git commit",
+        "Persistent memory + RAG (BGE embeddings)",
+        "Biometric voice verification (ECAPA-TDNN)",
+        "Daily backup + restore",
+        "Cloud-ready model config (Qwen3 / DeepSeek R1 671B)",
+        "Think Mode + Reasoning tier (DeepSeek-R1 endpoint)",
+    ],
+    "missing": [
+        "Video Generation (text→video, image→video) — Grok Imagine Video, Veo 3, Kling 2.6",
+        "Advanced Design Tools (UI mockups, Figma prototypes, slides, Canva-style)",
+        "Computer Use / Desktop Agent (mouse, keyboard, browser control)",
+        "Native Document Creation (PDF, PPTX, Excel, Word from chat)",
+        "Video Understanding (upload + analyse video files)",
+        "Music / Audio Generation (full songs, voice cloning, SFX)",
+        "Deep Research & Long-Form Content Creation mode",
+        "Multi-Modal Fusion (text + image + video + audio in one response)",
+    ],
+    "unique_ira_advantages": [
+        "Full privacy — 100% self-hosted, no data leaves your server",
+        "Biometric voice gate — only you can access sensitive commands",
+        "Self-healing — monitors itself, fixes bugs, commits to git",
+        "24/7 Evolution Team — proactively proposes and auto-implements features",
+        "Owner-first design — every feature is built for one person's superpower",
+    ],
+}
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Agent system prompts
+# Agent system prompts — each agent has a distinct voice and expertise
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _researcher_prompt(owner: str) -> str:
+def _researcher_prompt(owner: str, trigger: str) -> str:
+    missing = "\n".join(f"  - {f}" for f in IRA_CAPABILITY_MAP["missing"])
+    implemented = "\n".join(f"  - {f}" for f in IRA_CAPABILITY_MAP["implemented"][:8])
     return f"""\
-You are the RESEARCHER in {owner}'s IRA Architect Team — an AI evolution analyst.
+You are the RESEARCHER in {owner}'s IRA Evolution Team.
 
-Your job: Analyse the feature gap database below and identify the TOP 3 features \
-IRA should add next, ranked by user value + implementation feasibility.
+Context: {trigger}
 
-For each feature, provide:
-- What Grok/Claude/Gemini/ChatGPT currently offer in this area
-- Why {owner}'s specific use case benefits from it
-- One unique angle IRA could take that the big AIs don't have
+IRA currently has:
+{implemented}
 
-Format exactly:
-🔬 RESEARCHER ANALYSIS:
-**Feature 1: [Name]** — [Why now, what gap it fills, specific competitor comparison]
-**Feature 2: [Name]** — [Why now, what gap it fills, specific competitor comparison]
-**Feature 3: [Name]** — [Why now, what gap it fills, specific competitor comparison]
-Confidence: HIGH
+Features still missing:
+{missing}
 
-{FEATURE_GAP_DATABASE}"""
+Your job RIGHT NOW:
+1. Pick the TOP 3 most impactful missing features for {owner}'s personal/business AI use.
+2. For each: what does Grok/Claude/Gemini/ChatGPT do, and what gap does IRA have?
+3. Be specific — mention real product names, real API availability, real user benefit.
+4. Suggest one completely UNIQUE angle that makes IRA's version better than anyone else's.
 
-
-def _critic_prompt(owner: str) -> str:
-    return f"""\
-You are the CRITIC in {owner}'s IRA Architect Team — the voice of reason and risk.
-
-The Researcher will propose 3 features. Your job: push back hard.
-For EACH proposed feature identify:
-- Implementation complexity (1-10)
-- Maintenance burden
-- Risk of breaking existing features
-- Whether the effort is worth it for a single-person system
-- Cheaper alternatives that achieve 80% of the value
-
-Format exactly:
-🛡️ CRITIC REVIEW:
-**On [Feature 1]:** [Your challenge + complexity rating + risk + alternative]
-**On [Feature 2]:** [Your challenge + complexity rating + risk + alternative]
-**On [Feature 3]:** [Your challenge + complexity rating + risk + alternative]
-Overall Risk: [PROCEED/CAUTION/REJECT]"""
-
-
-def _executor_prompt(owner: str) -> str:
-    return f"""\
-You are the EXECUTOR in {owner}'s IRA Architect Team — the hands-on engineer.
-
-Based on the Researcher's proposals and Critic's concerns, assess:
-1. Which feature can be implemented FASTEST with highest impact?
-2. Exact implementation plan (files to create/modify, libraries to add)
-3. What would the actual code look like? Give a short snippet for each.
-4. Estimated hours to implement each feature end-to-end.
-
-The IRA stack: FastAPI + LangGraph + Next.js/TypeScript + PostgreSQL + Redis + vLLM + Docker.
-
-Format exactly:
-⚙️ EXECUTOR ASSESSMENT:
-**Quick Win (#1 pick):** [Feature name + exact implementation steps + estimated hours]
-**Medium Effort (#2):** [Feature name + key files + libraries + estimated hours]
-**Major Feature (#3):** [Feature name + high-level architecture + estimated weeks]
-Recommendation: [Which one to build first and why]
-Feasibility: READY"""
+Respond in exactly this format:
+🔬 RESEARCHER:
+**Priority 1: [Feature Name]** — [3 sentences: current gap + competitor comparison + unique IRA angle]
+**Priority 2: [Feature Name]** — [3 sentences]
+**Priority 3: [Feature Name]** — [3 sentences]
+Verdict: [Which one would most change {owner}'s daily workflow?]"""
 
 
 def _creator_prompt(owner: str) -> str:
     return f"""\
-You are the CREATOR in {owner}'s IRA Architect Team — the visionary.
+You are the CREATOR / VISIONARY in {owner}'s IRA Evolution Team.
 
-Your job: go BEYOND what the Researcher proposed.
-Invent 1-2 completely NEW features that:
-- No other AI (Grok/Claude/Gemini/ChatGPT) currently offers
-- Would give {owner} a genuine superpower in their daily/business life
-- Are actually buildable in the IRA stack (FastAPI + Next.js + vLLM)
+You think beyond the obvious. Your job:
+1. Invent 2 features that NO OTHER AI currently offers — brand new ideas.
+2. These must be buildable with IRA's existing stack (FastAPI + Next.js + vLLM + Docker).
+3. They must give {owner} a genuine superpower in their personal/business life.
+4. Think about combinations of IRA's unique advantages (voice biometrics + self-healing + memory graph, etc.)
 
-Think: What does {owner} do every day where AI could silently supercharge them?
-Think: What combination of IRA's existing features creates something entirely new?
+Respond in exactly this format:
+✨ CREATOR:
+**Invention 1: [Catchy Feature Name]** — [Concept, what makes it unique, how it combines IRA's existing strengths, concrete daily use case]
+**Invention 2: [Catchy Feature Name]** — [Concept, what makes it unique, how it combines IRA's existing strengths, concrete daily use case]
+Innovation Score: BREAKTHROUGH | HIGH | MEDIUM"""
 
-Format exactly:
-✨ CREATOR INVENTION:
-**Unique Idea 1: [Feature Name]** — [Concept + how it uses existing IRA strengths + why nobody else has it]
-**Unique Idea 2: [Feature Name]** — [Concept + how it uses existing IRA strengths + why nobody else has it]
-Innovation Score: BREAKTHROUGH"""
+
+def _critic_prompt(owner: str) -> str:
+    return f"""\
+You are the CRITIC / RISK GUARDIAN in {owner}'s IRA Evolution Team.
+
+You have seen what Researcher and Creator proposed. Push back hard and honestly.
+For EACH proposed feature (Researcher's top 3 + Creator's 2):
+- What is the true implementation complexity? (1=trivial, 10=months)
+- What could break in the existing system?
+- What is the maintenance burden for a single-person system?
+- Is there a 20% effort that gives 80% of the value?
+- Should any feature be REJECTED as not worth building right now?
+
+Respond in exactly this format:
+🛡️ CRITIC:
+**On [Feature 1]:** Complexity [X/10] — [Risk analysis + maintenance concern + recommendation]
+**On [Feature 2]:** Complexity [X/10] — [Same]
+**On [Feature 3]:** Complexity [X/10] — [Same]
+**On [Invention 1]:** Complexity [X/10] — [Feasibility + unique risk]
+**On [Invention 2]:** Complexity [X/10] — [Feasibility + unique risk]
+Critic's Top Pick: [Which one has best value/effort ratio?]
+REJECT List: [Features not worth building now, with brief reason]"""
+
+
+def _executor_prompt(owner: str) -> str:
+    return f"""\
+You are the EXECUTOR / LEAD ENGINEER in {owner}'s IRA Evolution Team.
+
+You have seen the Researcher proposals, Creator inventions, and Critic's risk assessment.
+Your job: produce a precise, honest technical verdict.
+
+For the top 2 remaining features (after Critic's review):
+1. Exact files to create or modify (use real IRA file paths)
+2. Libraries needed (are they in requirements.txt already? if not, name them)
+3. Does it need a new Docker service? New env vars?
+4. How long would it actually take to implement end-to-end?
+5. Write a SHORT implementation sketch (pseudo-code or 10-line stub) for the #1 pick.
+
+IRA stack:
+  Backend: FastAPI + LangGraph + Python 3.12 (ira/)
+  Frontend: Next.js 14 TypeScript (frontend/)
+  Models: vLLM Qwen3 3-tier (fast/deep/reasoning)
+  DB: PostgreSQL + pgvector, Redis, APScheduler
+
+Respond in exactly this format:
+⚙️ EXECUTOR:
+**#1 Pick: [Feature Name]**
+  Files: [list of ira/ and frontend/ files]
+  New libs: [library names + pip install command]
+  New services: [yes/no + what]
+  Estimate: [X hours]
+  Sketch:
+  ```python
+  [10-15 line stub showing the core logic]
+  ```
+**#2 Pick: [Feature Name]**
+  Files: [list]
+  Estimate: [X hours]
+Recommendation: [Build #1 first because ...]
+Feasibility: READY | NEEDS_PREP | BLOCKED"""
 
 
 def _supervisor_prompt(owner: str) -> str:
     return f"""\
-You are the SUPERVISOR in {owner}'s IRA Architect Team.
+You are the SUPERVISOR of {owner}'s IRA Evolution Team.
 
-You have seen the full debate between Researcher, Critic, Executor, and Creator.
-Now produce the FINAL POLISHED PROPOSAL for {owner} to review and approve.
+You have read the complete debate between all 4 agents.
+Now produce the FINAL PROPOSAL for {owner} to approve or reject.
 
-The proposal must include:
-1. **Top Recommendation** — single best feature to build next with full justification
-2. **Complete Implementation Plan** — exact files, diffs, libraries, docker changes needed
-3. **Debate Summary** — what each agent said (3-4 lines each)
-4. **Unique Angle** — what makes IRA's version better than Grok/Claude/Gemini's equivalent
-5. **Risk & Mitigation** — what could go wrong and how to prevent it
-6. **Effort** — realistic hours/days estimate
-7. **Two Alternatives** — features #2 and #3 in brief, with implementation sketches
+Required sections (do not skip any):
+1. **🏆 Recommendation** — single best feature + one-paragraph justification
+2. **📊 Debate Summary** — what each agent said (2-3 lines per agent)
+3. **🔍 Feature Details** — full description, how it compares to Grok/Claude/Gemini version
+4. **💡 IRA's Unique Angle** — what makes IRA's version special vs the cloud AIs
+5. **🛠️ Implementation Plan** — numbered steps (5-8 steps, be specific)
+6. **📦 Requirements** — new libs, env vars, Docker changes needed
+7. **⏱️ Effort** — realistic hours estimate
+8. **⚠️ Risks** — top 2 risks and how to mitigate
+9. **🥈 Alternatives** — features #2 and #3 in 2 sentences each
 
-End with EXACTLY this block (user will reply to approve):
+End with EXACTLY this approval block (do not change the wording):
+
 ---
-**To approve:** Reply with **"Architect implement: [feature name]"**
-**To see alternatives:** Reply with **"Architect alternatives"**
-**To propose something else:** Reply with **"Architect propose [your idea]"**
+**⬇️ AWAITING YOUR DECISION:**
+- **Approve & implement:** Reply → `architect implement: [feature name]`
+- **See the code first:** Reply → `architect show code: [feature name]`
+- **Choose alternative:** Reply → `architect implement: [alternative name]`
+- **Reject all:** Reply → `architect next proposal`
 ---"""
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Core streaming debate function
+# Core debate runner
 # ─────────────────────────────────────────────────────────────────────────────
 
 async def _run_agent(
-    agent_name: str,
-    system_prompt: str,
+    name: str,
+    system: str,
     user_content: str,
     context: str = "",
+    max_tokens: int = 1000,
 ) -> str:
-    """Run a single architect agent and return its output."""
-    messages: list[dict] = [{"role": "system", "content": system_prompt}]
+    """Run one architect agent and return its output string."""
+    msgs: list[dict] = [{"role": "system", "content": system}]
     if context:
-        messages.append({"role": "system", "content": f"Team context so far:\n{context}"})
-    messages.append({"role": "user", "content": user_content})
+        msgs.append({"role": "system", "content": f"Previous debate:\n{context}"})
+    msgs.append({"role": "user", "content": user_content})
     try:
-        return await chat_complete(messages, use_deep=True, max_tokens=1200, temperature=0.7)
+        result = await chat_complete(msgs, use_deep=True, max_tokens=max_tokens, temperature=0.65)
+        return result or f"[{name} returned empty]"
     except Exception as e:
-        logger.error(f"Architect agent {agent_name} failed: {e}")
-        return f"[{agent_name} encountered an error: {e}]"
+        logger.error(f"Architect {name} failed: {e}")
+        return f"[{name} error: {e}]"
 
 
 async def stream_architect_proposal(
-    query: str,
+    query: str = "Analyse IRA's current capabilities and propose the most valuable next feature.",
     memory_context: str = "",
+    background_mode: bool = False,
 ) -> AsyncIterator[dict]:
     """
-    Stream the full 5-agent architectural debate as SSE events.
+    Stream the full 5-agent debate as SSE-compatible dict events.
 
-    Yields dicts matching the SSE event format:
-      {"architect_agent": "researcher", "chunk": "...", "done": False}
-      {"architect_agent": "supervisor",  "chunk": "...", "done": True}
-      {"architect_done": True, "proposal": "..."}
+    background_mode=True: shorter output, no streaming, returns summary for Redis storage.
     """
     cfg = get_settings()
     owner = cfg.owner_name
     t0 = time.monotonic()
+    trigger = query if len(query) < 200 else query[:200] + "…"
 
-    # Build user prompt for all agents
     user_prompt = (
-        f"Analyse IRA's current capabilities and the user's request: '{query}'\n\n"
-        f"Memory context:\n{memory_context}" if memory_context
-        else f"Analyse IRA's current capabilities and the user's request: '{query}'"
+        f"Perform a complete feature proposal cycle for {owner}'s IRA system.\n"
+        f"Context: {trigger}\n"
+        + (f"\nMemory context:\n{memory_context}" if memory_context else "")
     )
 
-    # ── Phase 1: Yield "debate starting" signal ───────────────────────────────
+    # ── Signal debate start ───────────────────────────────────────────────────
     yield {
         "architect_start": True,
-        "message": "🏛️ IRA Architect Team is convening — internal debate starting…",
+        "message": (
+            "🏛️ **IRA Evolution Team convening…**\n\n"
+            "Five engineers are analysing your system, debating features, and preparing "
+            "a ranked proposal. You will see their full discussion in real-time.\n\n"
+            "---"
+        ),
     }
-    await asyncio.sleep(0.05)
+    await asyncio.sleep(0.02)
 
-    # ── Phase 2: Researcher + Creator run in parallel (independent) ───────────
-    yield {"architect_agent": "researcher", "chunk": "🔬 **Researcher** is analysing feature gaps…\n", "done": False}
+    # ── Wave 1: Researcher + Creator in parallel ──────────────────────────────
+    yield {"architect_agent": "researcher", "chunk": "\n\n### 🔬 Researcher is analysing the feature landscape…\n\n", "done": False}
 
-    researcher_task = asyncio.create_task(
-        _run_agent("researcher", _researcher_prompt(owner), user_prompt)
-    )
-    creator_task = asyncio.create_task(
-        _run_agent("creator", _creator_prompt(owner), user_prompt)
-    )
+    res_task = asyncio.create_task(_run_agent(
+        "researcher", _researcher_prompt(owner, trigger), user_prompt, max_tokens=900
+    ))
+    cre_task = asyncio.create_task(_run_agent(
+        "creator", _creator_prompt(owner), user_prompt, max_tokens=700
+    ))
 
-    researcher_output, creator_output = await asyncio.gather(
-        researcher_task, creator_task, return_exceptions=True
-    )
-    if isinstance(researcher_output, Exception):
-        researcher_output = f"[Researcher error: {researcher_output}]"
-    if isinstance(creator_output, Exception):
-        creator_output = f"[Creator error: {creator_output}]"
+    researcher_out, creator_out = await asyncio.gather(res_task, cre_task, return_exceptions=True)
+    if isinstance(researcher_out, Exception):
+        researcher_out = f"[Researcher error: {researcher_out}]"
+    if isinstance(creator_out, Exception):
+        creator_out = f"[Creator error: {creator_out}]"
 
-    # Stream researcher output token by token (simulate)
-    for line in researcher_output.split("\n"):
+    for line in str(researcher_out).split("\n"):
         yield {"architect_agent": "researcher", "chunk": line + "\n", "done": False}
-        await asyncio.sleep(0.005)
-
+        await asyncio.sleep(0.004)
     yield {"architect_agent": "researcher", "chunk": "", "done": True}
 
-    # ── Phase 3: Critic + Executor run in parallel (they have researcher context) ─
-    context_so_far = f"RESEARCHER:\n{researcher_output}\n\nCREATOR:\n{creator_output}"
-
-    yield {"architect_agent": "critic", "chunk": "🛡️ **Critic** is reviewing the proposals…\n", "done": False}
-
-    critic_task = asyncio.create_task(
-        _run_agent("critic", _critic_prompt(owner), user_prompt, context=context_so_far)
-    )
-    executor_task = asyncio.create_task(
-        _run_agent("executor", _executor_prompt(owner), user_prompt, context=context_so_far)
-    )
-
-    critic_output, executor_output = await asyncio.gather(
-        critic_task, executor_task, return_exceptions=True
-    )
-    if isinstance(critic_output, Exception):
-        critic_output = f"[Critic error: {critic_output}]"
-    if isinstance(executor_output, Exception):
-        executor_output = f"[Executor error: {executor_output}]"
-
-    for line in critic_output.split("\n"):
-        yield {"architect_agent": "critic", "chunk": line + "\n", "done": False}
-        await asyncio.sleep(0.005)
-    yield {"architect_agent": "critic", "chunk": "", "done": True}
-
-    yield {"architect_agent": "executor", "chunk": "⚙️ **Executor** is assessing feasibility…\n", "done": False}
-    for line in executor_output.split("\n"):
-        yield {"architect_agent": "executor", "chunk": line + "\n", "done": False}
-        await asyncio.sleep(0.005)
-    yield {"architect_agent": "executor", "chunk": "", "done": True}
-
-    # Stream creator output
-    yield {"architect_agent": "creator", "chunk": "✨ **Creator** has new ideas…\n", "done": False}
-    for line in creator_output.split("\n"):
+    yield {"architect_agent": "creator", "chunk": "\n\n### ✨ Creator is inventing unique features…\n\n", "done": False}
+    for line in str(creator_out).split("\n"):
         yield {"architect_agent": "creator", "chunk": line + "\n", "done": False}
-        await asyncio.sleep(0.005)
+        await asyncio.sleep(0.004)
     yield {"architect_agent": "creator", "chunk": "", "done": True}
 
-    # ── Phase 4: Supervisor synthesises everything ────────────────────────────
+    # ── Wave 2: Critic + Executor in parallel (have Wave 1 context) ──────────
+    wave1_ctx = f"RESEARCHER OUTPUT:\n{researcher_out}\n\nCREATOR OUTPUT:\n{creator_out}"
+
+    yield {"architect_agent": "critic", "chunk": "\n\n### 🛡️ Critic is reviewing risks and pushing back…\n\n", "done": False}
+
+    crit_task = asyncio.create_task(_run_agent(
+        "critic", _critic_prompt(owner), user_prompt, context=wave1_ctx, max_tokens=900
+    ))
+    exec_task = asyncio.create_task(_run_agent(
+        "executor", _executor_prompt(owner), user_prompt, context=wave1_ctx, max_tokens=1000
+    ))
+
+    critic_out, executor_out = await asyncio.gather(crit_task, exec_task, return_exceptions=True)
+    if isinstance(critic_out, Exception):
+        critic_out = f"[Critic error: {critic_out}]"
+    if isinstance(executor_out, Exception):
+        executor_out = f"[Executor error: {executor_out}]"
+
+    for line in str(critic_out).split("\n"):
+        yield {"architect_agent": "critic", "chunk": line + "\n", "done": False}
+        await asyncio.sleep(0.004)
+    yield {"architect_agent": "critic", "chunk": "", "done": True}
+
+    yield {"architect_agent": "executor", "chunk": "\n\n### ⚙️ Executor is assessing feasibility and sketching code…\n\n", "done": False}
+    for line in str(executor_out).split("\n"):
+        yield {"architect_agent": "executor", "chunk": line + "\n", "done": False}
+        await asyncio.sleep(0.004)
+    yield {"architect_agent": "executor", "chunk": "", "done": True}
+
+    # ── Final: Supervisor streams live synthesis ──────────────────────────────
     full_debate = (
-        f"RESEARCHER OUTPUT:\n{researcher_output}\n\n"
-        f"CREATOR OUTPUT:\n{creator_output}\n\n"
-        f"CRITIC OUTPUT:\n{critic_output}\n\n"
-        f"EXECUTOR OUTPUT:\n{executor_output}"
+        f"=== RESEARCHER ===\n{researcher_out}\n\n"
+        f"=== CREATOR ===\n{creator_out}\n\n"
+        f"=== CRITIC ===\n{critic_out}\n\n"
+        f"=== EXECUTOR ===\n{executor_out}"
     )
 
-    yield {"architect_agent": "supervisor", "chunk": "🧠 **Supervisor** is synthesising the debate into a final proposal…\n", "done": False}
+    yield {"architect_agent": "supervisor", "chunk": "\n\n---\n\n### 🧠 Supervisor is synthesising the debate into a final proposal…\n\n", "done": False}
 
-    # Stream supervisor output live
-    supervisor_messages = [
+    sup_msgs = [
         {"role": "system", "content": _supervisor_prompt(owner)},
         {"role": "system", "content": f"Full team debate:\n\n{full_debate}"},
         {"role": "user", "content": user_prompt},
     ]
 
-    full_proposal_parts: list[str] = []
+    proposal_parts: list[str] = []
     try:
-        async for token in stream_tokens(supervisor_messages, use_deep=True, max_tokens=2000, temperature=0.4):
-            full_proposal_parts.append(token)
-            yield {"architect_agent": "supervisor", "chunk": token, "done": False}
+        async for tok in stream_tokens(sup_msgs, use_deep=True, max_tokens=2000, temperature=0.35):
+            proposal_parts.append(tok)
+            yield {"architect_agent": "supervisor", "chunk": tok, "done": False}
     except Exception as e:
-        err_msg = f"\n\n[Supervisor error: {e}]"
-        full_proposal_parts.append(err_msg)
-        yield {"architect_agent": "supervisor", "chunk": err_msg, "done": False}
+        err = f"\n[Supervisor stream error: {e}]"
+        proposal_parts.append(err)
+        yield {"architect_agent": "supervisor", "chunk": err, "done": False}
 
     yield {"architect_agent": "supervisor", "chunk": "", "done": True}
 
+    final_proposal = "".join(proposal_parts)
     latency = int((time.monotonic() - t0) * 1000)
-    full_proposal = "".join(full_proposal_parts)
+
+    # Store in Redis for background notifications
+    try:
+        from utils.redis_client import get_redis
+        redis = get_redis()
+        payload = json.dumps({
+            "proposal": final_proposal,
+            "debate": {
+                "researcher": str(researcher_out),
+                "creator": str(creator_out),
+                "critic": str(critic_out),
+                "executor": str(executor_out),
+            },
+            "latency_ms": latency,
+            "timestamp": time.time(),
+        })
+        await redis.setex("architect:latest_proposal", 86400 * 3, payload)  # 3-day TTL
+        logger.info("Architect proposal saved to Redis")
+    except Exception as e:
+        logger.warning(f"Could not save architect proposal to Redis: {e}")
 
     yield {
         "architect_done": True,
-        "proposal": full_proposal,
+        "proposal": final_proposal,
         "latency_ms": latency,
-        "debate": {
-            "researcher": researcher_output,
-            "creator": creator_output,
-            "critic": critic_output,
-            "executor": executor_output,
-        },
     }
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Auto-implementation (called when user approves a feature)
+# Background 24/7 cycle (called by APScheduler every 12 hours)
 # ─────────────────────────────────────────────────────────────────────────────
 
-_IMPLEMENT_SYSTEM = """\
-You are the IRA Auto-Implementation Engine — the Executor in action.
+async def run_background_architect_cycle() -> None:
+    """
+    Background evolution cycle — runs every 12 hours via APScheduler.
+    Generates a new proposal, stores it in Redis, and sends a notification.
+    Does NOT auto-implement anything — waits for explicit user approval.
+    """
+    logger.info("Architect background cycle starting…")
+    try:
+        # Collect all events (not streaming to a client here)
+        proposal_text = ""
+        async for event in stream_architect_proposal(
+            query=(
+                "Background cycle: analyse IRA's current capabilities and propose "
+                "the single most impactful feature to add next based on what Grok, "
+                "Claude, Gemini, and ChatGPT released in the last cycle."
+            ),
+            background_mode=True,
+        ):
+            if event.get("architect_done"):
+                proposal_text = event.get("proposal", "")
 
-When asked to implement a feature, you:
-1. Output a complete implementation as unified diffs (--- a/path +++ b/path format)
-2. Include EVERY file that needs to change (backend + frontend + config)
-3. Add clear one-sentence comments on each hunk explaining the change
-4. Output a `docker compose restart` command for only the affected services
-5. Output a git commit message following conventional commits format
+        if not proposal_text:
+            logger.warning("Architect background cycle produced no proposal")
+            return
 
-IMPORTANT:
-- The IRA stack: FastAPI (ira/) + Next.js (frontend/) + Docker
-- Use relative paths from the supracloud-jarvis/ directory
-- Every diff must be immediately applicable with `git apply`
-- Keep changes minimal and surgical — do not rewrite working code
-- Output in this exact structure:
+        # Send notification so the user knows there is something new
+        cfg = get_settings()
+        notification_msg = (
+            f"🏛️ *IRA Evolution Team has a new proposal for you, {cfg.owner_name}!*\n\n"
+            "Your 5-agent engineering team completed their 12-hour analysis cycle "
+            "and has a feature proposal ready.\n\n"
+            "Type **`architect`** in the IRA chat to see the full debate and proposal.\n\n"
+            "_Nothing has been implemented — awaiting your approval._"
+        )
 
+        try:
+            from worker.notifier import send_telegram, send_email
+            if cfg.telegram_bot_token and cfg.telegram_chat_id:
+                await send_telegram(notification_msg)
+                logger.info("Architect proposal notification sent via Telegram")
+            if cfg.smtp_host and cfg.smtp_user:
+                await send_email(
+                    subject="IRA Evolution Team: New Feature Proposal Ready",
+                    body=notification_msg.replace("*", "").replace("_", ""),
+                )
+        except Exception as e:
+            logger.warning(f"Architect notification failed (non-critical): {e}")
+
+        logger.info("Architect background cycle completed successfully")
+
+    except Exception as e:
+        logger.error(f"Architect background cycle failed: {e}", exc_info=True)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Auto-implementation (after explicit user approval)
+# ─────────────────────────────────────────────────────────────────────────────
+
+_IMPL_SYSTEM = """\
+You are the IRA Auto-Implementation Engine.
+
+When given a feature to implement, output the COMPLETE implementation as unified diffs.
+Every change must be immediately applicable with `git apply`.
+Use real file paths relative to the supracloud-jarvis/ root.
+
+Output format:
 ## Implementation: [Feature Name]
 
+### Summary
+[2-sentence description of what was implemented]
+
 ### Files Changed
-- `path/to/file.py` — one-sentence reason
+- `path/to/file` — reason
 
 ### Diffs
 ```diff
---- a/ira/...
-+++ b/ira/...
-@@ ... @@
-...
+--- a/ira/path/to/file.py
++++ b/ira/path/to/file.py
+@@ -N,M +N,M @@
+ context
+-removed
++added
+ context
+```
+
+### New Requirements (if any)
+```
+package>=version
 ```
 
 ### Restart Command
@@ -383,155 +483,126 @@ IMPORTANT:
 docker compose restart ira-api
 ```
 
-### Git Commit Message
+### Git Commit
 ```
-feat: [feature name] — [one line description]
+feat: [feature] — [description]
 ```
+
+Rules:
+- Never rewrite files entirely — only surgical diffs
+- Include 3 lines of context around each hunk
+- New files use --- /dev/null and +++ b/path
+- Keep every diff minimal and correct
+"""
+
+_IRA_CONTEXT = """\
+IRA Stack (supracloud-jarvis/):
+  ira/agents/          — LangGraph agents (expert_mode.py, engineer_agent.py, architect_agent.py)
+  ira/api/routes/      — FastAPI routes (chat.py, image_gen.py, video_gen.py, document_create.py)
+  ira/utils/           — helpers (llm.py, search_tools.py, auto_implement.py)
+  ira/worker/          — background jobs (scheduler.py, briefing.py, self_healing.py)
+  ira/config.py        — pydantic-settings
+  ira/main.py          — FastAPI app factory
+  ira/requirements.txt — Python dependencies
+  frontend/components/ — ChatInterface.tsx, Sidebar.tsx
+  frontend/app/        — page.tsx
 """
 
 
 async def stream_auto_implement(
     feature_name: str,
-    proposal_context: str,
-    memory_context: str = "",
+    proposal_context: str = "",
 ) -> AsyncIterator[dict]:
-    """
-    Stream the auto-implementation of an approved feature.
-    Yields SSE events with implementation progress, then the actual diffs.
-    """
+    """Stream the auto-implementation code generation for an approved feature."""
     cfg = get_settings()
-    owner = cfg.owner_name
 
     yield {
         "implement_start": True,
-        "message": f"⚙️ Auto-implementing: **{feature_name}** — generating code…",
+        "message": f"⚙️ **Implementing: {feature_name}**\n\nGenerating code, diffs, and commit message…\n\n",
     }
 
-    messages = [
-        {"role": "system", "content": _IMPLEMENT_SYSTEM},
-        {"role": "system", "content": f"IRA Stack context:\n{_IRA_STACK_CONTEXT}"},
+    msgs = [
+        {"role": "system", "content": _IMPL_SYSTEM},
+        {"role": "system", "content": _IRA_CONTEXT},
         {
             "role": "user",
             "content": (
-                f"Implement this feature for {owner}'s IRA system:\n"
-                f"**Feature:** {feature_name}\n\n"
-                f"**Context from proposal:**\n{proposal_context[:3000]}"
+                f"Implement **{feature_name}** for {cfg.owner_name}'s IRA system.\n\n"
+                f"Context from proposal:\n{proposal_context[:4000]}"
             ),
         },
     ]
 
-    impl_parts: list[str] = []
+    parts: list[str] = []
     try:
-        async for token in stream_tokens(messages, use_deep=True, max_tokens=4096, temperature=0.2):
-            impl_parts.append(token)
-            yield {"implement_chunk": token}
+        async for tok in stream_tokens(msgs, use_deep=True, max_tokens=4096, temperature=0.15):
+            parts.append(tok)
+            yield {"implement_chunk": tok}
     except Exception as e:
         err = f"\n\n[Implementation error: {e}]"
-        impl_parts.append(err)
+        parts.append(err)
         yield {"implement_chunk": err}
 
-    full_impl = "".join(impl_parts)
+    impl_text = "".join(parts)
 
     yield {
         "implement_done": True,
-        "implementation": full_impl,
+        "implementation": impl_text,
         "feature_name": feature_name,
         "message": (
-            "✅ Implementation generated.\n\n"
-            "**To apply these changes:** Reply with **'Architect apply'** and I will:\n"
-            "1. Run `git apply --check` to validate\n"
-            "2. Apply the diffs\n"
-            "3. Commit with the message above\n"
-            "4. Restart the affected services\n\n"
-            "**To review first:** Read the diffs above carefully before approving."
+            "\n\n---\n✅ **Implementation generated.**\n\n"
+            "Review the diffs above, then:\n"
+            "- **Apply now:** type `architect apply`\n"
+            "- **Dry-run first:** type `architect dry run`\n"
+            "- **Cancel:** type `architect cancel`"
         ),
     }
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Trigger detection
+# Trigger detection helpers
 # ─────────────────────────────────────────────────────────────────────────────
 
-import re as _re
-
-_PROPOSAL_RE = _re.compile(
-    r"\b(architect|propose new features?|evolution team|feature proposal|"
-    r"what should we build|new feature ideas?|ira evolve|improve ira)\b",
-    _re.I,
+_PROPOSAL_RE = re.compile(
+    r"\b(architect|propose( new)? features?|evolution team|"
+    r"what should (we|ira) build|new feature ideas?|ira evolve|"
+    r"improve ira|what'?s? (next|missing)|architect (next )?proposal)\b",
+    re.I,
 )
-
-_IMPLEMENT_RE = _re.compile(
+_IMPLEMENT_RE = re.compile(
     r"\b(architect implement|implement (this|feature|it|that)|"
-    r"go ahead (with|and build)|approve|approved|build (this|it|feature))\b",
-    _re.I,
+    r"go ahead (with|and build)|^approve$|approved|build (this|it|feature)|"
+    r"yes,? (do it|implement|build it|go ahead))\b",
+    re.I,
+)
+_APPLY_RE = re.compile(
+    r"\b(architect apply|apply (the )?(diff|changes|patch|it|them)|"
+    r"architect dry.?run|dry.?run (the )?(patch|diff))\b",
+    re.I,
+)
+_SHOW_CODE_RE = re.compile(
+    r"\b(architect show code|show (me )?(the )?(code|diff|implementation)|"
+    r"show implementation)\b",
+    re.I,
 )
 
-_APPLY_RE = _re.compile(
-    r"\b(architect apply|apply (the )?(diff|changes|patch)|apply (it|them))\b",
-    _re.I,
-)
+
+def is_architect_trigger(q: str) -> bool:
+    return bool(_PROPOSAL_RE.search(q))
+
+def is_implement_trigger(q: str) -> bool:
+    return bool(_IMPLEMENT_RE.search(q))
+
+def is_apply_trigger(q: str) -> bool:
+    return bool(_APPLY_RE.search(q))
+
+def is_show_code_trigger(q: str) -> bool:
+    return bool(_SHOW_CODE_RE.search(q))
 
 
-def is_architect_trigger(query: str) -> bool:
-    """Return True if the query should activate the Architect Team proposal mode."""
-    return bool(_PROPOSAL_RE.search(query))
-
-
-def is_implement_trigger(query: str) -> bool:
-    """Return True if the query is approving a feature for implementation."""
-    return bool(_IMPLEMENT_RE.search(query))
-
-
-def is_apply_trigger(query: str) -> bool:
-    """Return True if the user wants to apply the generated diffs."""
-    return bool(_APPLY_RE.search(query))
-
-
-def extract_feature_name(query: str) -> str:
-    """Extract the feature name from an implement command, if present."""
-    m = _re.search(
-        r"architect implement[:\s]+(.+)|implement[:\s]+(.+)|go ahead with[:\s]+(.+)",
-        query,
-        _re.I,
+def extract_feature_name(q: str) -> str:
+    m = re.search(
+        r"(?:architect implement|implement|go ahead with|build|approve)[:\s]+(.+)",
+        q, re.I,
     )
-    if m:
-        return (m.group(1) or m.group(2) or m.group(3) or "").strip()
-    return "the proposed feature"
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# IRA stack context (baked in for Executor's implementation accuracy)
-# ─────────────────────────────────────────────────────────────────────────────
-
-_IRA_STACK_CONTEXT = """\
-SupraCloud IRA stack:
-supracloud-jarvis/
-  ira/                         ← FastAPI backend (Python 3.12)
-    agents/                    ← LangGraph + custom agents
-      architect_agent.py       ← This file (Architect Team)
-      expert_mode.py           ← 5-agent Expert Mode
-      engineer_agent.py        ← Engineer Mode (4-step)
-      grok_personality.py      ← Grok system prompt
-      graph.py                 ← Agent routing graph
-      supervisor.py            ← Query classifier
-    api/routes/
-      chat.py                  ← /chat/stream (SSE), /chat/expert, /chat/vision
-      architect.py             ← /architect/propose, /architect/implement
-      image_gen.py             ← /image/generate, /image/edit
-    utils/
-      llm.py                   ← vLLM 3-tier routing (fast/deep/reasoning)
-      search_tools.py          ← Web + X search + DeepSearch
-      auto_implement.py        ← git apply + commit + service restart
-    config.py                  ← pydantic-settings (env vars)
-    main.py                    ← FastAPI app factory + router registration
-    requirements.txt
-  frontend/                    ← Next.js 14 (TypeScript)
-    components/
-      ChatInterface.tsx        ← Main chat UI (SSE client) — most complex file
-      Sidebar.tsx              ← Mode switcher
-    app/
-      page.tsx                 ← Auth + layout
-  docker-compose.yml           ← Base compose (Shadow PC)
-  docker-compose.cloud.yml     ← Cloud overlay (8×H100)
-  .env.example                 ← All env var docs
-"""
+    return (m.group(1).strip() if m else "the top recommended feature")

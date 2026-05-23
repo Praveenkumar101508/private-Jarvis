@@ -64,4 +64,16 @@ duckduckgo-search>=6.0.0        # DuckDuckGo web search (no API key required)
 
 # ── Document Analysis (Grok-style PDF/DOCX/TXT upload) ───────────────────────
 pypdf>=4.0.0                    # PDF text extraction for /chat/document
-python-docx>=1.0.0              # Word document text extraction
+python-docx>=1.0.0              # Word document text extraction + DOCX generation
+
+# ── Feature #4: Native Document Generation ────────────────────────────────────
+reportlab>=4.0.0                # PDF generation (Feature #4)
+python-pptx>=1.0.0              # PowerPoint generation (Feature #4)
+openpyxl>=3.1.0                 # Excel generation (Feature #4)
+
+# ── Feature #6: Audio Generation (Replicate MusicGen / Bark TTS / Whisper) ────
+# No extra deps — uses Replicate API via httpx (already listed above)
+
+# ── Feature #1 & #5: Video Generation + Understanding ─────────────────────────
+# Uses Replicate API (httpx) + ffmpeg system binary
+# ffmpeg install: apt-get install ffmpeg  (Docker) or brew install ffmpeg (macOS)

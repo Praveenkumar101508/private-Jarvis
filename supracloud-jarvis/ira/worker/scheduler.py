@@ -12,6 +12,7 @@ Job schedule:
   Every 15 min   — Reminder check (due reminders)
   Every 30 min   — Cal.com calendar sync
   Every 6 hours  — Security report summary
+  Every 12 hours — Architect Evolution Team cycle (silent, notifies when ready)
 """
 
 from __future__ import annotations
@@ -172,6 +173,19 @@ def build_scheduler() -> AsyncIOScheduler:
         replace_existing=True,
     )
 
+    # Architect Evolution Team — every 12 hours (06:00 and 18:00 UTC)
+    # Silently analyses IRA vs Grok/Claude/Gemini, generates proposal, notifies owner.
+    # Nothing is implemented until owner types "architect implement: [feature name]"
+    scheduler.add_job(
+        _architect_cycle,
+        trigger="interval",
+        hours=12,
+        id="architect_evolution",
+        name="IRA Architect Evolution Team",
+        replace_existing=True,
+        next_run_time=None,   # Don't run immediately at startup — wait 12h
+    )
+
     return scheduler
 
 
@@ -227,6 +241,19 @@ async def _database_backup() -> None:
             logger.error("Daily backup FAILED — check pg_dump logs")
     except Exception as e:
         logger.error(f"Backup job failed: {e}", exc_info=True)
+
+
+async def _architect_cycle() -> None:
+    """
+    24/7 Evolution Team background cycle.
+    Runs silently every 12 hours — generates a proposal and notifies the owner.
+    NEVER auto-implements anything — always waits for explicit 'architect implement: X' command.
+    """
+    try:
+        from agents.architect_agent import run_background_architect_cycle
+        await run_background_architect_cycle()
+    except Exception as e:
+        logger.error(f"Architect evolution cycle failed: {e}", exc_info=True)
 
 
 def get_scheduler() -> AsyncIOScheduler:

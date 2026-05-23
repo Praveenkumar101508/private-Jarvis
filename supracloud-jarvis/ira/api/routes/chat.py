@@ -256,6 +256,12 @@ async def chat_stream(
         is_architect_trigger, is_implement_trigger, is_apply_trigger,
         extract_feature_name, stream_architect_proposal, stream_auto_implement,
     )
+    # Feature routing — detect specialised request types
+    from api.routes.video_gen import is_video_gen_request, is_video_understand_request, VideoGenRequest
+    from api.routes.document_create import is_doc_create_request, DocCreateRequest
+    from api.routes.design_tools import is_design_request, DesignRequest
+    from api.routes.audio_gen import is_audio_gen_request, AudioGenRequest as AudioRequest
+    from api.routes.deep_research import is_deep_research_request, is_article_request, DeepResearchRequest, ArticleRequest
 
     # ── Architect Agent: intercept before all other routing ───────────────────
     if is_architect_trigger(req.message):
@@ -453,6 +459,41 @@ async def chat_stream(
             })}
 
         return EventSourceResponse(image_edit_stream())
+
+    # ── Video Generation path ─────────────────────────────────────────────────
+    if is_video_gen_request(req.message) and not req.is_voice:
+        from api.routes.video_gen import video_generate
+        video_req = VideoGenRequest(prompt=req.message, session_id=req.session_id)
+        return await video_generate(video_req, _user)
+
+    # ── Document Creation path ────────────────────────────────────────────────
+    if is_doc_create_request(req.message) and not req.is_voice:
+        from api.routes.document_create import document_create
+        doc_req = DocCreateRequest(prompt=req.message, session_id=req.session_id)
+        return await document_create(doc_req, _user)
+
+    # ── Design Tools path ─────────────────────────────────────────────────────
+    if is_design_request(req.message) and not req.is_voice:
+        from api.routes.design_tools import design_generate
+        design_req = DesignRequest(prompt=req.message, session_id=req.session_id)
+        return await design_generate(design_req, _user)
+
+    # ── Audio Generation path ─────────────────────────────────────────────────
+    if is_audio_gen_request(req.message) and not req.is_voice:
+        from api.routes.audio_gen import audio_generate
+        audio_req = AudioRequest(prompt=req.message, session_id=req.session_id)
+        return await audio_generate(audio_req, _user)
+
+    # ── Deep Research path ────────────────────────────────────────────────────
+    if is_deep_research_request(req.message) and not req.is_voice:
+        from api.routes.deep_research import deep_research
+        research_req = DeepResearchRequest(topic=req.message, session_id=req.session_id)
+        return await deep_research(research_req, _user)
+
+    if is_article_request(req.message) and not req.is_voice:
+        from api.routes.deep_research import generate_article
+        article_req = ArticleRequest(topic=req.message, session_id=req.session_id)
+        return await generate_article(article_req, _user)
 
     messages = [{"role": "system", "content": system_prompt}]
     if memory_ctx:

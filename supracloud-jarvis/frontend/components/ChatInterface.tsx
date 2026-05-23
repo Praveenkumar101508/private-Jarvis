@@ -47,6 +47,19 @@ interface Message {
   attachedFileName?: string;
   isArchitect?: boolean;
   pendingApply?: boolean;
+  // Feature #1: Video
+  videoUrl?: string;
+  videoPrompt?: string;
+  // Feature #4: Document
+  documentUrl?: string;
+  documentFilename?: string;
+  documentFormat?: string;
+  // Feature #2: Design
+  designUrl?: string;
+  designFilename?: string;
+  // Feature #6: Audio
+  audioUrl?: string;
+  audioType?: string;
 }
 
 interface Props {
@@ -74,9 +87,20 @@ const AGENT_LABELS: Record<string, string> = {
   expert_mode:    "Expert Mode",
   image_gen:      "Image Generation",
   image_edit:     "Image Editing",
-  engineer:       "Engineer Mode",
-  document:       "Document Analysis",
-  architect:      "Architect Team",
+  engineer:          "Engineer Mode",
+  document:          "Document Analysis",
+  architect:         "Architect Team",
+  video_gen:         "Video Generation",
+  video_understand:  "Video Analysis",
+  document_create:   "Document Creation",
+  design_tools:      "Design Tools",
+  computer_use:      "Computer Use",
+  audio_gen:         "Music Generation",
+  audio_tts:         "Voice Synthesis",
+  audio_transcribe:  "Audio Transcription",
+  deep_research:     "Deep Research",
+  article_gen:       "Article Writer",
+  multimodal_fusion: "Multi-Modal Fusion",
 };
 
 function estimateExpertTokens(text: string): number {
@@ -188,7 +212,7 @@ export default function ChatInterface({ sessionId, token, mode = "assistant" }: 
       };
       reader.readAsDataURL(file);
     } else {
-      // Document — read as ArrayBuffer, store raw bytes for FormData upload
+      // Documents, video, audio — read as ArrayBuffer, store raw bytes for FormData upload
       reader.onload = (ev) => {
         const buf = ev.target?.result as ArrayBuffer;
         const bytes = new Uint8Array(buf);
@@ -619,6 +643,38 @@ export default function ChatInterface({ sessionId, token, mode = "assistant" }: 
                       : m
                   )
                 );
+              } else if (data.video_generated) {
+                setMessages((prev) =>
+                  prev.map((m) =>
+                    m.id === assistantMsgId
+                      ? { ...m, videoUrl: data.video_url, videoPrompt: data.prompt }
+                      : m
+                  )
+                );
+              } else if (data.document_created) {
+                setMessages((prev) =>
+                  prev.map((m) =>
+                    m.id === assistantMsgId
+                      ? { ...m, documentUrl: data.download_url, documentFilename: data.filename, documentFormat: data.format }
+                      : m
+                  )
+                );
+              } else if (data.design_created) {
+                setMessages((prev) =>
+                  prev.map((m) =>
+                    m.id === assistantMsgId
+                      ? { ...m, designUrl: data.preview_url, designFilename: data.filename }
+                      : m
+                  )
+                );
+              } else if (data.audio_generated) {
+                setMessages((prev) =>
+                  prev.map((m) =>
+                    m.id === assistantMsgId
+                      ? { ...m, audioUrl: data.audio_url, audioType: data.audio_type }
+                      : m
+                  )
+                );
               } else if (data.token !== undefined) {
                 setMessages((prev) =>
                   prev.map((m) =>
@@ -876,6 +932,75 @@ export default function ChatInterface({ sessionId, token, mode = "assistant" }: 
                             </a>
                           </div>
                         )}
+                        {/* Feature #1: Video player */}
+                        {msg.videoUrl && (
+                          <div className="mb-3">
+                            <video
+                              src={msg.videoUrl}
+                              controls
+                              className="max-w-full rounded-xl border border-neutral-700 shadow-lg"
+                              style={{ maxHeight: "320px" }}
+                            />
+                            <a
+                              href={msg.videoUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="mt-1 inline-block text-[10px] text-sky-400 hover:text-sky-300 no-underline"
+                            >
+                              ⬇️ Download video
+                            </a>
+                          </div>
+                        )}
+                        {/* Feature #4: Document download */}
+                        {msg.documentUrl && (
+                          <div className="mb-3 flex items-center gap-2 p-2 rounded-lg bg-neutral-900 border border-neutral-700">
+                            <FileText className="w-5 h-5 text-saffron-400 flex-shrink-0" />
+                            <div className="flex-1 min-w-0">
+                              <p className="text-xs font-medium text-white truncate">{msg.documentFilename}</p>
+                              <p className="text-[10px] text-neutral-500">{(msg.documentFormat ?? "").toUpperCase()} document</p>
+                            </div>
+                            <a
+                              href={msg.documentUrl}
+                              download={msg.documentFilename}
+                              className="flex-shrink-0 px-2.5 py-1 rounded-lg bg-saffron-500/20 border border-saffron-500/40 text-saffron-400 text-[11px] hover:bg-saffron-500/30 no-underline transition-colors"
+                            >
+                              ⬇️ Download
+                            </a>
+                          </div>
+                        )}
+                        {/* Feature #2: Design preview */}
+                        {msg.designUrl && (
+                          <div className="mb-3 flex items-center gap-2 p-2 rounded-lg bg-neutral-900 border border-neutral-700">
+                            <span className="text-lg flex-shrink-0">🎨</span>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-xs font-medium text-white truncate">{msg.designFilename}</p>
+                              <p className="text-[10px] text-neutral-500">Design artifact</p>
+                            </div>
+                            <a
+                              href={msg.designUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="flex-shrink-0 px-2.5 py-1 rounded-lg bg-violet-500/20 border border-violet-500/40 text-violet-400 text-[11px] hover:bg-violet-500/30 no-underline transition-colors"
+                            >
+                              🔍 Preview
+                            </a>
+                          </div>
+                        )}
+                        {/* Feature #6: Audio player */}
+                        {msg.audioUrl && (
+                          <div className="mb-3">
+                            <audio
+                              src={msg.audioUrl}
+                              controls
+                              className="w-full rounded-xl"
+                            />
+                            <p className="text-[10px] text-neutral-500 mt-0.5">
+                              {msg.audioType === "music" ? "🎵 Generated music" :
+                               msg.audioType === "tts" ? "🗣️ Voice synthesis" :
+                               "🔊 Audio"}
+                            </p>
+                          </div>
+                        )}
                         {msg.content && <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content}</ReactMarkdown>}
                         {msg.isStreaming && (
                           <span className="inline-block w-1.5 h-4 bg-saffron-400 ml-0.5 align-middle animate-cursor-blink" />
@@ -1005,7 +1130,7 @@ export default function ChatInterface({ sessionId, token, mode = "assistant" }: 
           <input
             ref={fileInputRef}
             type="file"
-            accept="image/jpeg,image/png,image/gif,image/webp,application/pdf,.pdf,.docx,.doc,.txt,.md,.csv"
+            accept="image/jpeg,image/png,image/gif,image/webp,video/mp4,video/webm,audio/mpeg,audio/wav,audio/ogg,application/pdf,.pdf,.docx,.doc,.txt,.md,.csv,.mp4,.mp3,.wav"
             className="hidden"
             onChange={handleFileAttach}
           />
