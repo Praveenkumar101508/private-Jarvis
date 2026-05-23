@@ -252,6 +252,79 @@ async def chat_stream(
     )
     from agents.grok_personality import build_grok_system_prompt
     from agents.engineer_agent import build_engineer_prompt
+    from agents.architect_agent import (
+        is_architect_trigger, is_implement_trigger, is_apply_trigger,
+        extract_feature_name, stream_architect_proposal, stream_auto_implement,
+    )
+
+    # ── Architect Agent: intercept before all other routing ───────────────────
+    if is_architect_trigger(req.message):
+        memories_raw = await retrieve(req.message)
+        memory_ctx = "\n".join(m["content"] for m in memories_raw) if memories_raw else ""
+
+        async def architect_proposal_stream():
+            async for event in stream_architect_proposal(req.message, memory_context=memory_ctx):
+                # Re-map architect events to the standard SSE token format for the frontend
+                if event.get("architect_start"):
+                    yield {"data": json.dumps({"token": event["message"] + "\n\n"})}
+                elif event.get("architect_agent") and event.get("chunk"):
+                    yield {"data": json.dumps({"token": event["chunk"]})}
+                elif event.get("architect_done"):
+                    yield {"data": json.dumps({
+                        "done": True,
+                        "agent": "architect",
+                        "latency_ms": event.get("latency_ms", 0),
+                        "session_id": req.session_id,
+                        "is_architect": True,
+                    })}
+        return EventSourceResponse(architect_proposal_stream())
+
+    if is_implement_trigger(req.message):
+        feature = extract_feature_name(req.message)
+        from api.routes.architect import _state as _arch_state
+        proposal_ctx = _arch_state.get("proposal") or ""
+
+        async def architect_impl_stream():
+            async for event in stream_auto_implement(feature, proposal_context=proposal_ctx):
+                if event.get("implement_start"):
+                    yield {"data": json.dumps({"token": event["message"] + "\n\n"})}
+                elif event.get("implement_chunk"):
+                    yield {"data": json.dumps({"token": event["implement_chunk"]})}
+                elif event.get("implement_done"):
+                    _arch_state["implementation"] = event.get("implementation", "")
+                    _arch_state["feature_name"] = feature
+                    _arch_state["pending_apply"] = True
+                    yield {"data": json.dumps({
+                        "done": True,
+                        "agent": "architect",
+                        "latency_ms": 0,
+                        "session_id": req.session_id,
+                        "is_architect": True,
+                        "pending_apply": True,
+                    })}
+        return EventSourceResponse(architect_impl_stream())
+
+    if is_apply_trigger(req.message):
+        from api.routes.architect import _state as _arch_state
+        from utils.auto_implement import apply_implementation
+
+        async def apply_stream():
+            yield {"data": json.dumps({"token": "⚙️ Applying implementation — running `git apply`…\n\n"})}
+            impl = _arch_state.get("implementation")
+            if not impl:
+                yield {"data": json.dumps({"token": "❌ No pending implementation. Run `architect implement [feature]` first.\n"})}
+            else:
+                result = await apply_implementation(impl)
+                if result.success:
+                    _arch_state["pending_apply"] = False
+                    _arch_state["implementation"] = None
+                msg = result.message + ("\n\n" + result.error if result.error else "")
+                yield {"data": json.dumps({"token": msg})}
+            yield {"data": json.dumps({
+                "done": True, "agent": "architect", "latency_ms": 0,
+                "session_id": req.session_id, "is_architect": True,
+            })}
+        return EventSourceResponse(apply_stream())
 
     _THINK_ADDON = (
         "\n\nTHINK MODE ACTIVE: Before answering, reason through the problem thoroughly "

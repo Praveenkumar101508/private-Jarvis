@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback } from "react";
-import { Send, Square, Copy, Check, Loader2, Zap, ChevronDown, ChevronUp, Paperclip, X, AlertCircle, DollarSign, Brain, Code2, FileText, Search, Lightbulb } from "lucide-react";
+import { Send, Square, Copy, Check, Loader2, Zap, ChevronDown, ChevronUp, Paperclip, X, AlertCircle, DollarSign, Brain, Code2, FileText, Search, Lightbulb, FlaskConical } from "lucide-react";
 import clsx from "clsx";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -45,6 +45,8 @@ interface Message {
   thinkingOpen?: boolean;
   deepSearchRounds?: number;
   attachedFileName?: string;
+  isArchitect?: boolean;
+  pendingApply?: boolean;
 }
 
 interface Props {
@@ -74,6 +76,7 @@ const AGENT_LABELS: Record<string, string> = {
   image_edit:     "Image Editing",
   engineer:       "Engineer Mode",
   document:       "Document Analysis",
+  architect:      "Architect Team",
 };
 
 function estimateExpertTokens(text: string): number {
@@ -85,9 +88,9 @@ function estimateExpertTokens(text: string): number {
 const SUGGESTIONS: Record<AppMode, string[]> = {
   assistant: [
     "What can you do?",
-    "Analyze my GitHub repos",
+    "architect propose new features",
     "Scan for security threats",
-    "Open VS Code",
+    "Analyze my GitHub repos",
   ],
   tutor: [
     "I'm learning Docker",
@@ -637,6 +640,8 @@ export default function ChatInterface({ sessionId, token, mode = "assistant" }: 
                           isEngineer: data.is_engineer === true,
                           isThink: data.is_think === true,
                           deepSearchRounds: data.deep_search_rounds ?? 0,
+                          isArchitect: data.is_architect === true,
+                          pendingApply: data.pending_apply === true,
                         }
                       : m
                   )
@@ -966,6 +971,21 @@ export default function ChatInterface({ sessionId, token, mode = "assistant" }: 
                         𝕏 Live from X
                       </span>
                     )}
+                    {msg.isArchitect && !msg.isStreaming && (
+                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-orange-500/15 border border-orange-500/30 text-orange-400">
+                        <FlaskConical className="w-2.5 h-2.5" />
+                        Architect Team
+                      </span>
+                    )}
+                    {msg.pendingApply && !msg.isStreaming && (
+                      <button
+                        onClick={() => sendMessage("Architect apply")}
+                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-green-500/20 border border-green-500/40 text-green-400 hover:bg-green-500/30 transition-colors"
+                        title="Apply the generated implementation"
+                      >
+                        ⚡ Apply Implementation
+                      </button>
+                    )}
                     {msg.role === "assistant" && !msg.isStreaming && msg.content && (
                       <CopyButton text={msg.content} />
                     )}
@@ -1161,6 +1181,15 @@ export default function ChatInterface({ sessionId, token, mode = "assistant" }: 
               >
                 <Search className="w-3 h-3" />
                 DeepSearch
+              </button>
+              <button
+                onClick={() => sendMessage("architect propose new features")}
+                title="Architect Team: 5 agents debate, invent, and propose new IRA features — type 'Approve' to auto-implement"
+                disabled={isStreaming}
+                className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] border transition-all border-orange-700/50 text-orange-600 hover:text-orange-400 hover:border-orange-600 disabled:opacity-30"
+              >
+                <FlaskConical className="w-3 h-3" />
+                Architect
               </button>
             </div>
           </div>

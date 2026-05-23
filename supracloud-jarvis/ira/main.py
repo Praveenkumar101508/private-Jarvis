@@ -41,6 +41,7 @@ from api.routes.voice import router as voice_router
 from api.routes.webhooks import router as webhooks_router
 from api.routes.backup import router as backup_router
 from api.routes.image_gen import router as image_gen_router
+from api.routes.architect import router as architect_router
 from api.middleware.auth import authenticate_user, create_token
 
 logging.basicConfig(
@@ -148,6 +149,7 @@ def create_app() -> FastAPI:
     app.include_router(webhooks_router)              # /webhooks/lead + /webhooks/booking
     app.include_router(backup_router, prefix="/api/v1")      # /backup/list + /backup/download + /backup/restore
     app.include_router(image_gen_router, prefix="/api/v1")   # /image/generate + /image/edit
+    app.include_router(architect_router, prefix="/api/v1")  # /architect/propose + /implement + /apply
 
     # ── Global error handler ──────────────────────────────────────────────────
     @app.exception_handler(Exception)
