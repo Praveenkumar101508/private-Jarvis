@@ -45,6 +45,8 @@ class ChatRequest(BaseModel):
     mime_type: str = Field("image/jpeg")
     grok_mode: bool = False        # Use Grok personality + auto search + image gen tools
     engineer_mode: bool = False    # Claude-style 4-step engineering workflow (analysis→plan→diffs→verify)
+    think_mode: bool = False       # Show step-by-step reasoning in collapsible panel before answer
+    deep_search: bool = False      # Multi-step iterative web search (3 rounds) like Grok DeepSearch
 
 
 class ChatResponse(BaseModel):
@@ -240,36 +242,53 @@ async def chat_stream(
         return EventSourceResponse(tool_result_streamer())
 
     from utils.search_tools import (
-        get_search_context, is_image_gen_request, is_image_edit_request
+        get_search_context, deep_search_context, is_image_gen_request, is_image_edit_request
     )
     from agents.grok_personality import build_grok_system_prompt
     from agents.engineer_agent import build_engineer_prompt
 
-    # ── Mode selection: Engineer > Grok > Normal ───────────────────────────────
-    used_live_x = False
+    _THINK_ADDON = (
+        "\n\nTHINK MODE ACTIVE: Before answering, reason through the problem thoroughly "
+        "inside <think>...</think> tags. Be explicit and detailed in your reasoning. "
+        "After </think>, give your final clean answer without repeating the reasoning."
+    )
 
+    # ── Search context (DeepSearch or standard) ───────────────────────────────
+    used_live_x = False
+    deep_search_rounds = 0
+
+    async def _get_ctx():
+        if req.deep_search:
+            return await deep_search_context(req.message)
+        elif not req.is_voice:
+            return await get_search_context(req.message)
+        return "", {}
+
+    # ── Mode selection: Engineer > Grok > Normal ───────────────────────────────
     if req.engineer_mode:
-        # Engineer Mode: always use deep model, no web search (code context only)
         memories_raw = await retrieve(req.message)
         search_ctx = ""
-        system_prompt = build_engineer_prompt()   # memory injected via messages array below
-        use_deep = True                            # always use deep model for code quality
+        system_prompt = build_engineer_prompt()
+        use_deep = True
 
     elif req.grok_mode:
         memories_task = asyncio.create_task(retrieve(req.message))
-        search_task = asyncio.create_task(get_search_context(req.message))
+        search_task = asyncio.create_task(_get_ctx())
         memories_raw, (search_ctx, search_meta) = await asyncio.gather(memories_task, search_task)
         used_live_x = search_meta.get("used_live_x", False)
+        deep_search_rounds = search_meta.get("deep_search_rounds", 0)
         system_prompt = build_grok_system_prompt(context=search_ctx)
 
     else:
         memories_raw = await retrieve(req.message)
-        if not req.is_voice:
-            search_ctx, search_meta = await get_search_context(req.message)
-            used_live_x = search_meta.get("used_live_x", False)
-        else:
-            search_ctx = ""
+        search_ctx, search_meta = await _get_ctx()
+        used_live_x = search_meta.get("used_live_x", False)
+        deep_search_rounds = search_meta.get("deep_search_rounds", 0)
         system_prompt = _get_agent_system_prompt(active_agent, is_voice=req.is_voice)
+
+    # Append Think Mode instructions to whichever system prompt was selected
+    if req.think_mode and not req.is_voice:
+        system_prompt += _THINK_ADDON
 
     memory_ctx = "\n".join(m["content"] for m in memories_raw) if memories_raw else ""
 
@@ -368,11 +387,70 @@ async def chat_stream(
 
     async def event_generator():
         full_response: list[str] = []
+        full_thinking: list[str] = []
         t0 = time.monotonic()
         try:
-            async for token in stream_tokens(messages, use_deep=use_deep):
-                full_response.append(token)
-                yield {"data": json.dumps({"token": token})}
+            if req.think_mode:
+                # ── Think Mode: parse <think>…</think> tags from stream ────────
+                buf = ""
+                in_think = False
+                OPEN, CLOSE = "<think>", "</think>"
+
+                async for raw_tok in stream_tokens(messages, use_deep=use_deep):
+                    buf += raw_tok
+                    # Keep draining buf until we can't make progress
+                    while True:
+                        if in_think:
+                            ci = buf.find(CLOSE)
+                            if ci >= 0:
+                                chunk = buf[:ci]
+                                if chunk:
+                                    full_thinking.append(chunk)
+                                    yield {"data": json.dumps({"thinking_token": chunk})}
+                                yield {"data": json.dumps({"thinking_done": True})}
+                                buf = buf[ci + len(CLOSE):]
+                                in_think = False
+                            else:
+                                safe = max(0, len(buf) - len(CLOSE))
+                                if safe:
+                                    chunk = buf[:safe]
+                                    full_thinking.append(chunk)
+                                    yield {"data": json.dumps({"thinking_token": chunk})}
+                                    buf = buf[safe:]
+                                break
+                        else:
+                            oi = buf.find(OPEN)
+                            if oi >= 0:
+                                pre = buf[:oi]
+                                if pre:
+                                    full_response.append(pre)
+                                    yield {"data": json.dumps({"token": pre})}
+                                yield {"data": json.dumps({"thinking_start": True})}
+                                buf = buf[oi + len(OPEN):]
+                                in_think = True
+                            else:
+                                safe = max(0, len(buf) - len(OPEN))
+                                if safe:
+                                    chunk = buf[:safe]
+                                    full_response.append(chunk)
+                                    yield {"data": json.dumps({"token": chunk})}
+                                    buf = buf[safe:]
+                                break
+
+                # Flush remaining buffer
+                if buf:
+                    if in_think:
+                        full_thinking.append(buf)
+                        yield {"data": json.dumps({"thinking_token": buf})}
+                        yield {"data": json.dumps({"thinking_done": True})}
+                    else:
+                        full_response.append(buf)
+                        yield {"data": json.dumps({"token": buf})}
+            else:
+                # ── Normal streaming ───────────────────────────────────────────
+                async for token in stream_tokens(messages, use_deep=use_deep):
+                    full_response.append(token)
+                    yield {"data": json.dumps({"token": token})}
 
             latency = int((time.monotonic() - t0) * 1000)
             yield {
@@ -383,6 +461,8 @@ async def chat_stream(
                     "session_id": req.session_id,
                     "used_live_x": used_live_x,
                     "is_engineer": req.engineer_mode,
+                    "is_think": req.think_mode,
+                    "deep_search_rounds": deep_search_rounds,
                 })
             }
 
@@ -539,6 +619,131 @@ async def chat_vision(
             yield {"data": json.dumps({"error": f"Vision error: {str(e)[:100]}"})}
 
     return EventSourceResponse(vision_generator())
+
+
+# ── Document analysis endpoint (PDF / DOCX / TXT) ────────────────────────────
+
+def _extract_document_text(content: bytes, filename: str, content_type: str) -> str:
+    """Extract plain text from PDF, DOCX, or TXT file bytes."""
+    fname = (filename or "").lower()
+    ctype = (content_type or "").lower()
+
+    # PDF
+    if fname.endswith(".pdf") or "pdf" in ctype:
+        try:
+            import io
+            from pypdf import PdfReader
+            reader = PdfReader(io.BytesIO(content))
+            pages = [page.extract_text() or "" for page in reader.pages]
+            return "\n\n".join(p for p in pages if p.strip())
+        except ImportError:
+            return "[pypdf not installed — cannot extract PDF text]"
+        except Exception as e:
+            return f"[PDF extraction error: {e}]"
+
+    # DOCX
+    if fname.endswith(".docx") or "wordprocessingml" in ctype or "officedocument" in ctype:
+        try:
+            import io
+            from docx import Document
+            doc = Document(io.BytesIO(content))
+            return "\n".join(para.text for para in doc.paragraphs if para.text.strip())
+        except ImportError:
+            return "[python-docx not installed — cannot extract DOCX text]"
+        except Exception as e:
+            return f"[DOCX extraction error: {e}]"
+
+    # Plain text / markdown / CSV / anything else
+    try:
+        return content.decode("utf-8", errors="replace")
+    except Exception:
+        return "[Could not decode document as text]"
+
+
+@router.post("/document")
+async def chat_document(
+    message: str = None,
+    session_id: str = None,
+    _user: str = Depends(require_auth),
+):
+    """
+    Placeholder — document upload uses multipart; real handler below.
+    This stub keeps OpenAPI docs clean.
+    """
+    pass  # overridden by the real handler registered below
+
+
+# Register the real multipart handler manually to avoid FastAPI's form conflicts
+from fastapi import Form, File, UploadFile
+
+
+@router.post("/document/upload")
+async def chat_document_upload(
+    message: str = Form(...),
+    session_id: str = Form(default_factory=lambda: str(uuid.uuid4())),
+    file: UploadFile = File(...),
+    _user: str = Depends(require_auth),
+):
+    """
+    Analyse an uploaded document (PDF, DOCX, TXT) alongside a user message.
+
+    Extracts text from the file, injects it as context, and streams the LLM
+    response token-by-token via SSE.  Capped at 12 000 chars to fit context.
+
+    Returns SSE stream: {"token": "..."} … {"done": true, "agent": "document"}
+    """
+    conv_id = await ensure_conversation(session_id)
+
+    raw = await file.read()
+    doc_text = _extract_document_text(raw, file.filename or "", file.content_type or "")
+
+    # Truncate to fit context window
+    LIMIT = 12_000
+    if len(doc_text) > LIMIT:
+        doc_text = doc_text[:LIMIT] + f"\n\n[… document truncated at {LIMIT} chars …]"
+
+    system = _get_agent_system_prompt("conversational")
+    doc_system = (
+        f"The user has uploaded a document: **{file.filename}**\n\n"
+        f"Document contents:\n\n{doc_text}\n\n"
+        "Answer the user's question using the document as your primary source. "
+        "If the document does not contain the answer, say so clearly."
+    )
+
+    messages = [
+        {"role": "system", "content": system},
+        {"role": "system", "content": doc_system},
+        {"role": "user", "content": message},
+    ]
+
+    async def doc_generator():
+        full_response: list[str] = []
+        t0 = time.monotonic()
+        try:
+            async for token in stream_tokens(messages, use_deep=True):
+                full_response.append(token)
+                yield {"data": json.dumps({"token": token})}
+
+            latency = int((time.monotonic() - t0) * 1000)
+            yield {"data": json.dumps({
+                "done": True,
+                "agent": "document",
+                "latency_ms": latency,
+                "session_id": session_id,
+                "filename": file.filename,
+            })}
+
+            from memory.store import save_message
+            asyncio.create_task(save_message(conv_id, "user", f"[Document: {file.filename}] {message}"))
+            asyncio.create_task(save_message(
+                conv_id, "assistant", "".join(full_response),
+                model_used="qwen-deep",
+                latency_ms=latency,
+            ))
+        except Exception as e:
+            yield {"data": json.dumps({"error": f"Document analysis error: {str(e)[:100]}"})}
+
+    return EventSourceResponse(doc_generator())
 
 
 def _get_agent_system_prompt(agent: str, is_voice: bool = False) -> str:

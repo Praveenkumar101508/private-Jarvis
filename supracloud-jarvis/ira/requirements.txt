@@ -61,3 +61,7 @@ requests==2.32.3                # Sync HTTP (used by security_alerts.py)
 
 # ── Real-Time Search (Grok-style web + X search) ──────────────────────────────
 duckduckgo-search>=6.0.0        # DuckDuckGo web search (no API key required)
+
+# ── Document Analysis (Grok-style PDF/DOCX/TXT upload) ───────────────────────
+pypdf>=4.0.0                    # PDF text extraction for /chat/document
+python-docx>=1.0.0              # Word document text extraction

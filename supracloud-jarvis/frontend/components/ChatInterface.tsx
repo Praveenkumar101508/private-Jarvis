@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback } from "react";
-import { Send, Square, Copy, Check, Loader2, Zap, ChevronDown, ChevronUp, Paperclip, X, AlertCircle, DollarSign, Brain, Code2 } from "lucide-react";
+import { Send, Square, Copy, Check, Loader2, Zap, ChevronDown, ChevronUp, Paperclip, X, AlertCircle, DollarSign, Brain, Code2, FileText, Search, Lightbulb } from "lucide-react";
 import clsx from "clsx";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -18,9 +18,11 @@ interface AgentBubble {
 
 interface AttachedFile {
   name: string;
-  dataUrl: string;
+  dataUrl: string;      // data-URL for preview (images) or empty string for docs
   base64: string;
   mimeType: string;
+  fileType: "image" | "document";
+  rawBytes?: Uint8Array; // kept for document upload
 }
 
 interface Message {
@@ -38,6 +40,11 @@ interface Message {
   generatedImagePrompt?: string;
   usedLiveX?: boolean;
   isEngineer?: boolean;
+  isThink?: boolean;
+  thinkingContent?: string;
+  thinkingOpen?: boolean;
+  deepSearchRounds?: number;
+  attachedFileName?: string;
 }
 
 interface Props {
@@ -66,6 +73,7 @@ const AGENT_LABELS: Record<string, string> = {
   image_gen:      "Image Generation",
   image_edit:     "Image Editing",
   engineer:       "Engineer Mode",
+  document:       "Document Analysis",
 };
 
 function estimateExpertTokens(text: string): number {
@@ -123,6 +131,8 @@ export default function ChatInterface({ sessionId, token, mode = "assistant" }: 
   const [expertMode, setExpertMode] = useState(false);
   const [grokMode, setGrokMode] = useState(false);
   const [engineerMode, setEngineerMode] = useState(false);
+  const [thinkMode, setThinkMode] = useState(false);
+  const [deepSearch, setDeepSearch] = useState(false);
   const [costGuard, setCostGuard] = useState(true);
   const [attachedFile, setAttachedFile] = useState<AttachedFile | null>(null);
   const [showCostConfirm, setShowCostConfirm] = useState(false);
@@ -165,14 +175,32 @@ export default function ChatInterface({ sessionId, token, mode = "assistant" }: 
   const handleFileAttach = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    const isImage = file.type.startsWith("image/");
     const reader = new FileReader();
-    reader.onload = (ev) => {
-      const dataUrl = ev.target?.result as string;
-      const base64 = dataUrl.split(",")[1] ?? "";
-      setAttachedFile({ name: file.name, dataUrl, base64, mimeType: file.type || "image/jpeg" });
-    };
-    reader.readAsDataURL(file);
-    e.target.value = "";  // allow re-selecting same file
+    if (isImage) {
+      reader.onload = (ev) => {
+        const dataUrl = ev.target?.result as string;
+        const base64 = dataUrl.split(",")[1] ?? "";
+        setAttachedFile({ name: file.name, dataUrl, base64, mimeType: file.type, fileType: "image" });
+      };
+      reader.readAsDataURL(file);
+    } else {
+      // Document — read as ArrayBuffer, store raw bytes for FormData upload
+      reader.onload = (ev) => {
+        const buf = ev.target?.result as ArrayBuffer;
+        const bytes = new Uint8Array(buf);
+        setAttachedFile({
+          name: file.name,
+          dataUrl: "",
+          base64: "",
+          mimeType: file.type || "application/octet-stream",
+          fileType: "document",
+          rawBytes: bytes,
+        });
+      };
+      reader.readAsArrayBuffer(file);
+    }
+    e.target.value = "";
   }, []);
 
   const sendVisionMessage = useCallback(
@@ -258,6 +286,92 @@ export default function ChatInterface({ sessionId, token, mode = "assistant" }: 
                 ? { ...m, content: "Vision error — please try again.", isStreaming: false }
                 : m
             )
+          );
+        }
+      } finally {
+        setIsStreaming(false);
+        setStreamingId(null);
+        abortRef.current = null;
+        textareaRef.current?.focus();
+      }
+    },
+    [sessionId, token]
+  );
+
+  const sendDocumentMessage = useCallback(
+    async (content: string, file: AttachedFile) => {
+      const userMsgId = Date.now().toString();
+      const assistantMsgId = (Date.now() + 1).toString();
+
+      setMessages((prev) => [
+        ...prev,
+        { id: userMsgId, role: "user", content, attachedFileName: file.name },
+        { id: assistantMsgId, role: "assistant", content: "", isStreaming: true },
+      ]);
+      setInput("");
+      setIsStreaming(true);
+      setStreamingId(assistantMsgId);
+
+      const controller = new AbortController();
+      abortRef.current = controller;
+
+      try {
+        const form = new FormData();
+        form.append("message", content);
+        form.append("session_id", sessionId);
+        form.append("file", new Blob([file.rawBytes!], { type: file.mimeType }), file.name);
+
+        const res = await fetch("/api/v1/chat/document/upload", {
+          method: "POST",
+          headers: { Authorization: `Bearer ${token}` },
+          body: form,
+          signal: controller.signal,
+        });
+
+        if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
+
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buf = "";
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buf += decoder.decode(value, { stream: true });
+          const lines = buf.split("\n");
+          buf = lines.pop() ?? "";
+          for (const line of lines) {
+            if (!line.startsWith("data:")) continue;
+            const raw = line.slice(5).trim();
+            if (!raw) continue;
+            try {
+              const data = JSON.parse(raw);
+              if (data.token !== undefined) {
+                setMessages((prev) =>
+                  prev.map((m) => m.id === assistantMsgId ? { ...m, content: m.content + data.token } : m)
+                );
+              } else if (data.done) {
+                setMessages((prev) =>
+                  prev.map((m) => m.id === assistantMsgId
+                    ? { ...m, isStreaming: false, agent: "document", latencyMs: data.latency_ms }
+                    : m)
+                );
+              } else if (data.error) {
+                setMessages((prev) =>
+                  prev.map((m) => m.id === assistantMsgId
+                    ? { ...m, content: `⚠ ${data.error}`, isStreaming: false }
+                    : m)
+                );
+              }
+            } catch { /* ignore */ }
+          }
+        }
+      } catch (err: any) {
+        if (err.name !== "AbortError") {
+          setMessages((prev) =>
+            prev.map((m) => m.id === assistantMsgId
+              ? { ...m, content: "Document analysis error — please try again.", isStreaming: false }
+              : m)
           );
         }
       } finally {
@@ -400,16 +514,22 @@ export default function ChatInterface({ sessionId, token, mode = "assistant" }: 
         return;
       }
 
+      // Document upload path (PDF / DOCX / TXT)
+      if (attachedFile && attachedFile.fileType === "document") {
+        await sendDocumentMessage(content, attachedFile);
+        setAttachedFile(null);
+        return;
+      }
+
       // Image edit path: image attached + edit instruction
-      if (attachedFile && IMAGE_EDIT_RE.test(content)) {
-        // Route to vision endpoint which backend detects as image edit
+      if (attachedFile && attachedFile.fileType === "image" && IMAGE_EDIT_RE.test(content)) {
         await sendVisionMessage(content, attachedFile);
         setAttachedFile(null);
         return;
       }
 
-      // Vision path: image attached in normal mode (analysis, not editing)
-      if (attachedFile) {
+      // Vision path: image attached in normal mode
+      if (attachedFile && attachedFile.fileType === "image") {
         await sendVisionMessage(content, attachedFile);
         setAttachedFile(null);
         return;
@@ -444,6 +564,8 @@ export default function ChatInterface({ sessionId, token, mode = "assistant" }: 
             mode: mode === "bodyguard" ? "assistant" : mode,
             grok_mode: grokMode,
             engineer_mode: engineerMode,
+            think_mode: thinkMode,
+            deep_search: deepSearch,
           }),
           signal: controller.signal,
         });
@@ -468,16 +590,29 @@ export default function ChatInterface({ sessionId, token, mode = "assistant" }: 
             if (!raw) continue;
             try {
               const data = JSON.parse(raw);
-              if (data.image_generated) {
-                // Image generation result — store base64 on the message
+              if (data.thinking_start) {
+                // Think Mode: reasoning panel is starting
+                setMessages((prev) =>
+                  prev.map((m) => m.id === assistantMsgId ? { ...m, thinkingContent: "" } : m)
+                );
+              } else if (data.thinking_token !== undefined) {
                 setMessages((prev) =>
                   prev.map((m) =>
                     m.id === assistantMsgId
-                      ? {
-                          ...m,
-                          generatedImageB64: data.image_b64,
-                          generatedImagePrompt: data.prompt,
-                        }
+                      ? { ...m, thinkingContent: (m.thinkingContent ?? "") + data.thinking_token }
+                      : m
+                  )
+                );
+              } else if (data.thinking_done) {
+                // Reasoning complete — keep thinkingOpen: false (collapsed by default)
+                setMessages((prev) =>
+                  prev.map((m) => m.id === assistantMsgId ? { ...m, thinkingOpen: false } : m)
+                );
+              } else if (data.image_generated) {
+                setMessages((prev) =>
+                  prev.map((m) =>
+                    m.id === assistantMsgId
+                      ? { ...m, generatedImageB64: data.image_b64, generatedImagePrompt: data.prompt }
                       : m
                   )
                 );
@@ -500,6 +635,8 @@ export default function ChatInterface({ sessionId, token, mode = "assistant" }: 
                           latencyMs: data.latency_ms,
                           usedLiveX: data.used_live_x === true,
                           isEngineer: data.is_engineer === true,
+                          isThink: data.is_think === true,
+                          deepSearchRounds: data.deep_search_rounds ?? 0,
                         }
                       : m
                   )
@@ -539,7 +676,7 @@ export default function ChatInterface({ sessionId, token, mode = "assistant" }: 
         textareaRef.current?.focus();
       }
     },
-    [input, isStreaming, sessionId, token, mode, expertMode, grokMode, engineerMode, costGuard, attachedFile, sendExpertMessage, sendVisionMessage]
+    [input, isStreaming, sessionId, token, mode, expertMode, grokMode, engineerMode, thinkMode, deepSearch, costGuard, attachedFile, sendExpertMessage, sendVisionMessage, sendDocumentMessage]
   );
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -684,6 +821,39 @@ export default function ChatInterface({ sessionId, token, mode = "assistant" }: 
                   >
                     {msg.role === "assistant" ? (
                       <div className="prose prose-invert prose-sm max-w-none prose-p:leading-relaxed prose-p:my-1 prose-headings:text-white prose-headings:font-semibold prose-code:text-saffron-300 prose-code:bg-neutral-900 prose-code:px-1 prose-code:rounded prose-pre:bg-neutral-900 prose-pre:border prose-pre:border-neutral-700">
+                        {/* Think Mode reasoning panel */}
+                        {msg.thinkingContent !== undefined && (
+                          <div className="mb-3 rounded-xl border border-amber-500/20 bg-amber-500/5 overflow-hidden">
+                            <button
+                              onClick={() => setMessages((prev) =>
+                                prev.map((m) => m.id === msg.id ? { ...m, thinkingOpen: !m.thinkingOpen } : m)
+                              )}
+                              className="w-full flex items-center justify-between px-3 py-2 text-[11px] text-amber-400 hover:bg-amber-500/10 transition-colors"
+                            >
+                              <span className="flex items-center gap-1.5">
+                                <Lightbulb className="w-3 h-3" />
+                                Reasoning
+                                {msg.isStreaming && !msg.thinkingContent && (
+                                  <Loader2 className="w-3 h-3 animate-spin" />
+                                )}
+                              </span>
+                              {msg.thinkingOpen
+                                ? <ChevronUp className="w-3 h-3" />
+                                : <ChevronDown className="w-3 h-3" />
+                              }
+                            </button>
+                            {msg.thinkingOpen && (
+                              <div className="px-3 pb-3">
+                                <p className="text-[11px] text-amber-200/70 leading-relaxed whitespace-pre-wrap">
+                                  {msg.thinkingContent}
+                                  {msg.isStreaming && msg.thinkingContent !== undefined && (
+                                    <span className="inline-block w-1 h-3 bg-amber-400 ml-0.5 animate-cursor-blink" />
+                                  )}
+                                </p>
+                              </div>
+                            )}
+                          </div>
+                        )}
                         {/* Generated image display */}
                         {msg.generatedImageB64 && (
                           <div className="mb-3">
@@ -714,6 +884,12 @@ export default function ChatInterface({ sessionId, token, mode = "assistant" }: 
                             alt="attachment"
                             className="mb-2 max-w-[240px] rounded-xl border border-neutral-600"
                           />
+                        )}
+                        {msg.attachedFileName && (
+                          <div className="mb-1.5 flex items-center gap-1.5 text-[11px] text-white/70">
+                            <FileText className="w-3 h-3 flex-shrink-0" />
+                            <span className="truncate">{msg.attachedFileName}</span>
+                          </div>
                         )}
                         <p className="whitespace-pre-wrap">{msg.content}</p>
                       </>
@@ -773,6 +949,18 @@ export default function ChatInterface({ sessionId, token, mode = "assistant" }: 
                         Engineer Mode
                       </span>
                     )}
+                    {msg.isThink && !msg.isStreaming && (
+                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-amber-500/15 border border-amber-500/30 text-amber-400">
+                        <Lightbulb className="w-2.5 h-2.5" />
+                        Think Mode
+                      </span>
+                    )}
+                    {(msg.deepSearchRounds ?? 0) > 1 && !msg.isStreaming && (
+                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-violet-500/15 border border-violet-500/30 text-violet-400">
+                        <Search className="w-2.5 h-2.5" />
+                        DeepSearch ×{msg.deepSearchRounds}
+                      </span>
+                    )}
                     {msg.usedLiveX && !msg.isStreaming && (
                       <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-sky-500/15 border border-sky-500/30 text-sky-400">
                         𝕏 Live from X
@@ -797,16 +985,23 @@ export default function ChatInterface({ sessionId, token, mode = "assistant" }: 
           <input
             ref={fileInputRef}
             type="file"
-            accept="image/jpeg,image/png,image/gif,image/webp"
+            accept="image/jpeg,image/png,image/gif,image/webp,application/pdf,.pdf,.docx,.doc,.txt,.md,.csv"
             className="hidden"
             onChange={handleFileAttach}
           />
 
-          {/* Attached image preview */}
+          {/* Attached file preview */}
           {attachedFile && (
             <div className="mb-2 flex items-center gap-2 px-3 py-1.5 rounded-lg bg-violet-500/10 border border-violet-500/20">
-              <img src={attachedFile.dataUrl} alt="preview" className="w-8 h-8 rounded object-cover flex-shrink-0" />
+              {attachedFile.fileType === "image" ? (
+                <img src={attachedFile.dataUrl} alt="preview" className="w-8 h-8 rounded object-cover flex-shrink-0" />
+              ) : (
+                <FileText className="w-5 h-5 text-violet-400 flex-shrink-0" />
+              )}
               <span className="text-violet-300 text-xs flex-1 truncate">{attachedFile.name}</span>
+              <span className="text-violet-500 text-[10px] flex-shrink-0">
+                {attachedFile.fileType === "document" ? "PDF/Doc" : "Image"}
+              </span>
               <button
                 onClick={() => setAttachedFile(null)}
                 className="text-neutral-500 hover:text-neutral-300 transition-colors flex-shrink-0"
@@ -940,6 +1135,32 @@ export default function ChatInterface({ sessionId, token, mode = "assistant" }: 
               >
                 <Code2 className="w-3 h-3" />
                 Engineer Mode
+              </button>
+              <button
+                onClick={() => setThinkMode((v) => !v)}
+                title="Think Mode: shows step-by-step reasoning in a collapsible panel before the answer"
+                className={clsx(
+                  "flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] border transition-all",
+                  thinkMode
+                    ? "bg-amber-500/20 border-amber-500/50 text-amber-300"
+                    : "border-neutral-700 text-neutral-600 hover:text-neutral-400 hover:border-neutral-600"
+                )}
+              >
+                <Lightbulb className="w-3 h-3" />
+                Think Mode
+              </button>
+              <button
+                onClick={() => setDeepSearch((v) => !v)}
+                title="DeepSearch: 3-round iterative web search for richer, more accurate answers"
+                className={clsx(
+                  "flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] border transition-all",
+                  deepSearch
+                    ? "bg-violet-500/20 border-violet-500/50 text-violet-300"
+                    : "border-neutral-700 text-neutral-600 hover:text-neutral-400 hover:border-neutral-600"
+                )}
+              >
+                <Search className="w-3 h-3" />
+                DeepSearch
               </button>
             </div>
           </div>

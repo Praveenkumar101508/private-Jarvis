@@ -143,6 +143,77 @@ def format_x_results(results: list[dict]) -> str:
 
 # ── Combined search context (used by chat.py) ─────────────────────────────────
 
+def _extract_follow_up_queries(original: str, context: str) -> list[str]:
+    """
+    Derive 1-2 follow-up search queries from the initial results.
+    Uses simple keyword extraction rather than a secondary LLM call
+    to keep DeepSearch latency under 5 seconds.
+    """
+    follow_ups: list[str] = []
+    # Pull quoted entities and capitalised proper nouns from results
+    import re as _re
+    # Quoted phrases → direct follow-up
+    quoted = _re.findall(r'"([^"]{4,40})"', context)
+    if quoted:
+        follow_ups.append(f"{quoted[0]} {original.split()[0] if original.split() else ''} latest news".strip())
+    # Named entities (2+ capitalised words in a row)
+    entities = _re.findall(r'\b([A-Z][a-z]+ (?:[A-Z][a-z]+ ?)+)', context)
+    seen = set(follow_ups)
+    for ent in entities[:3]:
+        candidate = f"{ent.strip()} explained"
+        if candidate not in seen and len(follow_ups) < 2:
+            follow_ups.append(candidate)
+            seen.add(candidate)
+    # Fallback: append "explanation" and "latest" variants
+    if not follow_ups:
+        words = original.split()[:3]
+        follow_ups.append(" ".join(words) + " explained")
+    return follow_ups[:2]
+
+
+async def deep_search_context(query: str) -> tuple[str, dict]:
+    """
+    Multi-step DeepSearch: initial query → extract themes → 2 follow-up searches.
+
+    Returns (rich_context_str, meta) — same shape as get_search_context().
+    Runs up to 3 rounds of search and synthesises results into one block.
+    Total extra latency vs single search: ~2–4 s (parallel where possible).
+    """
+    meta: dict = {"used_live_x": False, "x_count": 0, "web_count": 0, "deep_search_rounds": 1}
+    parts: list[str] = []
+
+    # Round 1 — initial search (web + X in parallel)
+    ctx1, meta1 = await get_search_context(query)
+    if meta1.get("used_live_x"):
+        meta["used_live_x"] = True
+    meta["x_count"] += meta1.get("x_count", 0)
+    meta["web_count"] += meta1.get("web_count", 0)
+    if ctx1:
+        parts.append(f"**Round 1 — Initial search:**\n{ctx1}")
+
+    if not ctx1:
+        # Nothing found — return early rather than making empty follow-up calls
+        return "", meta
+
+    # Extract follow-up queries from Round 1 results
+    follow_ups = _extract_follow_up_queries(query, ctx1)
+
+    # Rounds 2 & 3 — follow-up searches (parallel)
+    if follow_ups:
+        tasks = [asyncio.create_task(web_search(q, max_results=4)) for q in follow_ups]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        for i, (fq, res) in enumerate(zip(follow_ups, results), 2):
+            if isinstance(res, Exception) or not res:
+                continue
+            meta["web_count"] += len(res)
+            meta["deep_search_rounds"] += 1
+            formatted = format_web_results(res)  # type: ignore[arg-type]
+            if formatted:
+                parts.append(f"**Round {i} — {fq[:60]}:**\n{formatted}")
+
+    return "\n\n---\n\n".join(parts), meta
+
+
 async def get_search_context(query: str) -> tuple[str, dict]:
     """
     Auto-detect search needs and return (context_str, meta).
