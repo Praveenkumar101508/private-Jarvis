@@ -68,6 +68,12 @@ def _is_owner(username: str) -> bool:
     return username == cfg.ira_admin_username
 
 
+def _is_voice_service(username: str) -> bool:
+    """Return True only if the request comes from the trusted voice service."""
+    cfg = get_settings()
+    return username == cfg.ira_voice_service_username
+
+
 def _stable_hash(text: str) -> str:
     """SHA-256-based stable hash for cache keys (not Python's randomised hash)."""
     return hashlib.sha256(text.encode()).hexdigest()[:16]
@@ -86,7 +92,8 @@ async def chat(
         return ChatResponse(**cached)
 
     conv_id = await ensure_conversation(req.session_id)
-    owner = _is_owner(_user) or req.is_voice_owner
+    # Only trust is_voice_owner when the request genuinely originates from the voice service
+    owner = _is_owner(_user) or (_is_voice_service(_user) and req.is_voice_owner)
 
     state = await run_graph(
         session_id=req.session_id,
@@ -124,7 +131,8 @@ async def chat_stream(
     Client receives: data: {"token": "..."} events, then data: {"done": true, ...}.
     """
     conv_id = await ensure_conversation(req.session_id)
-    owner = _is_owner(_user) or req.is_voice_owner
+    # Only trust is_voice_owner when the request genuinely originates from the voice service
+    owner = _is_owner(_user) or (_is_voice_service(_user) and req.is_voice_owner)
 
     from agents.state import IRAState
     from agents.supervisor import classify, is_restricted_domain
@@ -244,6 +252,37 @@ async def chat_stream(
             yield {"data": json.dumps({"error": f"Stream interrupted: {str(e)[:100]}"})}
 
     return EventSourceResponse(event_generator())
+
+
+@router.post("/expert")
+async def chat_expert(
+    req: ChatRequest,
+    _user: str = Depends(require_auth),
+):
+    """
+    Grok-style Expert Mode: 5 specialist agents run in true parallel, debate,
+    and stream their individual thoughts + supervisor synthesis via SSE.
+
+    Events: {"agent":"researcher","label":"Researcher","emoji":"🔬","chunk":"...","done":false}
+            {"agent":"supervisor","done":true,"latency_ms":N}
+    """
+    from agents.expert_mode import stream_expert_mode
+    from memory.store import retrieve
+
+    owner = _is_owner(_user) or (_is_voice_service(_user) and req.is_voice_owner)
+    memories = await retrieve(req.message)
+    memory_ctx = "\n".join(m["content"] for m in memories) if memories else ""
+
+    async def expert_generator():
+        import json
+        async for event in stream_expert_mode(
+            query=req.message,
+            memory_context=memory_ctx,
+            is_owner=owner,
+        ):
+            yield {"data": json.dumps(event)}
+
+    return EventSourceResponse(expert_generator())
 
 
 def _get_agent_system_prompt(agent: str, is_voice: bool = False) -> str:

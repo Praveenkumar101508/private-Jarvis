@@ -43,7 +43,7 @@ async def sync_calcom_bookings() -> int:
             headers={"Authorization": f"Bearer {cfg.calcom_api_key}"},
             timeout=15,
         ) as client:
-            resp = await client.get("/v1/bookings", params={"status": "upcoming"})
+            resp = await client.get("/v2/bookings", params={"status": "upcoming"})
             resp.raise_for_status()
             data = resp.json()
     except Exception as e:
@@ -109,7 +109,7 @@ async def create_calcom_booking(
             headers={"Authorization": f"Bearer {cfg.calcom_api_key}"},
             timeout=15,
         ) as client:
-            resp = await client.post("/v1/bookings", json={
+            resp = await client.post("/v2/bookings", json={
                 "eventTypeId": event_type_id,
                 "start": start,
                 "responses": {"name": name, "email": email, "notes": notes},

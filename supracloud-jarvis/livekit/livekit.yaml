@@ -28,6 +28,8 @@ keys:
   # Format: <api_key>: <api_secret>
   # These values are populated from the environment at container start.
   # Set LIVEKIT_API_KEY and LIVEKIT_API_SECRET in your .env file.
+  # Fallback dev key — override with real credentials via LIVEKIT_API_KEY / LIVEKIT_API_SECRET in .env
+  devkey: devsecret
 
 # ── Room defaults ─────────────────────────────────────────────────────────────
 room:

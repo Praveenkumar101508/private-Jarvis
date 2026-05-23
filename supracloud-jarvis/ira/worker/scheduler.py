@@ -28,6 +28,7 @@ from worker.briefing import generate_briefing
 from worker.security_monitor import run_security_scan
 from worker.business_monitor import run_business_scan
 from worker.reminders import check_due_reminders
+from worker.self_healing import run_self_healing_check, run_self_reflection
 from tasks.calendar import sync_calcom_bookings
 
 logger = logging.getLogger("ira.scheduler")
@@ -139,6 +140,26 @@ def build_scheduler() -> AsyncIOScheduler:
         replace_existing=True,
     )
 
+    # Self-Healing Agent — every 60 seconds, detects and fixes system issues
+    scheduler.add_job(
+        _self_healing_check,
+        trigger="interval",
+        seconds=60,
+        id="self_healing",
+        name="IRA Self-Healing Agent",
+        replace_existing=True,
+    )
+
+    # Self-Learning Reflection — hourly, improves IRA's own routing and prompts
+    scheduler.add_job(
+        _self_reflection,
+        trigger="interval",
+        hours=1,
+        id="self_reflection",
+        name="IRA Self-Learning Reflection",
+        replace_existing=True,
+    )
+
     return scheduler
 
 
@@ -169,6 +190,20 @@ async def _sync_calendar() -> None:
         await sync_calcom_bookings()
     except Exception as e:
         logger.error(f"Calendar sync failed: {e}", exc_info=True)
+
+
+async def _self_healing_check() -> None:
+    try:
+        await run_self_healing_check()
+    except Exception as e:
+        logger.error(f"Self-healing check failed: {e}", exc_info=True)
+
+
+async def _self_reflection() -> None:
+    try:
+        await run_self_reflection()
+    except Exception as e:
+        logger.error(f"Self-reflection failed: {e}", exc_info=True)
 
 
 def get_scheduler() -> AsyncIOScheduler:

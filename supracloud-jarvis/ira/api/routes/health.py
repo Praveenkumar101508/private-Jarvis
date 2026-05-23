@@ -51,7 +51,7 @@ async def _check_vllm(url: str, api_key: str) -> ServiceStatus:
     t = time.monotonic()
     try:
         async with httpx.AsyncClient(timeout=5) as client:
-            r = await client.get(f"{url.rstrip('/v1')}/health",
+            r = await client.get(f"{url.removesuffix('/v1')}/health",
                                  headers={"Authorization": f"Bearer {api_key}"})
         status = "ok" if r.status_code == 200 else "degraded"
         return ServiceStatus(status=status, latency_ms=int((time.monotonic() - t) * 1000))

@@ -47,6 +47,12 @@ COPY --chown=jarvis:jarvis . /app
 RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('BAAI/bge-large-en-v1.5')" \
     || echo "Model pre-download skipped — will download on first run"
 
+# Install Playwright Chromium for the digital agent (browser_tools.py)
+# Must run as root — switch back to jarvis afterward
+USER root
+RUN pip install --no-cache-dir playwright && playwright install chromium --with-deps
+USER jarvis
+
 EXPOSE 8000
 
 HEALTHCHECK --interval=30s --timeout=10s --retries=5 --start-period=30s \

@@ -1,12 +1,20 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback } from "react";
-import { Send, Square, Copy, Check, Loader2 } from "lucide-react";
+import { Send, Square, Copy, Check, Loader2, Zap, ChevronDown, ChevronUp } from "lucide-react";
 import clsx from "clsx";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
 import type { AppMode } from "./Sidebar";
+
+interface AgentBubble {
+  name: string;
+  label: string;
+  emoji: string;
+  content: string;
+  done: boolean;
+}
 
 interface Message {
   id: string;
@@ -15,6 +23,9 @@ interface Message {
   agent?: string;
   latencyMs?: number;
   isStreaming?: boolean;
+  isExpert?: boolean;
+  expertAgents?: AgentBubble[];
+  expertPanelOpen?: boolean;
 }
 
 interface Props {
@@ -85,6 +96,7 @@ export default function ChatInterface({ sessionId, token, mode = "assistant" }: 
   const [input, setInput] = useState("");
   const [isStreaming, setIsStreaming] = useState(false);
   const [streamingId, setStreamingId] = useState<string | null>(null);
+  const [expertMode, setExpertMode] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -112,10 +124,126 @@ export default function ChatInterface({ sessionId, token, mode = "assistant" }: 
     );
   }, []);
 
+  const toggleExpertPanel = useCallback((msgId: string) => {
+    setMessages((prev) =>
+      prev.map((m) => m.id === msgId ? { ...m, expertPanelOpen: !m.expertPanelOpen } : m)
+    );
+  }, []);
+
+  const sendExpertMessage = useCallback(
+    async (content: string) => {
+      const userMsgId = Date.now().toString();
+      const assistantMsgId = (Date.now() + 1).toString();
+
+      const initialAgents: AgentBubble[] = [
+        { name: "researcher", label: "Researcher", emoji: "🔬", content: "", done: false },
+        { name: "critic",     label: "Critic",     emoji: "🛡️", content: "", done: false },
+        { name: "executor",   label: "Executor",   emoji: "⚙️", content: "", done: false },
+        { name: "creator",    label: "Creator",    emoji: "✨", content: "", done: false },
+        { name: "supervisor", label: "Supervisor", emoji: "🧠", content: "", done: false },
+      ];
+
+      setMessages((prev) => [
+        ...prev,
+        { id: userMsgId, role: "user", content },
+        {
+          id: assistantMsgId, role: "assistant", content: "",
+          isStreaming: true, isExpert: true,
+          expertAgents: initialAgents, expertPanelOpen: true,
+        },
+      ]);
+      setInput("");
+      setIsStreaming(true);
+      setStreamingId(assistantMsgId);
+
+      const controller = new AbortController();
+      abortRef.current = controller;
+
+      try {
+        const res = await fetch("/api/v1/chat/expert", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ message: content, session_id: sessionId, stream: true }),
+          signal: controller.signal,
+        });
+
+        if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
+
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buf = "";
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buf += decoder.decode(value, { stream: true });
+          const lines = buf.split("\n");
+          buf = lines.pop() ?? "";
+
+          for (const line of lines) {
+            if (!line.startsWith("data:")) continue;
+            const raw = line.slice(5).trim();
+            if (!raw) continue;
+            try {
+              const data = JSON.parse(raw);
+              const agentName = data.agent;
+              const chunk = data.chunk ?? "";
+              const agentDone = data.done === true || data.agent_done === true;
+
+              setMessages((prev) =>
+                prev.map((m) => {
+                  if (m.id !== assistantMsgId) return m;
+                  const agents = (m.expertAgents ?? []).map((a) =>
+                    a.name === agentName
+                      ? { ...a, content: a.content + chunk, done: agentDone }
+                      : a
+                  );
+                  // Build supervisor content as main message content
+                  const supAgent = agents.find((a) => a.name === "supervisor");
+                  const mainContent = supAgent?.content ?? m.content;
+                  const allDone = agentDone && agentName === "supervisor";
+                  return {
+                    ...m,
+                    content: mainContent,
+                    expertAgents: agents,
+                    isStreaming: !allDone,
+                    agent: allDone ? "expert_mode" : m.agent,
+                    latencyMs: allDone ? data.latency_ms : m.latencyMs,
+                  };
+                })
+              );
+            } catch { /* ignore malformed frames */ }
+          }
+        }
+      } catch (err: any) {
+        if (err.name !== "AbortError") {
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === assistantMsgId
+                ? { ...m, content: "Expert Mode error — please try again.", isStreaming: false }
+                : m
+            )
+          );
+        }
+      } finally {
+        setIsStreaming(false);
+        setStreamingId(null);
+        abortRef.current = null;
+        textareaRef.current?.focus();
+      }
+    },
+    [input, isStreaming, sessionId, token]
+  );
+
   const sendMessage = useCallback(
     async (text?: string) => {
       const content = (text ?? input).trim();
       if (!content || isStreaming) return;
+
+      if (expertMode) {
+        await sendExpertMessage(content);
+        return;
+      }
 
       const userMsgId = Date.now().toString();
       const assistantMsgId = (Date.now() + 1).toString();
@@ -219,7 +347,7 @@ export default function ChatInterface({ sessionId, token, mode = "assistant" }: 
         textareaRef.current?.focus();
       }
     },
-    [input, isStreaming, sessionId, token, mode]
+    [input, isStreaming, sessionId, token, mode, expertMode, sendExpertMessage]
   );
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -336,10 +464,51 @@ export default function ChatInterface({ sessionId, token, mode = "assistant" }: 
                       <p className="whitespace-pre-wrap">{msg.content}</p>
                     )}
                   </div>
+                  {/* Agent Collaboration Panel (Expert Mode) */}
+                  {msg.isExpert && msg.expertAgents && msg.expertAgents.length > 0 && (
+                    <div className="mt-2 rounded-xl border border-violet-500/20 bg-violet-500/5 overflow-hidden">
+                      <button
+                        onClick={() => toggleExpertPanel(msg.id)}
+                        className="w-full flex items-center justify-between px-3 py-2 text-[11px] text-violet-400 hover:bg-violet-500/10 transition-colors"
+                      >
+                        <span className="flex items-center gap-1.5">
+                          <Zap className="w-3 h-3" />
+                          Agent Collaboration Panel
+                          {msg.isStreaming && <Loader2 className="w-3 h-3 animate-spin" />}
+                        </span>
+                        {msg.expertPanelOpen
+                          ? <ChevronUp className="w-3 h-3" />
+                          : <ChevronDown className="w-3 h-3" />
+                        }
+                      </button>
+                      {msg.expertPanelOpen && (
+                        <div className="divide-y divide-violet-500/10">
+                          {msg.expertAgents.filter((a) => a.name !== "supervisor").map((agent) => (
+                            <div key={agent.name} className="px-3 py-2">
+                              <div className="flex items-center gap-1.5 mb-1">
+                                <span>{agent.emoji}</span>
+                                <span className="text-[11px] font-medium text-violet-300">{agent.label}</span>
+                                {!agent.done && agent.content && (
+                                  <Loader2 className="w-2.5 h-2.5 animate-spin text-violet-400 ml-auto" />
+                                )}
+                                {agent.done && (
+                                  <Check className="w-2.5 h-2.5 text-green-400 ml-auto" />
+                                )}
+                              </div>
+                              <p className="text-[11px] text-neutral-400 leading-relaxed whitespace-pre-wrap">
+                                {agent.content || "…"}
+                              </p>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
                   <div className="flex items-center gap-1 mt-1 pl-1">
                     {msg.agent && !msg.isStreaming && (
                       <p className="text-[11px] text-neutral-600">
-                        {AGENT_LABELS[msg.agent] ?? msg.agent}
+                        {msg.isExpert ? "⚡ Expert Mode" : (AGENT_LABELS[msg.agent] ?? msg.agent)}
                         {msg.latencyMs ? ` · ${msg.latencyMs}ms` : ""}
                       </p>
                     )}
@@ -353,7 +522,6 @@ export default function ChatInterface({ sessionId, token, mode = "assistant" }: 
             <div ref={bottomRef} />
           </div>
         )}
-        {messages.length > 0 && <div ref={bottomRef} />}
       </div>
 
       {/* Input bar */}
@@ -409,11 +577,26 @@ export default function ChatInterface({ sessionId, token, mode = "assistant" }: 
               </button>
             )}
           </div>
-          <p className="text-[11px] text-neutral-700 text-center mt-1.5">
-            Enter to send · Shift+Enter for new line
-            {isTutor && " · Tutor mode — Socratic method enabled"}
-            {isBodyguard && " · Bodyguard mode — security commands active"}
-          </p>
+          <div className="flex items-center justify-between mt-1.5">
+            <p className="text-[11px] text-neutral-700">
+              Enter to send · Shift+Enter for new line
+              {isTutor && " · Tutor mode enabled"}
+              {isBodyguard && " · Bodyguard active"}
+            </p>
+            <button
+              onClick={() => setExpertMode((v) => !v)}
+              title="Expert Mode: 5 agents collaborate in parallel"
+              className={clsx(
+                "flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] border transition-all",
+                expertMode
+                  ? "bg-violet-500/20 border-violet-500/50 text-violet-300"
+                  : "border-neutral-700 text-neutral-600 hover:text-neutral-400 hover:border-neutral-600"
+              )}
+            >
+              <Zap className="w-3 h-3" />
+              Expert Mode
+            </button>
+          </div>
         </div>
       </div>
     </div>

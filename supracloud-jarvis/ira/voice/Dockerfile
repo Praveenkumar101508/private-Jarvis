@@ -42,7 +42,11 @@ RUN python -c "from faster_whisper import WhisperModel; WhisperModel('large-v3',
     || echo "Whisper pre-download skipped — will download on first run"
 
 # Pre-download Kokoro ONNX model + voices
-RUN python -c "from kokoro_onnx import Kokoro; Kokoro('kokoro-v0_19.onnx', 'voices.bin')" \
+# kokoro-onnx auto-downloads models to ~/.cache/kokoro on first init
+ENV KOKORO_MODEL_PATH=/home/ira/.cache/kokoro/kokoro-v0_19.onnx
+ENV KOKORO_VOICES_PATH=/home/ira/.cache/kokoro/voices.bin
+RUN mkdir -p /home/ira/.cache/kokoro && \
+    python -c "from kokoro_onnx import Kokoro; Kokoro('kokoro-v0_19.onnx', 'voices.bin')" \
     || echo "Kokoro pre-download skipped — will download on first run"
 
 HEALTHCHECK --interval=30s --timeout=10s --retries=5 --start-period=60s \

@@ -215,7 +215,7 @@ header "GPU Status"
 if command -v nvidia-smi &>/dev/null; then
     GPU_NAME=$(nvidia-smi --query-gpu=name --format=csv,noheader | head -1)
     GPU_UTIL=$(nvidia-smi --query-gpu=utilization.gpu --format=csv,noheader | head -1)
-    MEM_USED=$(nvidia-smi --query-gpu=memory.used --format=csv,noheader | head-1 2>/dev/null || nvidia-smi --query-gpu=memory.used --format=csv,noheader | head -1)
+    MEM_USED=$(nvidia-smi --query-gpu=memory.used --format=csv,noheader | head -1)
     MEM_TOTAL=$(nvidia-smi --query-gpu=memory.total --format=csv,noheader | head -1)
     ok "${GPU_NAME}"
     ok "VRAM: ${MEM_USED} / ${MEM_TOTAL} used"

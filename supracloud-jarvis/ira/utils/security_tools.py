@@ -126,7 +126,7 @@ async def scan_threats() -> dict:
             async with acquire() as db:
                 await db.execute(
                     """INSERT INTO security_events (severity, event_type, description)
-                       VALUES ($1, 'network_scan_alert', $2) ON CONFLICT DO NOTHING""",
+                       VALUES ($1, 'network_scan_alert', $2)""",
                     severity,
                     f"Network scan: {len(external)} external connections from {len(unique_ips)} IPs — {ip_summary}",
                 )

@@ -58,6 +58,10 @@ _DISPATCH_RE = re.compile(
 )
 
 
+# Module-level constant required by chat.py streaming router
+_SYSTEM = _build_system(get_settings().owner_name)
+
+
 async def _fetch_recent_events(limit: int = 20) -> list[dict]:
     """Pull the most recent unresolved security events from the database."""
     async with acquire() as conn:

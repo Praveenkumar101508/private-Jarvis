@@ -86,13 +86,32 @@ async def clear_read(_user: str = Depends(require_auth)):
 @router.websocket("/ws/notifications")
 async def ws_notifications(
     websocket: WebSocket,
-    token: str = Query(...),
 ):
     """
     Real-time notification stream via WebSocket.
     Subscribes to Redis pub/sub and forwards all IRA notifications to the client.
+
+    Authentication: send the JWT via the Sec-WebSocket-Protocol header using the
+    format "bearer.<token>" — this keeps the token out of nginx access logs.
+    Fallback: token query param is accepted for backwards compatibility in dev mode.
     """
-    # Authenticate via JWT token in query param
+    # Prefer token from Sec-WebSocket-Protocol header (avoids nginx log exposure)
+    token: str | None = None
+    protocol_header = websocket.headers.get("sec-websocket-protocol", "")
+    for part in protocol_header.split(","):
+        part = part.strip()
+        if part.startswith("bearer."):
+            token = part[len("bearer."):]
+            break
+
+    # Fallback: query param (dev / legacy clients)
+    if not token:
+        token = websocket.query_params.get("token")
+
+    if not token:
+        await websocket.close(code=4001)
+        return
+
     try:
         decode_token(token)
     except Exception:

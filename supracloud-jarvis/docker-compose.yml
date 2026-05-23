@@ -289,7 +289,7 @@ services:
       # Webhooks
       WEBHOOK_SECRET: ${WEBHOOK_SECRET:-}
       # Owner identity (biometric gate)
-      OWNER_NAME: ${OWNER_NAME:-Swetha Devisetty}
+      OWNER_NAME: ${OWNER_NAME:-Praveen Kumar}
       BIOMETRIC_THRESHOLD: ${BIOMETRIC_THRESHOLD:-0.75}
       # Embeddings (CPU)
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-BAAI/bge-large-en-v1.5}
@@ -349,7 +349,7 @@ services:
       IRA_SECRET_KEY: ${IRA_SECRET_KEY}
       IRA_ADMIN_PASSWORD: ${IRA_ADMIN_PASSWORD}
       # Owner identity (biometric gate)
-      OWNER_NAME: ${OWNER_NAME:-Swetha Devisetty}
+      OWNER_NAME: ${OWNER_NAME:-Praveen Kumar}
       BIOMETRIC_THRESHOLD: ${BIOMETRIC_THRESHOLD:-0.75}
       # Scheduler config
       BRIEFING_HOUR_UTC: ${BRIEFING_HOUR_UTC:-8}
@@ -369,6 +369,8 @@ services:
     volumes:
       # Read nginx logs for security analysis
       - nginx_logs:/var/log/nginx:ro
+      # SSH auth log for intrusion detection (read-only bind mount from host)
+      - /var/log/auth.log:/var/log/auth.log:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -385,6 +387,7 @@ services:
     logging: *default-logging
     networks:
       - ira-internal
+      - ira-external  # Bug #20: worker needs internet for Telegram, Apify, GitHub
 
   # ── IRA Voice Agent (LiveKit + Faster-Whisper STT + Kokoro TTS) ──────────
   # Phase 3: Full voice pipeline — multilingual, warm Indian female voice
@@ -429,6 +432,7 @@ services:
     logging: *default-logging
     networks:
       - ira-internal
+      - ira-external  # Bug #19: voice needs internet to download Whisper/Kokoro models
 
   # ── IRA Frontend (Next.js) ────────────────────────────────────────────────
   # Chat UI, voice button, notification feed, system status bar.

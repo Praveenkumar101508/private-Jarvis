@@ -71,8 +71,7 @@ CREATE TABLE IF NOT EXISTS calendar_events (
     metadata        JSONB DEFAULT '{}'
 );
 
-CREATE INDEX IF NOT EXISTS idx_calendar_upcoming ON calendar_events (start_at ASC)
-    WHERE start_at > NOW();
+CREATE INDEX IF NOT EXISTS idx_calendar_upcoming ON calendar_events (start_at ASC);
 
 -- =============================================================================
 -- NOTIFICATIONS

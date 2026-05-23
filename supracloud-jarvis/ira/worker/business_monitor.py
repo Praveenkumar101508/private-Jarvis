@@ -16,6 +16,7 @@ import json
 import logging
 from datetime import datetime, timezone, timedelta
 
+from config import get_settings
 from utils.db import acquire
 from utils.llm import chat_complete
 from worker.notifier import notify
@@ -23,11 +24,17 @@ from worker.notifier import notify
 logger = logging.getLogger("ira.business")
 
 # ── Lead qualification prompt ──────────────────────────────────────────────────
-_QUALIFY_PROMPT = """\
-You are IRA, a professional business assistant. Briefly qualify these leads for Sir.
-For each lead, give: likely budget tier (Low/Mid/High), urgency (cold/warm/hot), and recommended action.
-Keep it under 100 words total. Speak warmly and professionally.\
-"""
+def _qualify_prompt() -> str:
+    cfg = get_settings()
+    return (
+        f"You are IRA, a professional business assistant for {cfg.owner_name}. "
+        "Briefly qualify these leads. For each lead, give: likely budget tier (Low/Mid/High), "
+        "urgency (cold/warm/hot), and recommended action. "
+        "Keep it under 100 words total. Speak warmly and professionally."
+    )
+
+
+_QUALIFY_PROMPT = _qualify_prompt()  # Keep for backwards compat
 
 
 async def _get_new_leads_since(last_check: datetime) -> list[dict]:
@@ -114,8 +121,9 @@ async def run_business_scan() -> None:
 
     priority = "critical" if hot_leads else "warning" if count >= 3 else "info"
 
+    owner = get_settings().owner_name
     body = (
-        f"Sir, IRA has detected {count} new lead{'s' if count > 1 else ''}.\n\n"
+        f"{owner}, IRA has detected {count} new lead{'s' if count > 1 else ''}.\n\n"
         f"**Quick Assessment:**\n{qualification}\n\n"
         f"Shall I qualify them further, draft follow-up emails, or schedule calls?"
     )
@@ -133,7 +141,7 @@ async def run_business_scan() -> None:
     if stale > 0:
         await notify(
             f"{stale} Lead{'s' if stale > 1 else ''} Need Follow-Up",
-            f"Sir, {stale} lead{'s have' if stale > 1 else ' has'} not been actioned in over 48 hours. "
+            f"{owner}, {stale} lead{'s have' if stale > 1 else ' has'} not been actioned in over 48 hours. "
             f"Shall I draft follow-up messages or mark them for review?",
             category="business",
             priority="warning",

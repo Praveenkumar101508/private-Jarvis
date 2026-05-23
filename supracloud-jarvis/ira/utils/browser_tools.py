@@ -6,10 +6,36 @@ Navigates to any URL, extracts visible text, answers the user's specific query.
 """
 from __future__ import annotations
 
+import ipaddress
 import logging
 import re
+from urllib.parse import urlparse
 
 logger = logging.getLogger("ira.browser_tools")
+
+# Block SSRF: deny private/link-local/loopback IPs and non-HTTP schemes
+_BLOCKED_HOSTS = re.compile(
+    r"^(localhost|.*\.local|.*\.internal|.*\.corp)$", re.I
+)
+
+def _is_safe_url(url: str) -> bool:
+    """Return True only for publicly routable HTTP/HTTPS URLs."""
+    try:
+        parsed = urlparse(url)
+        if parsed.scheme not in ("http", "https"):
+            return False
+        host = parsed.hostname or ""
+        if _BLOCKED_HOSTS.match(host):
+            return False
+        try:
+            addr = ipaddress.ip_address(host)
+            if addr.is_private or addr.is_loopback or addr.is_link_local or addr.is_reserved:
+                return False
+        except ValueError:
+            pass  # hostname, not IP — allowed
+        return True
+    except Exception:
+        return False
 
 _MAX_PAGE_TEXT = 8_000  # characters fed to LLM
 
@@ -27,6 +53,12 @@ async def browse_and_summarize_website(url: str, query: str) -> dict:
     and use IRA's fast LLM to answer `query` based on what's on the page.
     Returns a structured dict with the answer, page title, and a brief excerpt.
     """
+    if not _is_safe_url(url):
+        return {
+            "error": "URL blocked for security reasons. Only public HTTP/HTTPS URLs are allowed.",
+            "url": url,
+        }
+
     try:
         from playwright.async_api import async_playwright
     except ImportError:

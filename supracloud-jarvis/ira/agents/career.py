@@ -33,6 +33,9 @@ def _build_system(owner_name: str) -> str:
         f"Be precise and encouraging. This is {owner_name}'s career pipeline."
     )
 
+# Module-level constant required by chat.py streaming router
+_SYSTEM = _build_system(get_settings().owner_name)
+
 _GITHUB_RE = re.compile(
     r"\b(github|codebase|repositories|repos|portfolio|my code|my projects|my skills|tech stack)\b",
     re.I,

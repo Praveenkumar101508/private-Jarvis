@@ -132,10 +132,9 @@ CREATE TABLE IF NOT EXISTS model_performance (
     created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- Partial index on recent records for dashboard queries
+-- Index on model performance for dashboard queries (filter in queries, not index)
 CREATE INDEX IF NOT EXISTS idx_model_perf_recent
-    ON model_performance (model_name, created_at DESC)
-    WHERE created_at > NOW() - INTERVAL '7 days';
+    ON model_performance (model_name, created_at DESC);
 
 -- =============================================================================
 -- UTILITY: auto-update updated_at timestamps

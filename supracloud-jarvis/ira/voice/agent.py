@@ -74,6 +74,12 @@ class IRALLMAdapter(llm.LLM):
             headers={"Authorization": f"Bearer {IRA_API_TOKEN}"},
             timeout=httpx.Timeout(connect=5, read=120, write=30, pool=5),
         )
+        # Stores the raw PCM bytes of the latest user utterance for biometric verification
+        self._pending_audio: bytes = b""
+
+    def set_audio_bytes(self, audio: bytes) -> None:
+        """Called by the speech-committed handler before chat() is invoked."""
+        self._pending_audio = audio
 
     def chat(
         self,
@@ -87,12 +93,16 @@ class IRALLMAdapter(llm.LLM):
             if msg.role == llm.ChatRole.USER:
                 user_msg = str(msg.content) if msg.content else ""
                 break
+        # Pass the buffered audio so the biometric gate inside _run() can verify
+        audio = self._pending_audio
+        self._pending_audio = b""  # reset after each turn
         return IRALLMStream(
             llm=self,
             session_id=self._session_id,
             user_message=user_msg,
             http=self._http,
-            is_owner=False,   # biometric check happens inside _run() using raw audio
+            is_owner=False,
+            audio_bytes=audio,
         )
 
     async def aclose(self):
@@ -235,10 +245,16 @@ async def entrypoint(ctx: JobContext) -> None:
 
     logger.info(f"IRA is listening to participant: {participant.identity}")
 
-    # Handle language switching: detect user's language from first utterance
-    # and personalise IRA's responses accordingly
+    # Capture raw audio for biometric verification + handle language switching
     @session.on("user_speech_committed")
     def on_user_speech(event):
+        # Pass audio bytes to the LLM adapter so _run() can verify the speaker
+        raw_audio = getattr(event, "audio", b"") or b""
+        if isinstance(raw_audio, (bytes, bytearray)):
+            ira_llm.set_audio_bytes(bytes(raw_audio))
+        elif hasattr(raw_audio, "data"):
+            ira_llm.set_audio_bytes(bytes(raw_audio.data))
+
         detected = getattr(event, "language", "en") or "en"
         lang = normalise_lang(detected)
         if lang != "en":

@@ -27,6 +27,7 @@ from datetime import datetime, timezone, timedelta
 
 import psutil
 
+from config import get_settings
 from utils.db import acquire
 from utils.security_alerts import send_alert
 from worker.notifier import notify
@@ -204,8 +205,7 @@ async def _write_security_events(events: list[dict]) -> int:
             await conn.execute(
                 """INSERT INTO security_events
                    (severity, event_type, source_ip, description, raw_log)
-                   VALUES ($1, $2, $3::inet, $4, $5)
-                   ON CONFLICT DO NOTHING""",
+                   VALUES ($1, $2, $3::inet, $4, $5)""",
                 ev["severity"],
                 ev["event_type"],
                 ev.get("source_ip"),
@@ -228,13 +228,14 @@ async def _check_system_health() -> list[dict]:
 
     if cpu > 90:
         events.append({
-            "severity": "warning",
+            "severity": "medium",
             "event_type": "high_cpu",
             "description": f"CPU usage critical: {cpu:.1f}%",
         })
         # send_alert uses requests (sync) — run in executor to avoid blocking the event loop
+        owner_name = get_settings().owner_name
         alert_msg = (
-            f"Praveen, CPU usage is *{cpu:.1f}%* — potential cryptominer or runaway process.\n"
+            f"{owner_name}, CPU usage is *{cpu:.1f}%* — potential cryptominer or runaway process.\n"
             f"Say _\"IRA, scan threats\"_ to check active connections."
         )
         loop = asyncio.get_running_loop()
@@ -244,7 +245,7 @@ async def _check_system_health() -> list[dict]:
         )
     if mem.percent > 90:
         events.append({
-            "severity": "warning",
+            "severity": "medium",
             "event_type": "high_memory",
             "description": f"Memory usage critical: {mem.percent:.1f}%",
         })
@@ -313,7 +314,7 @@ async def _check_ssh_failures() -> list[dict]:
             # Direct Telegram push for SSH attacks (time-critical)
             if count >= 5:
                 ssh_msg = (
-                    f"Praveen, *{count} failed SSH logins* from `{ip}`.\n"
+                    f"{get_settings().owner_name}, *{count} failed SSH logins* from `{ip}`.\n"
                     f"Usernames tried: {users_tried}\n\n"
                     f"Say _\"IRA, scan threats\"_ to investigate."
                 )
@@ -370,7 +371,7 @@ async def run_security_scan() -> None:
         )
         await notify(
             f"Security Alert — {new_highs} new threat(s) detected",
-            f"Sir, IRA has detected the following security events:\n\n{threat_summary}\n\n"
+            f"{get_settings().owner_name}, IRA has detected the following security events:\n\n{threat_summary}\n\n"
             f"Please review and I can suggest remediation steps.",
             category="security",
             priority="critical" if any(e["severity"] == "critical" for e in all_events) else "warning",

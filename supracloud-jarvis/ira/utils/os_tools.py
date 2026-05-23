@@ -78,8 +78,10 @@ async def run_terminal_command(command: str) -> dict:
         }
 
     try:
-        proc = await asyncio.create_subprocess_shell(
-            cmd_stripped,
+        import shlex
+        args = shlex.split(cmd_stripped)
+        proc = await asyncio.create_subprocess_exec(
+            *args,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )

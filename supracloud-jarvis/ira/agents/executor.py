@@ -23,10 +23,10 @@ from agents.state import IRAState
 from utils.llm import chat_complete
 from utils.db import acquire
 
-# Only these command prefixes are ever permitted
+# Only these command prefixes are ever permitted (read-only, no network, no code execution)
 _ALLOWLIST = frozenset({
-    "python", "pip", "pytest", "ls", "cat", "echo", "grep",
-    "find", "curl", "wget", "git status", "git log", "git diff",
+    "pytest", "ls", "cat", "echo", "grep",
+    "find", "git status", "git log", "git diff",
     "docker ps", "docker stats", "docker logs",
 })
 
@@ -40,7 +40,7 @@ Rules you must ALWAYS follow:
 4. After execution, summarise what happened and what changed
 5. Never execute anything that could modify production data without explicit confirmation
 
-Allowlisted prefixes: python, pip, pytest, ls, cat, echo, grep, find, curl, wget,
+Allowlisted prefixes: pytest, ls, cat, echo, grep, find,
                        git status, git log, git diff, docker ps, docker stats, docker logs
 
 For any command outside the allowlist, respond:

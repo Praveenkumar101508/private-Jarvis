@@ -13,6 +13,7 @@ import asyncio
 import logging
 import signal
 
+from config import get_settings
 from utils.db import init_pool, close_pool
 from utils.redis_client import init_redis, close_redis
 from worker.scheduler import start_scheduler, stop_scheduler
@@ -37,9 +38,10 @@ async def main() -> None:
     await start_scheduler()
 
     # Announce startup
+    owner = get_settings().owner_name
     await notify(
         "IRA Worker Online",
-        "Sir, IRA's proactive intelligence system is now active. "
+        f"{owner}, IRA's proactive intelligence system is now active. "
         "I will monitor your systems, alert you to threats, and send your morning briefing at 08:00 UTC.",
         category="system",
         priority="info",

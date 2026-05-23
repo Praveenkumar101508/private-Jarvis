@@ -19,6 +19,7 @@ Usage (set in your website's form submission handler):
 
 from __future__ import annotations
 
+import hmac
 import json
 import logging
 import uuid
@@ -45,7 +46,7 @@ def _validate_webhook_secret(x_webhook_secret: str | None) -> None:
             status_code=503,
             detail="Webhook secret not configured. Set WEBHOOK_SECRET in .env",
         )
-    if x_webhook_secret != cfg.webhook_secret:
+    if not hmac.compare_digest(x_webhook_secret or "", cfg.webhook_secret):
         raise HTTPException(
             status_code=401,
             detail="Invalid webhook secret. Request rejected.",
@@ -119,9 +120,10 @@ async def receive_lead(
     if is_hot:
         try:
             from worker.notifier import notify
+            owner_name = get_settings().owner_name
             await notify(
                 f"🔥 Hot Lead: {payload.name}",
-                f"Sir, a high-priority lead just arrived.\n\n"
+                f"{owner_name}, a high-priority lead just arrived.\n\n"
                 f"Name: {payload.name}\n"
                 f"Email: {payload.email}\n"
                 f"Company: {payload.company or 'N/A'}\n"
@@ -193,7 +195,7 @@ async def receive_booking(
         from worker.notifier import notify
         await notify(
             f"📅 New Booking: {payload.client_name}",
-            f"Sir, a new consultation has been booked.\n\n"
+            f"{get_settings().owner_name}, a new consultation has been booked.\n\n"
             f"Client: {payload.client_name}\n"
             f"Email: {payload.client_email}\n"
             f"Service: {payload.service or 'N/A'}\n"

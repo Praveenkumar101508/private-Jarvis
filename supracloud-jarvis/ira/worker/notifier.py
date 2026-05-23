@@ -15,6 +15,7 @@ Usage:
 from __future__ import annotations
 
 import asyncio
+import html
 import json
 import logging
 import smtplib
@@ -132,13 +133,13 @@ def _send_email_sync(title: str, body: str, category: str, cfg) -> None:
     # Plain text
     msg.attach(MIMEText(body, "plain"))
 
-    # Simple HTML version
-    html = f"""<html><body>
-    <h2 style="color:#1a1a2e;">IRA — {title}</h2>
-    <div style="font-family:sans-serif;white-space:pre-wrap;">{body}</div>
+    # Simple HTML version — escape body/title to prevent HTML injection
+    html_body = f"""<html><body>
+    <h2 style="color:#1a1a2e;">IRA — {html.escape(title)}</h2>
+    <div style="font-family:sans-serif;white-space:pre-wrap;">{html.escape(body)}</div>
     <hr><p style="color:#888;font-size:12px;">SupraCloud IRA — Private AI Assistant</p>
     </body></html>"""
-    msg.attach(MIMEText(html, "html"))
+    msg.attach(MIMEText(html_body, "html"))
 
     with smtplib.SMTP(cfg.smtp_host, cfg.smtp_port) as server:
         server.starttls()

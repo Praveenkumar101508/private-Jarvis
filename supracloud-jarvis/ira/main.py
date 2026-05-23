@@ -110,10 +110,13 @@ def create_app() -> FastAPI:
     app.state.limiter = limiter
     app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
-    # CORS — restrict to your domain in production
+    # CORS — only allow localhost in development; production uses domain only
+    allowed_origins = [f"https://{cfg.ira_domain}"]
+    if cfg.dev_mode:
+        allowed_origins += ["http://localhost:3000", "http://127.0.0.1:3000"]
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=[f"https://{cfg.ira_domain}", "http://localhost:3000"],
+        allow_origins=allowed_origins,
         allow_credentials=True,
         allow_methods=["GET", "POST", "DELETE"],
         allow_headers=["Authorization", "Content-Type"],

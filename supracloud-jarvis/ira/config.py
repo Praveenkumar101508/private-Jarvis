@@ -114,12 +114,16 @@ class Settings(BaseSettings):
     webhook_secret: str = ""    # Shared secret for validating inbound webhooks
 
     # ── Owner / Biometric Gate ────────────────────────────────────────────────
-    owner_name: str = "Swetha Devisetty"
+    owner_name: str = "Praveen Kumar"
     biometric_threshold: float = 0.75   # Cosine similarity floor for voice auth
 
     # ── Career Tools ──────────────────────────────────────────────────────────
     github_token: str = ""
     apify_api_token: str = ""
+
+    # ── Voice Service ─────────────────────────────────────────────────────────
+    # JWT sub that the voice agent uses — only this identity may set is_voice_owner
+    ira_voice_service_username: str = "ira-voice"
 
     # ── Dev Mode (Shadow PC / local development) ──────────────────────────────
     # DEV_MODE=true routes LLM calls to a local Ollama instance,

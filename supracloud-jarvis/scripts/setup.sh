@@ -112,24 +112,35 @@ else
     # Use field-specific patterns so POSTGRES_PASSWORD and IRA_ADMIN_PASSWORD
     # are set independently (they shared the same placeholder in .env.example).
     # Use Python for safe substitution — avoids sed breaking on passwords with special chars
-    python3 - <<PYEOF
-import re, sys
+    PG_PASS="$PG_PASS" \
+    ADMIN_PASS="$ADMIN_PASS" \
+    REDIS_PASS="$REDIS_PASS" \
+    VLLM_KEY="$VLLM_KEY" \
+    IRA_SECRET="$IRA_SECRET" \
+    VOICE_TOKEN="$VOICE_TOKEN" \
+    WEBHOOK_SECRET_VAL="$WEBHOOK_SECRET_VAL" \
+    LIVEKIT_KEY="$LIVEKIT_KEY" \
+    LIVEKIT_SECRET="$LIVEKIT_SECRET" \
+    HF_TOKEN="$HF_TOKEN" \
+    DOMAIN="$DOMAIN" \
+    python3 - <<'PYEOF'
+import re, os
 
 with open('.env', 'r') as f:
     content = f.read()
 
 replacements = {
-    r'^POSTGRES_PASSWORD=CHANGE_ME_strong_password_here':   f'POSTGRES_PASSWORD=${PG_PASS}',
-    r'^IRA_ADMIN_PASSWORD=CHANGE_ME_strong_password_here':  f'IRA_ADMIN_PASSWORD=${ADMIN_PASS}',
-    r'^REDIS_PASSWORD=CHANGE_ME_redis_password_here':        f'REDIS_PASSWORD=${REDIS_PASS}',
-    r'^VLLM_API_KEY=.*':                                     f'VLLM_API_KEY=${VLLM_KEY}',
-    r'^IRA_SECRET_KEY=.*':                                   f'IRA_SECRET_KEY=${IRA_SECRET}',
-    r'^IRA_VOICE_API_TOKEN=.*':                              f'IRA_VOICE_API_TOKEN=${VOICE_TOKEN}',
-    r'^WEBHOOK_SECRET=.*':                                   f'WEBHOOK_SECRET=${WEBHOOK_SECRET_VAL}',
-    r'^LIVEKIT_API_KEY=.*':                                  f'LIVEKIT_API_KEY=${LIVEKIT_KEY}',
-    r'^LIVEKIT_API_SECRET=.*':                               f'LIVEKIT_API_SECRET=${LIVEKIT_SECRET}',
-    r'^HF_TOKEN=.*':                                         f'HF_TOKEN=${HF_TOKEN}',
-    r'^IRA_DOMAIN=.*':                                       f'IRA_DOMAIN=${DOMAIN}',
+    r'^POSTGRES_PASSWORD=CHANGE_ME_strong_password_here':   'POSTGRES_PASSWORD=' + os.environ['PG_PASS'],
+    r'^IRA_ADMIN_PASSWORD=CHANGE_ME_strong_password_here':  'IRA_ADMIN_PASSWORD=' + os.environ['ADMIN_PASS'],
+    r'^REDIS_PASSWORD=CHANGE_ME_redis_password_here':        'REDIS_PASSWORD=' + os.environ['REDIS_PASS'],
+    r'^VLLM_API_KEY=.*':                                     'VLLM_API_KEY=' + os.environ['VLLM_KEY'],
+    r'^IRA_SECRET_KEY=.*':                                   'IRA_SECRET_KEY=' + os.environ['IRA_SECRET'],
+    r'^IRA_VOICE_API_TOKEN=.*':                              'IRA_VOICE_API_TOKEN=' + os.environ['VOICE_TOKEN'],
+    r'^WEBHOOK_SECRET=.*':                                   'WEBHOOK_SECRET=' + os.environ['WEBHOOK_SECRET_VAL'],
+    r'^LIVEKIT_API_KEY=.*':                                  'LIVEKIT_API_KEY=' + os.environ['LIVEKIT_KEY'],
+    r'^LIVEKIT_API_SECRET=.*':                               'LIVEKIT_API_SECRET=' + os.environ['LIVEKIT_SECRET'],
+    r'^HF_TOKEN=.*':                                         'HF_TOKEN=' + os.environ['HF_TOKEN'],
+    r'^IRA_DOMAIN=.*':                                       'IRA_DOMAIN=' + os.environ['DOMAIN'],
 }
 
 for pattern, replacement in replacements.items():
