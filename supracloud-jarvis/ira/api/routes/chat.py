@@ -25,7 +25,7 @@ from sse_starlette.sse import EventSourceResponse
 from api.middleware.auth import require_auth
 from agents.graph import run_graph
 from memory.store import ensure_conversation, get_recent_messages, retrieve
-from utils.llm import stream_tokens, should_use_deep
+from utils.llm import stream_tokens, should_use_deep, should_use_reasoning
 from utils.redis_client import cache_get, cache_set
 from config import get_settings
 
@@ -191,6 +191,12 @@ async def chat_stream(
     classified = await classify(temp_state)
     active_agent = classified["active_agent"]
     use_deep = classified["use_deep_model"]
+    # Reasoning tier: Think Mode + DeepSearch + explicit reasoning queries route here
+    use_reasoning = should_use_reasoning(
+        req.message,
+        think_mode=req.think_mode,
+        deep_search=req.deep_search,
+    )
 
     # ── Biometric gate: block restricted domains for non-owners ───────────────
     cfg = get_settings()
@@ -396,7 +402,7 @@ async def chat_stream(
                 in_think = False
                 OPEN, CLOSE = "<think>", "</think>"
 
-                async for raw_tok in stream_tokens(messages, use_deep=use_deep):
+                async for raw_tok in stream_tokens(messages, use_deep=use_deep, use_reasoning=use_reasoning):
                     buf += raw_tok
                     # Keep draining buf until we can't make progress
                     while True:
@@ -448,7 +454,7 @@ async def chat_stream(
                         yield {"data": json.dumps({"token": buf})}
             else:
                 # ── Normal streaming ───────────────────────────────────────────
-                async for token in stream_tokens(messages, use_deep=use_deep):
+                async for token in stream_tokens(messages, use_deep=use_deep, use_reasoning=use_reasoning):
                     full_response.append(token)
                     yield {"data": json.dumps({"token": token})}
 
@@ -470,7 +476,7 @@ async def chat_stream(
             asyncio.create_task(save_message(conv_id, "user", req.message))
             asyncio.create_task(save_message(
                 conv_id, "assistant", "".join(full_response),
-                model_used="qwen-deep" if use_deep else "llama-fast",
+                model_used="qwen3-reasoning" if use_reasoning else ("qwen3-deep" if use_deep else "qwen3-fast"),
                 latency_ms=latency,
             ))
 

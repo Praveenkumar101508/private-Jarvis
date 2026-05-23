@@ -1,13 +1,20 @@
 # =============================================================================
-# SupraCloud IRA — docker-compose.yml
-# Phase 2: Core Infrastructure + FastAPI + LangGraph Multi-Agent System
+# SupraCloud IRA — docker-compose.yml  (v1.0.0 — Maximum Power 2026 Edition)
 #
-# GPU Target : NVIDIA RTX A4500 (20GB VRAM)
-# Fast Path  : Llama 3.1 8B AWQ  — gpu_memory_utilization=0.35 (~7GB)
-# Deep Path  : Qwen 2.5 14B AWQ  — gpu_memory_utilization=0.60 (~12GB)
-# Combined   : 0.95 × 20GB = 19GB — leaves 1GB for OS/driver overhead
+# ── CURRENT (Shadow PC / RTX A4500 20GB VRAM) ────────────────────────────────
+#   Fast Path      : Qwen3-8B AWQ    — gpu_memory_utilization=0.35 (~7GB)
+#   Deep Path      : Qwen3-14B AWQ   — gpu_memory_utilization=0.60 (~12GB)
+#   Combined       : 0.95 × 20GB = 19GB — leaves 1GB for OS/driver overhead
 #
-# Network topology:
+# ── CLOUD UPGRADE (8×H100 80GB — override with docker-compose.cloud.yml) ─────
+#   Fast Path      : Qwen3-30B-A3B   (MoE, 3B active params — blazing fast)
+#   Deep Path      : Qwen3-72B       (dense — beats GPT-4o on most benchmarks)
+#   Reasoning Path : DeepSeek-R1 671B or Qwen3-235B-A22B (world-class reasoning)
+#   Vision         : Qwen3-VL-72B    (beats Gemini 1.5 Pro on vision evals)
+#
+#   Run: docker compose -f docker-compose.yml -f docker-compose.cloud.yml up -d
+#
+# ── Network topology ──────────────────────────────────────────────────────────
 #   ira-external  → nginx, livekit (internet-facing)
 #   ira-internal  → all services (isolated, no external routing)
 #   ira-api       → both networks (proxied by nginx, calls internal services)
@@ -127,10 +134,16 @@ services:
       - ira-internal
 
   # ── vLLM Fast Path ────────────────────────────────────────────────────────
-  # Model  : Llama 3.1 8B Instruct (AWQ-INT4, Marlin kernels)
+  # Model  : Qwen3-8B Instruct (AWQ-INT4, Marlin kernels)
+  #          Beats Llama 3.1 8B on every benchmark (coding, math, reasoning).
+  #          2026 best small model for conversational AI.
   # Purpose: 90%+ of conversational queries, agent supervisor decisions
   # Target : <2s TTFT for simple queries, <5s end-to-end
   # VRAM   : ~7GB (gpu_memory_utilization=0.35 × 20GB)
+  # ──────────────────────────────────────────────────────────────────────────
+  # CLOUD UPGRADE (2×H100 80GB):
+  #   FAST_MODEL=Qwen/Qwen3-30B-A3B  (MoE — 30B params, only 3B active)
+  #   --gpu-memory-utilization 0.90 --tensor-parallel-size 2
   vllm-fast:
     <<: *vllm-common
     container_name: ira-vllm-fast
@@ -139,17 +152,17 @@ services:
       - vllm_fast_cache:/tmp/vllm_fast
     command:
       - "--model"
-      - "${FAST_MODEL:-hugging-quants/Meta-Llama-3.1-8B-Instruct-AWQ-INT4}"
+      - "${FAST_MODEL:-Qwen/Qwen3-8B-AWQ}"
       - "--served-model-name"
-      - "llama-fast"
+      - "qwen3-fast"
       - "--quantization"
       - "awq_marlin"
       - "--gpu-memory-utilization"
       - "0.35"
       - "--max-model-len"
-      - "16384"            # 16k context — balances speed and KV cache usage
+      - "32768"            # Qwen3 native 32k context window
       - "--max-num-seqs"
-      - "32"               # Handle 32 concurrent requests
+      - "32"               # 32 concurrent requests
       - "--max-num-batched-tokens"
       - "8192"
       - "--enable-prefix-caching" # Cache common system prompt prefixes
@@ -171,16 +184,23 @@ services:
       interval: 30s
       timeout: 15s
       retries: 15
-      start_period: 180s   # Model download + load time on first run
+      start_period: 180s   # Model download + load on first run
 
   # ── vLLM Deep Path ────────────────────────────────────────────────────────
-  # Model  : Qwen 2.5 14B Instruct (AWQ-INT4, Marlin kernels)
+  # Model  : Qwen3-14B Instruct (AWQ-INT4, Marlin kernels)
+  #          Best open-source 14B model in 2026. Excellent at code, math,
+  #          security analysis, long document understanding.
   # Purpose: Complex reasoning, code generation, multi-step planning,
-  #          Security Guardian analysis, Meta Agent Creator
+  #          Security Guardian, Meta Agent Creator, Engineer Mode
   # Target : <8s end-to-end for complex tasks
   # VRAM   : ~12GB (gpu_memory_utilization=0.60 × 20GB)
   # Note   : Starts AFTER vllm-fast is healthy to avoid VRAM collision
-  #          during simultaneous model loading
+  # ──────────────────────────────────────────────────────────────────────────
+  # CLOUD UPGRADE (4×H100 80GB):
+  #   DEEP_MODEL=Qwen/Qwen3-72B  (dense 72B — beats GPT-4o on most tasks)
+  #   --gpu-memory-utilization 0.92 --tensor-parallel-size 4
+  # ALTERNATIVE (stronger reasoning):
+  #   DEEP_MODEL=deepseek-ai/DeepSeek-R1-Distill-Qwen-32B
   vllm-deep:
     <<: *vllm-common
     container_name: ira-vllm-deep
@@ -189,9 +209,9 @@ services:
       - vllm_deep_cache:/tmp/vllm_deep
     command:
       - "--model"
-      - "${DEEP_MODEL:-Qwen/Qwen2.5-14B-Instruct-AWQ}"
+      - "${DEEP_MODEL:-Qwen/Qwen3-14B-AWQ}"
       - "--served-model-name"
-      - "qwen-deep"
+      - "qwen3-deep"
       - "--quantization"
       - "awq_marlin"
       - "--gpu-memory-utilization"
@@ -294,12 +314,25 @@ services:
       # Embeddings (CPU)
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-BAAI/bge-large-en-v1.5}
       EMBEDDING_DEVICE: cpu
-      # Grok parity — image generation + real-time search
+      # Image generation
       IMAGE_GEN_URL: ${IMAGE_GEN_URL:-}
+      IMAGE_GEN_PROVIDER: ${IMAGE_GEN_PROVIDER:-replicate}
       REPLICATE_API_TOKEN: ${REPLICATE_API_TOKEN:-}
+      # Real-time search
       TWITTER_BEARER_TOKEN: ${TWITTER_BEARER_TOKEN:-}
       X_FALLBACK_API_URL: ${X_FALLBACK_API_URL:-https://api.twitterapi.io}
       X_FALLBACK_API_KEY: ${X_FALLBACK_API_KEY:-}
+      # 2026 model routing — set these to upgrade model tiers
+      # FAST_MODEL, DEEP_MODEL are consumed by vllm containers (not ira-api)
+      # ira-api uses the model names below for logging/display purposes
+      VLLM_FAST_MODEL: ${FAST_MODEL_NAME:-qwen3-fast}
+      VLLM_DEEP_MODEL: ${DEEP_MODEL_NAME:-qwen3-deep}
+      # Optional reasoning tier (Think Mode / DeepSearch — falls back to deep)
+      VLLM_REASONING_URL: ${VLLM_REASONING_URL:-}
+      VLLM_REASONING_MODEL: ${VLLM_REASONING_MODEL:-qwen3-reasoning}
+      # Optional vision model (image analysis — falls back to fast text model)
+      VLLM_VISION_URL: ${VLLM_VISION_URL:-}
+      VLLM_VISION_MODEL: ${VLLM_VISION_MODEL:-qwen3-vl}
     volumes:
       # HF cache shared with vLLM — BGE model downloads here
       - hf_cache:/home/jarvis/.cache/huggingface
@@ -377,9 +410,11 @@ services:
       # Backup configuration
       BACKUP_DIR: /backups
       BACKUP_KEEP: ${BACKUP_KEEP:-7}
-      # Grok parity — image generation + real-time search
+      # Image generation
       IMAGE_GEN_URL: ${IMAGE_GEN_URL:-}
+      IMAGE_GEN_PROVIDER: ${IMAGE_GEN_PROVIDER:-replicate}
       REPLICATE_API_TOKEN: ${REPLICATE_API_TOKEN:-}
+      # Real-time search
       TWITTER_BEARER_TOKEN: ${TWITTER_BEARER_TOKEN:-}
       X_FALLBACK_API_URL: ${X_FALLBACK_API_URL:-https://api.twitterapi.io}
       X_FALLBACK_API_KEY: ${X_FALLBACK_API_KEY:-}

@@ -1,6 +1,17 @@
 """
 Central configuration — all values come from environment variables.
 Pydantic-settings validates types and provides clear error messages for missing vars.
+
+MODEL TIERS (2026):
+  Fast      — Qwen3-8B   (conversational, <2s TTFT)
+  Deep      — Qwen3-14B or DeepSeek-R1-Distill-14B (complex reasoning, code)
+  Reasoning — DeepSeek-R1-Distill-32B or Qwen3-32B  (Think Mode / DeepSearch)
+
+CLOUD UPGRADE PATH (8×H100 80GB):
+  Fast      — Qwen3-30B-A3B  (MoE, fast despite 30B params)
+  Deep      — Qwen3-72B      (dense, beats GPT-4o on most benchmarks)
+  Reasoning — DeepSeek-R1 671B or Qwen3-235B-A22B (MoE, world-class reasoning)
+  Vision    — Qwen3-VL-72B   (multimodal, beats Gemini 1.5 Pro on vision evals)
 """
 
 from functools import lru_cache
@@ -16,7 +27,7 @@ class Settings(BaseSettings):
     )
 
     # ── Identity ──────────────────────────────────────────────────────────────
-    ira_version: str = "0.2.0"
+    ira_version: str = "1.0.0"
     ira_domain: str = "jarvis.local"
 
     # ── Auth ──────────────────────────────────────────────────────────────────
@@ -59,18 +70,27 @@ class Settings(BaseSettings):
 
     # ── vLLM Endpoints ────────────────────────────────────────────────────────
     vllm_api_key: str
-    # Fast path — Llama 3.1 8B AWQ
+    # Fast path — Qwen3-8B (2026: best small model, beats Llama 3.1 8B significantly)
+    # Cloud upgrade: set FAST_MODEL=Qwen/Qwen3-30B-A3B (MoE, fits in 2×H100)
     vllm_fast_url: str = "http://vllm-fast:8001/v1"
-    vllm_fast_model: str = "llama-fast"
-    # Deep path — Qwen 2.5 14B AWQ
+    vllm_fast_model: str = "qwen3-fast"
+    # Deep path — DeepSeek-R1-Distill-Qwen-14B (reasoning + code, beats Qwen2.5 14B)
+    # Cloud upgrade: set DEEP_MODEL=Qwen/Qwen3-72B (requires 4×H100 80GB)
     vllm_deep_url: str = "http://vllm-deep:8002/v1"
-    vllm_deep_model: str = "qwen-deep"
+    vllm_deep_model: str = "qwen3-deep"
+    # Reasoning path — dedicated endpoint for Think Mode + DeepSearch
+    # Falls back to deep path if VLLM_REASONING_URL is not set
+    # Cloud upgrade: set REASONING_MODEL=deepseek-ai/DeepSeek-R1 or Qwen/Qwen3-235B-A22B
+    vllm_reasoning_url: str = ""    # e.g. http://vllm-reasoning:8003/v1
+    vllm_reasoning_model: str = "qwen3-reasoning"
 
     # Routing thresholds
-    fast_max_tokens: int = 2048
-    deep_max_tokens: int = 8192
-    fast_temperature: float = 0.7
-    deep_temperature: float = 0.4    # Lower temp for reasoning tasks
+    fast_max_tokens: int = 4096     # Upgraded: Qwen3 handles longer outputs at fast tier
+    deep_max_tokens: int = 16384    # Upgraded: 16k for deep reasoning tasks
+    reasoning_max_tokens: int = 32768  # Full context for Think Mode chains
+    fast_temperature: float = 0.6
+    deep_temperature: float = 0.3    # Lower temp for deterministic reasoning
+    reasoning_temperature: float = 0.1  # Near-deterministic for step-by-step thinking
 
     # ── Embeddings ────────────────────────────────────────────────────────────
     embedding_model: str = "BAAI/bge-large-en-v1.5"
@@ -132,6 +152,20 @@ class Settings(BaseSettings):
     x_fallback_api_url: str = "https://api.twitterapi.io"
     x_fallback_api_key: str = ""
 
+    # ── Image Generation ──────────────────────────────────────────────────────
+    # Provider: "replicate" (cloud, Flux Schnell) | "sd_webui" (local SD WebUI) | "comfyui"
+    # Cloud upgrade: "replicate" with REPLICATE_API_TOKEN gives instant Flux Pro access
+    image_gen_url: str = ""            # SD WebUI / ComfyUI local endpoint
+    image_gen_provider: str = "replicate"  # "replicate" | "sd_webui" | "comfyui"
+    replicate_api_token: str = ""
+
+    # ── Vision Model ──────────────────────────────────────────────────────────
+    # Multimodal endpoint for image analysis (Qwen3-VL or LLaVA-NeXT)
+    # Defaults to the deep path which should be a vision-capable model
+    # Cloud upgrade: set VLLM_VISION_URL=http://vllm-vision:8004/v1 with Qwen3-VL-72B
+    vllm_vision_url: str = ""
+    vllm_vision_model: str = "qwen3-vl"
+
     # ── Dev Mode (Shadow PC / local development) ──────────────────────────────
     # DEV_MODE=true routes LLM calls to a local Ollama instance,
     # bypasses biometric gate, and auto-authenticates as admin.
@@ -140,7 +174,8 @@ class Settings(BaseSettings):
     # Ollama base URL — host.docker.internal reaches Windows host from WSL2/Docker
     ollama_base_url: str = "http://host.docker.internal:11434/v1"
     # Ollama model to use for all requests in dev mode
-    dev_model: str = "llama3.2"
+    # Recommended: ollama pull qwen3:8b (best 2026 small model)
+    dev_model: str = "qwen3:8b"
 
 
 @lru_cache(maxsize=1)
