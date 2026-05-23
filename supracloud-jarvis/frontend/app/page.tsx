@@ -152,6 +152,7 @@ export default function Home() {
         mode={mode}
         onModeChange={setMode}
         onNewChat={handleNewChat}
+        token={token}
       />
 
       {/* Main column: top bar + chat */}

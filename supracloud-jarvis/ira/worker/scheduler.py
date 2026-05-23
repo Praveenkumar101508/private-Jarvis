@@ -29,6 +29,7 @@ from worker.security_monitor import run_security_scan
 from worker.business_monitor import run_business_scan
 from worker.reminders import check_due_reminders
 from worker.self_healing import run_self_healing_check, run_self_reflection
+from worker.backup import run_database_backup
 from tasks.calendar import sync_calcom_bookings
 
 logger = logging.getLogger("ira.scheduler")
@@ -160,6 +161,17 @@ def build_scheduler() -> AsyncIOScheduler:
         replace_existing=True,
     )
 
+    # Daily database backup — 03:00 UTC (low-traffic window)
+    scheduler.add_job(
+        _database_backup,
+        trigger="cron",
+        hour=3,
+        minute=0,
+        id="database_backup",
+        name="IRA Daily Database Backup",
+        replace_existing=True,
+    )
+
     return scheduler
 
 
@@ -204,6 +216,17 @@ async def _self_reflection() -> None:
         await run_self_reflection()
     except Exception as e:
         logger.error(f"Self-reflection failed: {e}", exc_info=True)
+
+
+async def _database_backup() -> None:
+    try:
+        path = await run_database_backup()
+        if path:
+            logger.info(f"Daily backup saved: {path.name}")
+        else:
+            logger.error("Daily backup FAILED — check pg_dump logs")
+    except Exception as e:
+        logger.error(f"Backup job failed: {e}", exc_info=True)
 
 
 def get_scheduler() -> AsyncIOScheduler:

@@ -201,6 +201,76 @@ async def _attempt_remediation(issue_type: str) -> str:
     return "No automated remediation available for this issue type."
 
 
+# ── Git-Aware Commit ─────────────────────────────────────────────────────────
+
+async def _git_commit_fix(issue_type: str, description: str) -> str:
+    """
+    Safely commit any self-healing file changes to git and attempt to push.
+
+    Safety gate: if uncommitted user changes already exist before we stage
+    anything, we skip entirely to avoid mixing self-healing commits with
+    in-progress user work.
+    """
+    try:
+        # 1. Safety check — bail if user already has uncommitted changes
+        proc = await asyncio.create_subprocess_exec(
+            "git", "status", "--porcelain",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=10)
+        if stdout.strip():
+            return "Git commit skipped — pre-existing uncommitted user changes detected"
+
+        # 2. Stage everything the self-healer touched
+        proc = await asyncio.create_subprocess_exec(
+            "git", "add", "-A",
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        await asyncio.wait_for(proc.communicate(), timeout=15)
+
+        # 3. Check if there is actually anything staged
+        proc = await asyncio.create_subprocess_exec(
+            "git", "diff", "--cached", "--quiet",
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        await asyncio.wait_for(proc.communicate(), timeout=10)
+        if proc.returncode == 0:
+            return "Git commit skipped — no file changes to commit"
+
+        # 4. Commit with a descriptive message
+        commit_msg = f"self-healing: auto-fixed {issue_type} — {description[:60]}"
+        proc = await asyncio.create_subprocess_exec(
+            "git", "commit", "-m", commit_msg,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=30)
+        if proc.returncode != 0:
+            return f"Git commit failed: {stderr.decode()[:100]}"
+
+        # 5. Push — best effort; may fail in air-gapped or unauthenticated envs
+        proc = await asyncio.create_subprocess_exec(
+            "git", "push",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        _, push_err = await asyncio.wait_for(proc.communicate(), timeout=60)
+        if proc.returncode == 0:
+            return f"Committed and pushed: '{commit_msg}'"
+        else:
+            return f"Committed locally (push skipped: {push_err.decode()[:60].strip()})"
+
+    except asyncio.TimeoutError:
+        return "Git operation timed out"
+    except FileNotFoundError:
+        return "git not available in this container environment"
+    except Exception as e:
+        return f"Git commit error: {e}"
+
+
 # ── Main healing loop ─────────────────────────────────────────────────────────
 
 async def run_self_healing_check() -> None:
@@ -233,6 +303,12 @@ async def run_self_healing_check() -> None:
     for issue in all_issues:
         result = await _attempt_remediation(issue["type"])
         remediation_log.append(f"[{issue['type']}] {result}")
+
+    # Git-commit any file-level changes the self-healer applied
+    primary = all_issues[0]
+    git_result = await _git_commit_fix(primary["type"], primary["detail"])
+    logger.info(f"Git auto-commit: {git_result}")
+    remediation_log.append(f"[git] {git_result}")
 
     # Log to security_events
     try:

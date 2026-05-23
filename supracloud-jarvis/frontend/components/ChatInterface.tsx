@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback } from "react";
-import { Send, Square, Copy, Check, Loader2, Zap, ChevronDown, ChevronUp } from "lucide-react";
+import { Send, Square, Copy, Check, Loader2, Zap, ChevronDown, ChevronUp, Paperclip, X, AlertCircle, DollarSign } from "lucide-react";
 import clsx from "clsx";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -16,6 +16,13 @@ interface AgentBubble {
   done: boolean;
 }
 
+interface AttachedFile {
+  name: string;
+  dataUrl: string;
+  base64: string;
+  mimeType: string;
+}
+
 interface Message {
   id: string;
   role: "user" | "assistant";
@@ -26,6 +33,7 @@ interface Message {
   isExpert?: boolean;
   expertAgents?: AgentBubble[];
   expertPanelOpen?: boolean;
+  imageDataUrl?: string;
 }
 
 interface Props {
@@ -47,7 +55,14 @@ const AGENT_LABELS: Record<string, string> = {
   tutor:          "Supracloud Tutor",
   digital:        "Digital Brain",
   security_gate:  "Security Gate",
+  vision:         "Vision Analysis",
+  expert_mode:    "Expert Mode",
 };
+
+function estimateExpertTokens(text: string): number {
+  // 5 agents each see the full context; rough 4 chars/token + fixed overhead
+  return Math.ceil((text.length / 4) * 5 + 2000);
+}
 
 // Suggestion chips per mode
 const SUGGESTIONS: Record<AppMode, string[]> = {
@@ -97,9 +112,15 @@ export default function ChatInterface({ sessionId, token, mode = "assistant" }: 
   const [isStreaming, setIsStreaming] = useState(false);
   const [streamingId, setStreamingId] = useState<string | null>(null);
   const [expertMode, setExpertMode] = useState(false);
+  const [costGuard, setCostGuard] = useState(true);
+  const [attachedFile, setAttachedFile] = useState<AttachedFile | null>(null);
+  const [showCostConfirm, setShowCostConfirm] = useState(false);
+  const [pendingQuery, setPendingQuery] = useState("");
+  const [estimatedTokens, setEstimatedTokens] = useState(0);
   const bottomRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -130,8 +151,116 @@ export default function ChatInterface({ sessionId, token, mode = "assistant" }: 
     );
   }, []);
 
+  const handleFileAttach = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const dataUrl = ev.target?.result as string;
+      const base64 = dataUrl.split(",")[1] ?? "";
+      setAttachedFile({ name: file.name, dataUrl, base64, mimeType: file.type || "image/jpeg" });
+    };
+    reader.readAsDataURL(file);
+    e.target.value = "";  // allow re-selecting same file
+  }, []);
+
+  const sendVisionMessage = useCallback(
+    async (content: string, file: AttachedFile) => {
+      const userMsgId = Date.now().toString();
+      const assistantMsgId = (Date.now() + 1).toString();
+
+      setMessages((prev) => [
+        ...prev,
+        { id: userMsgId, role: "user", content, imageDataUrl: file.dataUrl },
+        { id: assistantMsgId, role: "assistant", content: "", isStreaming: true },
+      ]);
+      setInput("");
+      setIsStreaming(true);
+      setStreamingId(assistantMsgId);
+
+      const controller = new AbortController();
+      abortRef.current = controller;
+
+      try {
+        const res = await fetch("/api/v1/chat/vision", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+          body: JSON.stringify({
+            message: content,
+            session_id: sessionId,
+            image_b64: file.base64,
+            mime_type: file.mimeType,
+          }),
+          signal: controller.signal,
+        });
+
+        if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
+
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buf = "";
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buf += decoder.decode(value, { stream: true });
+          const lines = buf.split("\n");
+          buf = lines.pop() ?? "";
+
+          for (const line of lines) {
+            if (!line.startsWith("data:")) continue;
+            const raw = line.slice(5).trim();
+            if (!raw) continue;
+            try {
+              const data = JSON.parse(raw);
+              if (data.token !== undefined) {
+                setMessages((prev) =>
+                  prev.map((m) =>
+                    m.id === assistantMsgId ? { ...m, content: m.content + data.token } : m
+                  )
+                );
+              } else if (data.done) {
+                setMessages((prev) =>
+                  prev.map((m) =>
+                    m.id === assistantMsgId
+                      ? { ...m, isStreaming: false, agent: "vision", latencyMs: data.latency_ms }
+                      : m
+                  )
+                );
+              } else if (data.error) {
+                setMessages((prev) =>
+                  prev.map((m) =>
+                    m.id === assistantMsgId
+                      ? { ...m, content: `⚠ ${data.error}`, isStreaming: false }
+                      : m
+                  )
+                );
+              }
+            } catch { /* ignore malformed frames */ }
+          }
+        }
+      } catch (err: any) {
+        if (err.name !== "AbortError") {
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === assistantMsgId
+                ? { ...m, content: "Vision error — please try again.", isStreaming: false }
+                : m
+            )
+          );
+        }
+      } finally {
+        setIsStreaming(false);
+        setStreamingId(null);
+        abortRef.current = null;
+        textareaRef.current?.focus();
+      }
+    },
+    [sessionId, token]
+  );
+
   const sendExpertMessage = useCallback(
-    async (content: string) => {
+    async (content: string, imageb64?: string, imageMime = "image/jpeg") => {
       const userMsgId = Date.now().toString();
       const assistantMsgId = (Date.now() + 1).toString();
 
@@ -163,7 +292,12 @@ export default function ChatInterface({ sessionId, token, mode = "assistant" }: 
         const res = await fetch("/api/v1/chat/expert", {
           method: "POST",
           headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-          body: JSON.stringify({ message: content, session_id: sessionId, stream: true }),
+          body: JSON.stringify({
+            message: content,
+            session_id: sessionId,
+            stream: true,
+            ...(imageb64 ? { image_b64: imageb64, mime_type: imageMime } : {}),
+          }),
           signal: controller.signal,
         });
 
@@ -241,7 +375,23 @@ export default function ChatInterface({ sessionId, token, mode = "assistant" }: 
       if (!content || isStreaming) return;
 
       if (expertMode) {
-        await sendExpertMessage(content);
+        // Cost Guard: warn before large queries (>50k estimated tokens across 5 agents)
+        const estimated = estimateExpertTokens(content + (attachedFile ? " [image]" : ""));
+        if (costGuard && estimated > 50_000) {
+          setEstimatedTokens(estimated);
+          setPendingQuery(content);
+          setShowCostConfirm(true);
+          return;
+        }
+        await sendExpertMessage(content, attachedFile?.base64, attachedFile?.mimeType);
+        setAttachedFile(null);
+        return;
+      }
+
+      // Vision path: image attached in normal mode
+      if (attachedFile) {
+        await sendVisionMessage(content, attachedFile);
+        setAttachedFile(null);
         return;
       }
 
@@ -347,7 +497,7 @@ export default function ChatInterface({ sessionId, token, mode = "assistant" }: 
         textareaRef.current?.focus();
       }
     },
-    [input, isStreaming, sessionId, token, mode, expertMode, sendExpertMessage]
+    [input, isStreaming, sessionId, token, mode, expertMode, costGuard, attachedFile, sendExpertMessage, sendVisionMessage]
   );
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -377,6 +527,43 @@ export default function ChatInterface({ sessionId, token, mode = "assistant" }: 
 
   return (
     <div className="flex flex-col h-full">
+      {/* Cost Guard confirmation modal */}
+      {showCostConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+          <div className="bg-neutral-900 border border-violet-500/30 rounded-2xl p-6 max-w-sm mx-4 shadow-2xl">
+            <div className="flex items-center gap-2 mb-3">
+              <AlertCircle className="w-5 h-5 text-amber-400" />
+              <h3 className="text-white font-semibold">Cost Guard</h3>
+            </div>
+            <p className="text-neutral-300 text-sm mb-4">
+              This Expert Mode query will use approximately{" "}
+              <span className="text-amber-400 font-medium">
+                {estimatedTokens.toLocaleString()} tokens
+              </span>{" "}
+              across all 5 agents. Continue?
+            </p>
+            <div className="flex gap-2">
+              <button
+                onClick={() => {
+                  setShowCostConfirm(false);
+                  sendExpertMessage(pendingQuery, attachedFile?.base64, attachedFile?.mimeType);
+                  setAttachedFile(null);
+                  setPendingQuery("");
+                }}
+                className="flex-1 py-2 rounded-xl bg-violet-600 hover:bg-violet-700 text-white text-sm font-medium transition-colors"
+              >
+                Proceed
+              </button>
+              <button
+                onClick={() => { setShowCostConfirm(false); setPendingQuery(""); }}
+                className="flex-1 py-2 rounded-xl bg-neutral-800 hover:bg-neutral-700 text-neutral-300 text-sm transition-colors"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {/* Message list */}
       <div className="flex-1 overflow-y-auto px-4 py-6">
         {messages.length === 0 ? (
@@ -461,7 +648,16 @@ export default function ChatInterface({ sessionId, token, mode = "assistant" }: 
                         )}
                       </div>
                     ) : (
-                      <p className="whitespace-pre-wrap">{msg.content}</p>
+                      <>
+                        {msg.imageDataUrl && (
+                          <img
+                            src={msg.imageDataUrl}
+                            alt="attachment"
+                            className="mb-2 max-w-[240px] rounded-xl border border-neutral-600"
+                          />
+                        )}
+                        <p className="whitespace-pre-wrap">{msg.content}</p>
+                      </>
                     )}
                   </div>
                   {/* Agent Collaboration Panel (Expert Mode) */}
@@ -527,7 +723,30 @@ export default function ChatInterface({ sessionId, token, mode = "assistant" }: 
       {/* Input bar */}
       <div className="border-t border-neutral-800 px-4 py-3 flex-shrink-0">
         <div className="max-w-3xl mx-auto">
-          {hasUrl && (
+          {/* Hidden file input */}
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/jpeg,image/png,image/gif,image/webp"
+            className="hidden"
+            onChange={handleFileAttach}
+          />
+
+          {/* Attached image preview */}
+          {attachedFile && (
+            <div className="mb-2 flex items-center gap-2 px-3 py-1.5 rounded-lg bg-violet-500/10 border border-violet-500/20">
+              <img src={attachedFile.dataUrl} alt="preview" className="w-8 h-8 rounded object-cover flex-shrink-0" />
+              <span className="text-violet-300 text-xs flex-1 truncate">{attachedFile.name}</span>
+              <button
+                onClick={() => setAttachedFile(null)}
+                className="text-neutral-500 hover:text-neutral-300 transition-colors flex-shrink-0"
+              >
+                <X className="w-3 h-3" />
+              </button>
+            </div>
+          )}
+
+          {hasUrl && !attachedFile && (
             <div className="mb-2 px-3 py-1.5 rounded-lg bg-indigo-500/10 border border-indigo-500/20 text-indigo-300 text-xs flex items-center gap-1.5">
               <span>🔗</span>
               <span>IRA will browse and summarize this link for you.</span>
@@ -554,6 +773,20 @@ export default function ChatInterface({ sessionId, token, mode = "assistant" }: 
               rows={1}
               className="flex-1 bg-transparent text-sm text-white placeholder-neutral-600 resize-none outline-none py-1 leading-relaxed"
             />
+            {/* Image attach button */}
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              disabled={isStreaming}
+              title="Attach image for vision analysis"
+              className={clsx(
+                "flex-shrink-0 w-7 h-7 rounded-lg flex items-center justify-center transition-all mb-0.5",
+                attachedFile
+                  ? "bg-violet-500/20 border border-violet-500/50 text-violet-400"
+                  : "text-neutral-600 hover:text-neutral-400 disabled:opacity-30"
+              )}
+            >
+              <Paperclip className="w-3.5 h-3.5" />
+            </button>
             {isStreaming ? (
               <button
                 onClick={stopStreaming}
@@ -583,19 +816,36 @@ export default function ChatInterface({ sessionId, token, mode = "assistant" }: 
               {isTutor && " · Tutor mode enabled"}
               {isBodyguard && " · Bodyguard active"}
             </p>
-            <button
-              onClick={() => setExpertMode((v) => !v)}
-              title="Expert Mode: 5 agents collaborate in parallel"
-              className={clsx(
-                "flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] border transition-all",
-                expertMode
-                  ? "bg-violet-500/20 border-violet-500/50 text-violet-300"
-                  : "border-neutral-700 text-neutral-600 hover:text-neutral-400 hover:border-neutral-600"
+            <div className="flex items-center gap-1.5">
+              <button
+                onClick={() => setExpertMode((v) => !v)}
+                title="Expert Mode: 5 agents collaborate in parallel"
+                className={clsx(
+                  "flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] border transition-all",
+                  expertMode
+                    ? "bg-violet-500/20 border-violet-500/50 text-violet-300"
+                    : "border-neutral-700 text-neutral-600 hover:text-neutral-400 hover:border-neutral-600"
+                )}
+              >
+                <Zap className="w-3 h-3" />
+                Expert Mode
+              </button>
+              {expertMode && (
+                <button
+                  onClick={() => setCostGuard((v) => !v)}
+                  title="Cost Guard: warns before large Expert Mode queries (>50k tokens)"
+                  className={clsx(
+                    "flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] border transition-all",
+                    costGuard
+                      ? "bg-amber-500/20 border-amber-500/50 text-amber-300"
+                      : "border-neutral-700 text-neutral-600 hover:text-neutral-400 hover:border-neutral-600"
+                  )}
+                >
+                  <DollarSign className="w-3 h-3" />
+                  Cost Guard
+                </button>
               )}
-            >
-              <Zap className="w-3 h-3" />
-              Expert Mode
-            </button>
+            </div>
           </div>
         </div>
       </div>

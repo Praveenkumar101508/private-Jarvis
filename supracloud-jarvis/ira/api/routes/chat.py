@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import os
 import time
 import uuid
 
@@ -40,6 +41,8 @@ class ChatRequest(BaseModel):
     is_voice_owner: bool = False   # Set True by voice agent after biometric verification
     is_voice: bool = False         # Set True by voice pipeline for concise reply routing
     mode: str = "assistant"        # "assistant" | "tutor"
+    image_b64: str | None = Field(None, description="Base64-encoded image for vision queries")
+    mime_type: str = Field("image/jpeg")
 
 
 class ChatResponse(BaseModel):
@@ -77,6 +80,31 @@ def _is_voice_service(username: str) -> bool:
 def _stable_hash(text: str) -> str:
     """SHA-256-based stable hash for cache keys (not Python's randomised hash)."""
     return hashlib.sha256(text.encode()).hexdigest()[:16]
+
+
+# ── Expert Mode rate limiting ─────────────────────────────────────────────────
+
+_EXPERT_RATE_LIMIT = 3     # max Expert Mode calls per user per hour
+_EXPERT_RATE_WINDOW = 3600  # sliding window in seconds
+
+
+async def _check_expert_rate_limit(username: str) -> tuple[bool, int]:
+    """
+    Increment the per-user Expert Mode counter and check against the limit.
+    Returns (allowed, calls_remaining). Fails open if Redis is unavailable.
+    """
+    key = f"expert_rate:{username}"
+    try:
+        from utils.redis_client import get_redis
+        redis = get_redis()
+        count = await redis.incr(key)
+        if count == 1:
+            # First call in this window — set the TTL
+            await redis.expire(key, _EXPERT_RATE_WINDOW)
+        remaining = max(0, _EXPERT_RATE_LIMIT - count)
+        return count <= _EXPERT_RATE_LIMIT, remaining
+    except Exception:
+        return True, _EXPERT_RATE_LIMIT  # fail open if Redis is down
 
 
 # ── Standard (non-streaming) chat ─────────────────────────────────────────────
@@ -263,9 +291,22 @@ async def chat_expert(
     Grok-style Expert Mode: 5 specialist agents run in true parallel, debate,
     and stream their individual thoughts + supervisor synthesis via SSE.
 
+    Rate limit: max 3 sessions per user per hour (tracked in Redis).
     Events: {"agent":"researcher","label":"Researcher","emoji":"🔬","chunk":"...","done":false}
             {"agent":"supervisor","done":true,"latency_ms":N}
     """
+    # Server-side rate limit: 3 Expert Mode sessions per hour per user
+    allowed, remaining = await _check_expert_rate_limit(_user)
+    if not allowed:
+        raise HTTPException(
+            status_code=429,
+            detail=(
+                f"Expert Mode rate limit reached ({_EXPERT_RATE_LIMIT} sessions/hour). "
+                "Please wait before starting another Expert Mode session."
+            ),
+            headers={"X-Expert-Remaining": "0", "Retry-After": "3600"},
+        )
+
     from agents.expert_mode import stream_expert_mode
     from memory.store import retrieve
 
@@ -274,15 +315,100 @@ async def chat_expert(
     memory_ctx = "\n".join(m["content"] for m in memories) if memories else ""
 
     async def expert_generator():
-        import json
         async for event in stream_expert_mode(
             query=req.message,
             memory_context=memory_ctx,
             is_owner=owner,
+            image_b64=req.image_b64,
+            mime_type=req.mime_type,
         ):
             yield {"data": json.dumps(event)}
 
-    return EventSourceResponse(expert_generator())
+    return EventSourceResponse(
+        expert_generator(),
+        headers={"X-Expert-Remaining": str(remaining)},
+    )
+
+
+# ── Vision endpoint ───────────────────────────────────────────────────────────
+
+class VisionRequest(BaseModel):
+    message: str = Field(..., min_length=1, max_length=8_000)
+    session_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    image_b64: str = Field(..., description="Base64-encoded image")
+    mime_type: str = Field("image/jpeg")
+
+
+@router.post("/vision")
+async def chat_vision(
+    req: VisionRequest,
+    _user: str = Depends(require_auth),
+):
+    """
+    Vision-capable streaming chat.  Accepts a base64-encoded image alongside
+    a text prompt.  Uses VLLM_VISION_URL if configured; falls back to the
+    fast text model with a graceful degradation note.
+    """
+    conv_id = await ensure_conversation(req.session_id)
+    vision_url = os.getenv("VLLM_VISION_URL", "")
+    data_url = f"data:{req.mime_type};base64,{req.image_b64}"
+
+    if vision_url:
+        user_content: list | str = [
+            {"type": "text", "text": req.message},
+            {"type": "image_url", "image_url": {"url": data_url}},
+        ]
+    else:
+        user_content = (
+            f"{req.message}\n\n[Note: an image was attached but no vision model is configured. "
+            "Set VLLM_VISION_URL in .env to enable image analysis.]"
+        )
+
+    messages = [
+        {"role": "system", "content": _get_agent_system_prompt("conversational")},
+        {"role": "user", "content": user_content},
+    ]
+
+    async def vision_generator():
+        t0 = time.monotonic()
+        full_response: list[str] = []
+        try:
+            if vision_url:
+                cfg = get_settings()
+                from openai import AsyncOpenAI
+                vision_client = AsyncOpenAI(api_key=cfg.vllm_api_key, base_url=vision_url)
+                stream = await vision_client.chat.completions.create(
+                    model="vision",
+                    messages=messages,  # type: ignore[arg-type]
+                    stream=True,
+                    max_tokens=2048,
+                    temperature=0.3,
+                )
+                async for chunk in stream:
+                    token = chunk.choices[0].delta.content or ""
+                    if token:
+                        full_response.append(token)
+                        yield {"data": json.dumps({"token": token})}
+            else:
+                async for token in stream_tokens(messages, use_deep=False):
+                    full_response.append(token)
+                    yield {"data": json.dumps({"token": token})}
+
+            latency = int((time.monotonic() - t0) * 1000)
+            yield {"data": json.dumps({"done": True, "agent": "vision", "latency_ms": latency})}
+
+            from memory.store import save_message
+            final_text = "".join(full_response)
+            asyncio.create_task(save_message(conv_id, "user", req.message))
+            asyncio.create_task(save_message(
+                conv_id, "assistant", final_text,
+                model_used="vision" if vision_url else "llama-fast",
+                latency_ms=latency,
+            ))
+        except Exception as e:
+            yield {"data": json.dumps({"error": f"Vision error: {str(e)[:100]}"})}
+
+    return EventSourceResponse(vision_generator())
 
 
 def _get_agent_system_prompt(agent: str, is_voice: bool = False) -> str:

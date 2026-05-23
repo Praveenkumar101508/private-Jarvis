@@ -228,9 +228,14 @@ async def stream_expert_mode(
     query: str,
     memory_context: str = "",
     is_owner: bool = False,
+    image_b64: str | None = None,
+    mime_type: str = "image/jpeg",
 ) -> AsyncIterator[dict]:
     """
     Stream Expert Mode results agent-by-agent as they complete.
+
+    If image_b64 is provided, all 5 agents receive the image as part of
+    their multimodal user message (requires a vision-capable model).
 
     Yields dicts with:
       {"agent": name, "label": label, "emoji": emoji, "chunk": text, "done": False}
@@ -240,12 +245,21 @@ async def stream_expert_mode(
     owner = cfg.owner_name
     t0 = time.monotonic()
 
+    def _user_content(text: str):
+        """Build user message content — multimodal if image attached."""
+        if image_b64:
+            return [
+                {"type": "text", "text": text},
+                {"type": "image_url", "image_url": {"url": f"data:{mime_type};base64,{image_b64}"}},
+            ]
+        return text
+
     # Stream each specialist result as soon as it's ready
     async def _stream_agent(name, label, emoji, system):
         messages = [{"role": "system", "content": system}]
         if memory_context:
             messages.append({"role": "system", "content": f"Context:\n{memory_context}"})
-        messages.append({"role": "user", "content": query})
+        messages.append({"role": "user", "content": _user_content(query)})
         result_chunks = []
         try:
             async for token in stream_tokens(messages, use_deep=True):
@@ -300,7 +314,7 @@ async def stream_expert_mode(
             "role": "system",
             "content": f"Specialist agent outputs:\n\n{agent_summary}",
         },
-        {"role": "user", "content": f"Question: {query}\n\nSynthesize the definitive answer."},
+        {"role": "user", "content": _user_content(f"Question: {query}\n\nSynthesize the definitive answer.")},
     ]
 
     try:

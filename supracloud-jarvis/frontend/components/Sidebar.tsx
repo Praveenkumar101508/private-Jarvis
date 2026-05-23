@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { Shield, GraduationCap, Bot, ChevronLeft, ChevronRight, Clock, X } from "lucide-react";
+import { useState, useRef } from "react";
+import { Shield, GraduationCap, Bot, ChevronLeft, ChevronRight, Clock, Download, HardDrive, Upload, RefreshCw } from "lucide-react";
 import clsx from "clsx";
 
 export type AppMode = "assistant" | "tutor" | "bodyguard";
@@ -18,6 +18,7 @@ interface Props {
   onModeChange: (mode: AppMode) => void;
   onNewChat: () => void;
   recentChats?: ConversationItem[];
+  token?: string;
 }
 
 const MODES: { id: AppMode; label: string; icon: React.ReactNode; accent: string; description: string }[] = [
@@ -55,8 +56,77 @@ function formatRelative(date: Date): string {
   return `${Math.floor(hrs / 24)}d ago`;
 }
 
-export default function Sidebar({ mode, onModeChange, onNewChat, recentChats = [] }: Props) {
+export default function Sidebar({ mode, onModeChange, onNewChat, recentChats = [], token = "" }: Props) {
   const [collapsed, setCollapsed] = useState(false);
+  const [backupStatus, setBackupStatus] = useState<string>("");
+  const [backupLoading, setBackupLoading] = useState(false);
+  const restoreInputRef = useRef<HTMLInputElement>(null);
+
+  const authHeaders = { Authorization: `Bearer ${token}` };
+
+  const triggerBackup = async () => {
+    setBackupLoading(true);
+    setBackupStatus("Creating backup…");
+    try {
+      const res = await fetch("/api/v1/backup/create", { method: "POST", headers: authHeaders });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ detail: "Error" }));
+        setBackupStatus(`Failed: ${err.detail}`);
+        return;
+      }
+      const data = await res.json();
+      setBackupStatus(`Saved: ${data.filename} (${data.size_mb} MB)`);
+    } catch {
+      setBackupStatus("Network error");
+    } finally {
+      setBackupLoading(false);
+    }
+  };
+
+  const downloadLatest = async () => {
+    try {
+      const listRes = await fetch("/api/v1/backup/list", { headers: authHeaders });
+      if (!listRes.ok) { setBackupStatus("Cannot list backups"); return; }
+      const { backups } = await listRes.json();
+      if (!backups || backups.length === 0) { setBackupStatus("No backups found"); return; }
+      const latest = backups[0].filename;
+      const a = document.createElement("a");
+      a.href = `/api/v1/backup/download/${latest}`;
+      // Pass auth via a temporary anchor — works for same-origin only
+      a.setAttribute("download", latest);
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    } catch {
+      setBackupStatus("Download failed");
+    }
+  };
+
+  const handleRestoreFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.name.endsWith(".sql.gz")) { setBackupStatus("Must be a .sql.gz file"); return; }
+    if (!confirm(`Restore database from "${file.name}"? This will overwrite current data.`)) return;
+
+    setBackupLoading(true);
+    setBackupStatus("Restoring…");
+    const form = new FormData();
+    form.append("file", file);
+    try {
+      const res = await fetch("/api/v1/backup/restore", {
+        method: "POST",
+        headers: authHeaders,
+        body: form,
+      });
+      const data = await res.json().catch(() => ({ detail: "Parse error" }));
+      setBackupStatus(res.ok ? `Restored: ${data.message}` : `Failed: ${data.detail}`);
+    } catch {
+      setBackupStatus("Restore network error");
+    } finally {
+      setBackupLoading(false);
+      e.target.value = "";
+    }
+  };
 
   const activeMode = MODES.find((m) => m.id === mode) ?? MODES[0];
 
@@ -150,6 +220,52 @@ export default function Sidebar({ mode, onModeChange, onNewChat, recentChats = [
               </button>
             ))
           )}
+        </div>
+      )}
+
+      {/* Backup & Restore section */}
+      {!collapsed && token && (
+        <div className="px-2 py-3 border-t border-neutral-800/50">
+          <p className="px-1 pb-2 text-[10px] font-semibold text-neutral-600 uppercase tracking-wider flex items-center gap-1">
+            <HardDrive className="w-2.5 h-2.5" />
+            Backup & Restore
+          </p>
+          <input
+            ref={restoreInputRef}
+            type="file"
+            accept=".sql.gz"
+            className="hidden"
+            onChange={handleRestoreFile}
+          />
+          <div className="space-y-1">
+            <button
+              onClick={triggerBackup}
+              disabled={backupLoading}
+              className="w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs text-neutral-400 hover:text-white hover:bg-neutral-800 transition-colors disabled:opacity-40"
+            >
+              {backupLoading ? <RefreshCw className="w-3 h-3 animate-spin" /> : <HardDrive className="w-3 h-3" />}
+              Create Backup Now
+            </button>
+            <button
+              onClick={downloadLatest}
+              disabled={backupLoading}
+              className="w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs text-neutral-400 hover:text-white hover:bg-neutral-800 transition-colors disabled:opacity-40"
+            >
+              <Download className="w-3 h-3" />
+              Download Latest
+            </button>
+            <button
+              onClick={() => restoreInputRef.current?.click()}
+              disabled={backupLoading}
+              className="w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs text-red-500 hover:text-red-400 hover:bg-red-500/10 transition-colors disabled:opacity-40"
+            >
+              <Upload className="w-3 h-3" />
+              Restore from File
+            </button>
+            {backupStatus && (
+              <p className="px-2 text-[10px] text-neutral-500 break-words leading-tight">{backupStatus}</p>
+            )}
+          </div>
         </div>
       )}
 

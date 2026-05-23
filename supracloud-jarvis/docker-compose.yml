@@ -297,6 +297,8 @@ services:
     volumes:
       # HF cache shared with vLLM — BGE model downloads here
       - hf_cache:/home/jarvis/.cache/huggingface
+      # Backup volume — API serves backup downloads from here
+      - backup_data:/backups:ro
     ports:
       - "127.0.0.1:8000:8000"
     depends_on:
@@ -366,11 +368,16 @@ services:
       CALCOM_API_URL: ${CALCOM_API_URL:-https://api.cal.com}
       # Security monitor
       NGINX_LOG_PATH: /var/log/nginx/access.log
+      # Backup configuration
+      BACKUP_DIR: /backups
+      BACKUP_KEEP: ${BACKUP_KEEP:-7}
     volumes:
       # Read nginx logs for security analysis
       - nginx_logs:/var/log/nginx:ro
       # SSH auth log for intrusion detection (read-only bind mount from host)
       - /var/log/auth.log:/var/log/auth.log:ro
+      # Backup storage (pg_dump writes here; API serves downloads from here)
+      - backup_data:/backups
     depends_on:
       postgres:
         condition: service_healthy
@@ -507,6 +514,8 @@ volumes:
   vllm_deep_cache:
     driver: local
   nginx_logs:
+    driver: local
+  backup_data:          # Database backups (pg_dump → .sql.gz, kept 7 days)
     driver: local
 
 # ── Networks ──────────────────────────────────────────────────────────────────

@@ -39,6 +39,7 @@ from api.routes.notifications import router as notifications_router
 from api.routes.briefing import router as briefing_router
 from api.routes.voice import router as voice_router
 from api.routes.webhooks import router as webhooks_router
+from api.routes.backup import router as backup_router
 from api.middleware.auth import authenticate_user, create_token
 
 logging.basicConfig(
@@ -144,6 +145,7 @@ def create_app() -> FastAPI:
     app.include_router(notifications_router)         # /notifications + /ws/notifications
     app.include_router(voice_router, prefix="/api/v1")   # /voice/token + /voice/enroll
     app.include_router(webhooks_router)              # /webhooks/lead + /webhooks/booking
+    app.include_router(backup_router, prefix="/api/v1")  # /backup/list + /backup/download + /backup/restore
 
     # ── Global error handler ──────────────────────────────────────────────────
     @app.exception_handler(Exception)
