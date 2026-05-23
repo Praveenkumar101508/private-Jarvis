@@ -244,16 +244,20 @@ async def chat_stream(
     from agents.grok_personality import build_grok_system_prompt
 
     # ── Grok mode: override personality and auto-enable search ────────────────
+    used_live_x = False
     if req.grok_mode:
-        # Run live search in parallel with memory retrieval
         memories_task = asyncio.create_task(retrieve(req.message))
         search_task = asyncio.create_task(get_search_context(req.message))
-        memories_raw, search_ctx = await asyncio.gather(memories_task, search_task)
+        memories_raw, (search_ctx, search_meta) = await asyncio.gather(memories_task, search_task)
+        used_live_x = search_meta.get("used_live_x", False)
         system_prompt = build_grok_system_prompt(context=search_ctx)
     else:
         memories_raw = await retrieve(req.message)
-        # Auto-search even without Grok mode if query clearly needs live data
-        search_ctx = await get_search_context(req.message) if not req.is_voice else ""
+        if not req.is_voice:
+            search_ctx, search_meta = await get_search_context(req.message)
+            used_live_x = search_meta.get("used_live_x", False)
+        else:
+            search_ctx = ""
         system_prompt = _get_agent_system_prompt(active_agent, is_voice=req.is_voice)
 
     memory_ctx = "\n".join(m["content"] for m in memories_raw) if memories_raw else ""
@@ -366,6 +370,7 @@ async def chat_stream(
                     "agent": active_agent,
                     "latency_ms": latency,
                     "session_id": req.session_id,
+                    "used_live_x": used_live_x,
                 })
             }
 
@@ -415,10 +420,11 @@ async def chat_expert(
 
     # Gather memory + live search in parallel for Expert Mode
     from utils.search_tools import get_search_context as _get_search_ctx
-    memories_raw, search_ctx = await asyncio.gather(
+    memories_raw, (search_ctx, search_meta) = await asyncio.gather(
         retrieve(req.message),
         _get_search_ctx(req.message),
     )
+    expert_used_live_x = search_meta.get("used_live_x", False)
     memory_ctx = "\n".join(m["content"] for m in memories_raw) if memories_raw else ""
     if search_ctx:
         memory_ctx = f"{memory_ctx}\n\n{search_ctx}".strip()
@@ -431,6 +437,9 @@ async def chat_expert(
             image_b64=req.image_b64,
             mime_type=req.mime_type,
         ):
+            # Inject used_live_x into the final supervisor done event
+            if event.get("done") and event.get("agent") == "supervisor":
+                event["used_live_x"] = expert_used_live_x
             yield {"data": json.dumps(event)}
 
     return EventSourceResponse(

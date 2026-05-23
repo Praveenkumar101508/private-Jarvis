@@ -125,6 +125,13 @@ class Settings(BaseSettings):
     # JWT sub that the voice agent uses — only this identity may set is_voice_owner
     ira_voice_service_username: str = "ira-voice"
 
+    # ── X / Twitter Search ───────────────────────────────────────────────────
+    # Official X API v2 bearer token — get at developer.x.com (required for best results)
+    twitter_bearer_token: str = ""
+    # Cheap third-party X API fallback (e.g. twitterapi.io) — $5/month, no rate limits
+    x_fallback_api_url: str = "https://api.twitterapi.io"
+    x_fallback_api_key: str = ""
+
     # ── Dev Mode (Shadow PC / local development) ──────────────────────────────
     # DEV_MODE=true routes LLM calls to a local Ollama instance,
     # bypasses biometric gate, and auto-authenticates as admin.

@@ -298,6 +298,8 @@ services:
       IMAGE_GEN_URL: ${IMAGE_GEN_URL:-}
       REPLICATE_API_TOKEN: ${REPLICATE_API_TOKEN:-}
       TWITTER_BEARER_TOKEN: ${TWITTER_BEARER_TOKEN:-}
+      X_FALLBACK_API_URL: ${X_FALLBACK_API_URL:-https://api.twitterapi.io}
+      X_FALLBACK_API_KEY: ${X_FALLBACK_API_KEY:-}
     volumes:
       # HF cache shared with vLLM — BGE model downloads here
       - hf_cache:/home/jarvis/.cache/huggingface
@@ -379,6 +381,8 @@ services:
       IMAGE_GEN_URL: ${IMAGE_GEN_URL:-}
       REPLICATE_API_TOKEN: ${REPLICATE_API_TOKEN:-}
       TWITTER_BEARER_TOKEN: ${TWITTER_BEARER_TOKEN:-}
+      X_FALLBACK_API_URL: ${X_FALLBACK_API_URL:-https://api.twitterapi.io}
+      X_FALLBACK_API_KEY: ${X_FALLBACK_API_KEY:-}
     volumes:
       # Read nginx logs for security analysis
       - nginx_logs:/var/log/nginx:ro

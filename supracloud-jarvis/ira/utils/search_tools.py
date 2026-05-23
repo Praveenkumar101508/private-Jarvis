@@ -2,36 +2,41 @@
 IRA Real-Time Search Tools — Web Search + X (Twitter) Search.
 
 Web search uses DuckDuckGo (no API key required, async wrapper).
-X/Twitter search uses Twitter API v2 if TWITTER_BEARER_TOKEN is set,
-otherwise falls back to DuckDuckGo site:twitter.com search.
+X/Twitter search delegates to utils.x_search which supports:
+  - Official X API v2 (TWITTER_BEARER_TOKEN)
+  - Cheap fallback API (X_FALLBACK_API_KEY + X_FALLBACK_API_URL)
+  - DuckDuckGo site:x.com last-resort fallback
 
-Designed to run before LLM inference so results are injected as live context.
+get_search_context() returns (context_str, meta) where meta carries
+  used_live_x: bool — set True when real X API results were fetched,
+  which triggers the "Live from X" badge in the frontend.
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
-import os
 import re
 
 logger = logging.getLogger("ira.search")
 
-_TWITTER_BEARER = os.getenv("TWITTER_BEARER_TOKEN", "")
-
-# Detect queries that need current information
+# Detect queries that benefit from real-time web search
 _SEARCH_RE = re.compile(
     r"\b(today|yesterday|this week|this month|current|latest|recent|breaking|"
-    r"news|now|2024|2025|2026|price of|stock price|weather|who is|what is happening|"
-    r"just announced|just released|search for|look up|find|trending|viral|"
-    r"x\.com|twitter|tweet)\b",
+    r"news|now|2024|2025|2026|price of|stock price|weather|who is|"
+    r"what is happening|just announced|just released|search for|look up|find|"
+    r"trending|viral|x\.com|twitter|tweet)\b",
     re.I,
 )
 
-# Detect queries specifically about X/Twitter content
+# Detect queries specifically about X/Twitter content or celebrity/country sentiment
 _X_RE = re.compile(
-    r"\b(twitter|x\.com|tweet|trending on x|what.*x|"
-    r"people saying|everyone.*saying|social.*opinion|viral)\b",
+    r"\b(twitter|x\.com|tweet|trending on x|"
+    r"people (are |were )?saying|everyone.*saying|social.*opinion|viral|"
+    r"what.*bollywood|what.*celebrities|what.*people think|public opinion|"
+    r"elon musk|elon says?|trump says?|trump tweet|modi says?|modi tweet|"
+    r"celebrity opinion|actor (said?|think|tweet)|"
+    r"india.*think|uk.*think|us.*think|brazil.*think)\b",
     re.I,
 )
 
@@ -55,22 +60,18 @@ _IMAGE_EDIT_RE = re.compile(
 
 
 def should_search(query: str) -> bool:
-    """Return True if the query would benefit from real-time web search."""
     return bool(_SEARCH_RE.search(query))
 
 
 def should_x_search(query: str) -> bool:
-    """Return True if the query specifically wants X/Twitter content."""
     return bool(_X_RE.search(query))
 
 
 def is_image_gen_request(query: str) -> bool:
-    """Return True if the query is asking IRA to generate an image."""
     return bool(_IMAGE_GEN_RE.search(query))
 
 
 def is_image_edit_request(query: str) -> bool:
-    """Return True if the query is asking IRA to edit an attached image."""
     return bool(_IMAGE_EDIT_RE.search(query))
 
 
@@ -79,7 +80,7 @@ def is_image_edit_request(query: str) -> bool:
 async def web_search(query: str, max_results: int = 5) -> list[dict]:
     """
     Search the web via DuckDuckGo. Returns list of {title, url, snippet}.
-    No API key required. Runs in a thread executor to avoid blocking the loop.
+    Runs in a thread executor to avoid blocking the event loop.
     """
     try:
         loop = asyncio.get_running_loop()
@@ -110,78 +111,20 @@ def _ddg_search(query: str, max_results: int) -> list[dict]:
 
 async def x_search(query: str, max_results: int = 10) -> list[dict]:
     """
-    Search X (Twitter) for recent posts. Uses Twitter API v2 if
-    TWITTER_BEARER_TOKEN is configured; otherwise falls back to DDG.
+    Country-aware X search. Delegates to utils.x_search.smart_x_search().
+    Returns results as plain dicts (legacy format for callers that don't need meta).
     """
-    if _TWITTER_BEARER:
-        results = await _twitter_api_search(query, max_results)
-        if results:
-            return results
-    return await _twitter_ddg_fallback(query, max_results)
+    from utils.x_search import smart_x_search
+    results, _used_live, _cc = await smart_x_search(query, max_results)
+    return [r._asdict() for r in results]
 
 
-async def _twitter_api_search(query: str, max_results: int) -> list[dict]:
-    try:
-        import httpx
-        headers = {"Authorization": f"Bearer {_TWITTER_BEARER}"}
-        params = {
-            "query": f"{query} -is:retweet lang:en",
-            "max_results": min(max(10, max_results), 100),
-            "tweet.fields": "created_at,author_id,text,public_metrics",
-            "expansions": "author_id",
-            "user.fields": "name,username",
-        }
-        async with httpx.AsyncClient(timeout=10) as client:
-            resp = await client.get(
-                "https://api.twitter.com/2/tweets/search/recent",
-                headers=headers,
-                params=params,
-            )
-            resp.raise_for_status()
-            data = resp.json()
-
-        tweets = data.get("data", [])
-        users = {u["id"]: u for u in data.get("includes", {}).get("users", [])}
-        results = []
-        for t in tweets:
-            author = users.get(t.get("author_id", ""), {})
-            results.append({
-                "text": t["text"],
-                "author": author.get("name", "Unknown"),
-                "username": f"@{author.get('username', 'unknown')}",
-                "created_at": t.get("created_at", ""),
-                "url": f"https://twitter.com/{author.get('username','i')}/status/{t['id']}",
-                "likes": t.get("public_metrics", {}).get("like_count", 0),
-                "retweets": t.get("public_metrics", {}).get("retweet_count", 0),
-            })
-        return results
-    except Exception as e:
-        logger.warning(f"Twitter API search failed: {e}")
-        return []
-
-
-async def _twitter_ddg_fallback(query: str, max_results: int) -> list[dict]:
-    results = await web_search(f"site:twitter.com OR site:x.com {query}", max_results)
-    return [
-        {
-            "text": r["snippet"],
-            "author": r["title"],
-            "username": "",
-            "url": r["url"],
-            "created_at": "",
-            "likes": 0,
-            "retweets": 0,
-        }
-        for r in results
-    ]
-
-
-# ── Formatters (for LLM context injection) ───────────────────────────────────
+# ── Formatters ────────────────────────────────────────────────────────────────
 
 def format_web_results(results: list[dict]) -> str:
     if not results:
         return ""
-    lines = [f"**Web search results:**"]
+    lines = ["**Web search results:**"]
     for i, r in enumerate(results, 1):
         lines.append(f"{i}. [{r['title']}]({r['url']})\n   {r['snippet'][:200]}")
     return "\n\n".join(lines)
@@ -192,43 +135,69 @@ def format_x_results(results: list[dict]) -> str:
         return ""
     lines = ["**Recent X/Twitter posts:**"]
     for r in results[:8]:
-        author_str = f"{r['author']} {r['username']}".strip()
+        author_str = f"{r.get('author', '')} {r.get('username', '')}".strip()
         engagement = f" ({r['likes']} likes)" if r.get("likes") else ""
-        lines.append(f"• {author_str}{engagement}: {r['text'][:220]}")
+        lines.append(f"• {author_str}{engagement}: {r.get('text', '')[:220]}")
     return "\n".join(lines)
 
 
-async def get_search_context(query: str) -> str:
+# ── Combined search context (used by chat.py) ─────────────────────────────────
+
+async def get_search_context(query: str) -> tuple[str, dict]:
     """
-    Auto-detect search needs and return a formatted context block ready for LLM injection.
+    Auto-detect search needs and return (context_str, meta).
+
+    meta keys:
+      used_live_x: bool  — True if real X API results were fetched
+      x_count: int       — number of X results
+      web_count: int     — number of web results
+
     Runs web search + X search in parallel when both are needed.
     """
     need_web = should_search(query)
     need_x = should_x_search(query)
 
+    meta: dict = {"used_live_x": False, "x_count": 0, "web_count": 0}
+
     if not need_web and not need_x:
-        return ""
+        return "", meta
 
-    tasks = []
-    if need_web:
-        tasks.append(web_search(query, max_results=5))
-    if need_x:
-        tasks.append(x_search(query, max_results=8))
+    from utils.x_search import smart_x_search, format_x_results as _fmt_x
 
-    results = await asyncio.gather(*tasks, return_exceptions=True)
+    parts: list[str] = []
 
-    parts = []
-    idx = 0
-    if need_web:
-        web_res = results[idx] if not isinstance(results[idx], Exception) else []
-        idx += 1
-        formatted = format_web_results(web_res)  # type: ignore[arg-type]
+    if need_web and need_x:
+        web_task = asyncio.create_task(web_search(query, max_results=5))
+        x_task = asyncio.create_task(smart_x_search(query, max_results=10))
+        web_res, x_tuple = await asyncio.gather(web_task, x_task, return_exceptions=True)
+
+        if not isinstance(web_res, Exception) and web_res:
+            meta["web_count"] = len(web_res)  # type: ignore[arg-type]
+            formatted = format_web_results(web_res)  # type: ignore[arg-type]
+            if formatted:
+                parts.append(formatted)
+
+        if not isinstance(x_tuple, Exception):
+            x_results, used_live, cc = x_tuple  # type: ignore[misc]
+            meta["used_live_x"] = used_live
+            meta["x_count"] = len(x_results)
+            formatted = _fmt_x(x_results, used_live_api=used_live, country_code=cc)
+            if formatted:
+                parts.append(formatted)
+
+    elif need_web:
+        web_res = await web_search(query, max_results=5)
+        meta["web_count"] = len(web_res)
+        formatted = format_web_results(web_res)
         if formatted:
             parts.append(formatted)
-    if need_x:
-        x_res = results[idx] if not isinstance(results[idx], Exception) else []
-        formatted = format_x_results(x_res)  # type: ignore[arg-type]
+
+    else:  # need_x only
+        x_results, used_live, cc = await smart_x_search(query, max_results=10)
+        meta["used_live_x"] = used_live
+        meta["x_count"] = len(x_results)
+        formatted = _fmt_x(x_results, used_live_api=used_live, country_code=cc)
         if formatted:
             parts.append(formatted)
 
-    return "\n\n".join(parts)
+    return "\n\n".join(parts), meta

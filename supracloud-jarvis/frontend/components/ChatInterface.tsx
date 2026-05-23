@@ -34,8 +34,9 @@ interface Message {
   expertAgents?: AgentBubble[];
   expertPanelOpen?: boolean;
   imageDataUrl?: string;
-  generatedImageB64?: string;   // image gen result (base64)
+  generatedImageB64?: string;
   generatedImagePrompt?: string;
+  usedLiveX?: boolean;
 }
 
 interface Props {
@@ -350,6 +351,7 @@ export default function ChatInterface({ sessionId, token, mode = "assistant" }: 
                     isStreaming: !allDone,
                     agent: allDone ? "expert_mode" : m.agent,
                     latencyMs: allDone ? data.latency_ms : m.latencyMs,
+                    usedLiveX: allDone ? data.used_live_x === true : m.usedLiveX,
                   };
                 })
               );
@@ -487,7 +489,13 @@ export default function ChatInterface({ sessionId, token, mode = "assistant" }: 
                 setMessages((prev) =>
                   prev.map((m) =>
                     m.id === assistantMsgId
-                      ? { ...m, isStreaming: false, agent: data.agent, latencyMs: data.latency_ms }
+                      ? {
+                          ...m,
+                          isStreaming: false,
+                          agent: data.agent,
+                          latencyMs: data.latency_ms,
+                          usedLiveX: data.used_live_x === true,
+                        }
                       : m
                   )
                 );
@@ -747,12 +755,17 @@ export default function ChatInterface({ sessionId, token, mode = "assistant" }: 
                     </div>
                   )}
 
-                  <div className="flex items-center gap-1 mt-1 pl-1">
+                  <div className="flex items-center gap-2 mt-1 pl-1 flex-wrap">
                     {msg.agent && !msg.isStreaming && (
                       <p className="text-[11px] text-neutral-600">
                         {msg.isExpert ? "⚡ Expert Mode" : (AGENT_LABELS[msg.agent] ?? msg.agent)}
                         {msg.latencyMs ? ` · ${msg.latencyMs}ms` : ""}
                       </p>
+                    )}
+                    {msg.usedLiveX && !msg.isStreaming && (
+                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-sky-500/15 border border-sky-500/30 text-sky-400">
+                        𝕏 Live from X
+                      </span>
                     )}
                     {msg.role === "assistant" && !msg.isStreaming && msg.content && (
                       <CopyButton text={msg.content} />
