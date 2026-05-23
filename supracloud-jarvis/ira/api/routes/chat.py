@@ -44,6 +44,7 @@ class ChatRequest(BaseModel):
     image_b64: str | None = Field(None, description="Base64-encoded image for vision queries")
     mime_type: str = Field("image/jpeg")
     grok_mode: bool = False        # Use Grok personality + auto search + image gen tools
+    engineer_mode: bool = False    # Claude-style 4-step engineering workflow (analysis→plan→diffs→verify)
 
 
 class ChatResponse(BaseModel):
@@ -242,15 +243,25 @@ async def chat_stream(
         get_search_context, is_image_gen_request, is_image_edit_request
     )
     from agents.grok_personality import build_grok_system_prompt
+    from agents.engineer_agent import build_engineer_prompt
 
-    # ── Grok mode: override personality and auto-enable search ────────────────
+    # ── Mode selection: Engineer > Grok > Normal ───────────────────────────────
     used_live_x = False
-    if req.grok_mode:
+
+    if req.engineer_mode:
+        # Engineer Mode: always use deep model, no web search (code context only)
+        memories_raw = await retrieve(req.message)
+        search_ctx = ""
+        system_prompt = build_engineer_prompt()   # memory injected via messages array below
+        use_deep = True                            # always use deep model for code quality
+
+    elif req.grok_mode:
         memories_task = asyncio.create_task(retrieve(req.message))
         search_task = asyncio.create_task(get_search_context(req.message))
         memories_raw, (search_ctx, search_meta) = await asyncio.gather(memories_task, search_task)
         used_live_x = search_meta.get("used_live_x", False)
         system_prompt = build_grok_system_prompt(context=search_ctx)
+
     else:
         memories_raw = await retrieve(req.message)
         if not req.is_voice:
@@ -367,10 +378,11 @@ async def chat_stream(
             yield {
                 "data": json.dumps({
                     "done": True,
-                    "agent": active_agent,
+                    "agent": "engineer" if req.engineer_mode else active_agent,
                     "latency_ms": latency,
                     "session_id": req.session_id,
                     "used_live_x": used_live_x,
+                    "is_engineer": req.engineer_mode,
                 })
             }
 

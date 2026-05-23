@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback } from "react";
-import { Send, Square, Copy, Check, Loader2, Zap, ChevronDown, ChevronUp, Paperclip, X, AlertCircle, DollarSign, Brain } from "lucide-react";
+import { Send, Square, Copy, Check, Loader2, Zap, ChevronDown, ChevronUp, Paperclip, X, AlertCircle, DollarSign, Brain, Code2 } from "lucide-react";
 import clsx from "clsx";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -37,6 +37,7 @@ interface Message {
   generatedImageB64?: string;
   generatedImagePrompt?: string;
   usedLiveX?: boolean;
+  isEngineer?: boolean;
 }
 
 interface Props {
@@ -64,6 +65,7 @@ const AGENT_LABELS: Record<string, string> = {
   expert_mode:    "Expert Mode",
   image_gen:      "Image Generation",
   image_edit:     "Image Editing",
+  engineer:       "Engineer Mode",
 };
 
 function estimateExpertTokens(text: string): number {
@@ -120,6 +122,7 @@ export default function ChatInterface({ sessionId, token, mode = "assistant" }: 
   const [streamingId, setStreamingId] = useState<string | null>(null);
   const [expertMode, setExpertMode] = useState(false);
   const [grokMode, setGrokMode] = useState(false);
+  const [engineerMode, setEngineerMode] = useState(false);
   const [costGuard, setCostGuard] = useState(true);
   const [attachedFile, setAttachedFile] = useState<AttachedFile | null>(null);
   const [showCostConfirm, setShowCostConfirm] = useState(false);
@@ -440,6 +443,7 @@ export default function ChatInterface({ sessionId, token, mode = "assistant" }: 
             stream: true,
             mode: mode === "bodyguard" ? "assistant" : mode,
             grok_mode: grokMode,
+            engineer_mode: engineerMode,
           }),
           signal: controller.signal,
         });
@@ -495,6 +499,7 @@ export default function ChatInterface({ sessionId, token, mode = "assistant" }: 
                           agent: data.agent,
                           latencyMs: data.latency_ms,
                           usedLiveX: data.used_live_x === true,
+                          isEngineer: data.is_engineer === true,
                         }
                       : m
                   )
@@ -534,7 +539,7 @@ export default function ChatInterface({ sessionId, token, mode = "assistant" }: 
         textareaRef.current?.focus();
       }
     },
-    [input, isStreaming, sessionId, token, mode, expertMode, grokMode, costGuard, attachedFile, sendExpertMessage, sendVisionMessage]
+    [input, isStreaming, sessionId, token, mode, expertMode, grokMode, engineerMode, costGuard, attachedFile, sendExpertMessage, sendVisionMessage]
   );
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -762,6 +767,12 @@ export default function ChatInterface({ sessionId, token, mode = "assistant" }: 
                         {msg.latencyMs ? ` · ${msg.latencyMs}ms` : ""}
                       </p>
                     )}
+                    {msg.isEngineer && !msg.isStreaming && (
+                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-indigo-500/15 border border-indigo-500/30 text-indigo-400">
+                        <Code2 className="w-2.5 h-2.5" />
+                        Engineer Mode
+                      </span>
+                    )}
                     {msg.usedLiveX && !msg.isStreaming && (
                       <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-sky-500/15 border border-sky-500/30 text-sky-400">
                         𝕏 Live from X
@@ -916,6 +927,19 @@ export default function ChatInterface({ sessionId, token, mode = "assistant" }: 
               >
                 <Brain className="w-3 h-3" />
                 Grok Mode
+              </button>
+              <button
+                onClick={() => setEngineerMode((v) => !v)}
+                title="Engineer Mode: Claude-style 4-step workflow — analysis → plan → diffs → verify"
+                className={clsx(
+                  "flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] border transition-all",
+                  engineerMode
+                    ? "bg-indigo-500/20 border-indigo-500/50 text-indigo-300"
+                    : "border-neutral-700 text-neutral-600 hover:text-neutral-400 hover:border-neutral-600"
+                )}
+              >
+                <Code2 className="w-3 h-3" />
+                Engineer Mode
               </button>
             </div>
           </div>
