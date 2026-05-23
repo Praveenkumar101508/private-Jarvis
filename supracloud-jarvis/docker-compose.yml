@@ -294,6 +294,10 @@ services:
       # Embeddings (CPU)
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-BAAI/bge-large-en-v1.5}
       EMBEDDING_DEVICE: cpu
+      # Grok parity — image generation + real-time search
+      IMAGE_GEN_URL: ${IMAGE_GEN_URL:-}
+      REPLICATE_API_TOKEN: ${REPLICATE_API_TOKEN:-}
+      TWITTER_BEARER_TOKEN: ${TWITTER_BEARER_TOKEN:-}
     volumes:
       # HF cache shared with vLLM — BGE model downloads here
       - hf_cache:/home/jarvis/.cache/huggingface
@@ -371,6 +375,10 @@ services:
       # Backup configuration
       BACKUP_DIR: /backups
       BACKUP_KEEP: ${BACKUP_KEEP:-7}
+      # Grok parity — image generation + real-time search
+      IMAGE_GEN_URL: ${IMAGE_GEN_URL:-}
+      REPLICATE_API_TOKEN: ${REPLICATE_API_TOKEN:-}
+      TWITTER_BEARER_TOKEN: ${TWITTER_BEARER_TOKEN:-}
     volumes:
       # Read nginx logs for security analysis
       - nginx_logs:/var/log/nginx:ro

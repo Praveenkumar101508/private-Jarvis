@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback } from "react";
-import { Send, Square, Copy, Check, Loader2, Zap, ChevronDown, ChevronUp, Paperclip, X, AlertCircle, DollarSign } from "lucide-react";
+import { Send, Square, Copy, Check, Loader2, Zap, ChevronDown, ChevronUp, Paperclip, X, AlertCircle, DollarSign, Brain } from "lucide-react";
 import clsx from "clsx";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -34,6 +34,8 @@ interface Message {
   expertAgents?: AgentBubble[];
   expertPanelOpen?: boolean;
   imageDataUrl?: string;
+  generatedImageB64?: string;   // image gen result (base64)
+  generatedImagePrompt?: string;
 }
 
 interface Props {
@@ -43,6 +45,8 @@ interface Props {
 }
 
 const URL_RE = /https?:\/\/\S+/;
+const IMAGE_GEN_RE = /\b(generate\s+(an?\s+)?image|create\s+(an?\s+)?(image|picture|photo|art|drawing)|draw\s+(me\s+)?|make\s+(an?\s+)?(image|picture)|imagine\s+(an?\s+)?|visualize|render\s+|design\s+(an?\s+)?(image|logo|banner))\b/i;
+const IMAGE_EDIT_RE = /\b(edit\s+(this\s+)?image|modify\s+(this\s+)?image|change\s+(this\s+)?image|make\s+(it|this)\s+(look|appear)|add\s+to\s+(this|the)\s+image|remove\s+from|transform\s+(this\s+)?image|enhance|upscale|colorize|restore)\b/i;
 
 const AGENT_LABELS: Record<string, string> = {
   conversational: "IRA",
@@ -57,6 +61,8 @@ const AGENT_LABELS: Record<string, string> = {
   security_gate:  "Security Gate",
   vision:         "Vision Analysis",
   expert_mode:    "Expert Mode",
+  image_gen:      "Image Generation",
+  image_edit:     "Image Editing",
 };
 
 function estimateExpertTokens(text: string): number {
@@ -112,6 +118,7 @@ export default function ChatInterface({ sessionId, token, mode = "assistant" }: 
   const [isStreaming, setIsStreaming] = useState(false);
   const [streamingId, setStreamingId] = useState<string | null>(null);
   const [expertMode, setExpertMode] = useState(false);
+  const [grokMode, setGrokMode] = useState(false);
   const [costGuard, setCostGuard] = useState(true);
   const [attachedFile, setAttachedFile] = useState<AttachedFile | null>(null);
   const [showCostConfirm, setShowCostConfirm] = useState(false);
@@ -388,7 +395,15 @@ export default function ChatInterface({ sessionId, token, mode = "assistant" }: 
         return;
       }
 
-      // Vision path: image attached in normal mode
+      // Image edit path: image attached + edit instruction
+      if (attachedFile && IMAGE_EDIT_RE.test(content)) {
+        // Route to vision endpoint which backend detects as image edit
+        await sendVisionMessage(content, attachedFile);
+        setAttachedFile(null);
+        return;
+      }
+
+      // Vision path: image attached in normal mode (analysis, not editing)
       if (attachedFile) {
         await sendVisionMessage(content, attachedFile);
         setAttachedFile(null);
@@ -422,6 +437,7 @@ export default function ChatInterface({ sessionId, token, mode = "assistant" }: 
             session_id: sessionId,
             stream: true,
             mode: mode === "bodyguard" ? "assistant" : mode,
+            grok_mode: grokMode,
           }),
           signal: controller.signal,
         });
@@ -446,7 +462,20 @@ export default function ChatInterface({ sessionId, token, mode = "assistant" }: 
             if (!raw) continue;
             try {
               const data = JSON.parse(raw);
-              if (data.token !== undefined) {
+              if (data.image_generated) {
+                // Image generation result — store base64 on the message
+                setMessages((prev) =>
+                  prev.map((m) =>
+                    m.id === assistantMsgId
+                      ? {
+                          ...m,
+                          generatedImageB64: data.image_b64,
+                          generatedImagePrompt: data.prompt,
+                        }
+                      : m
+                  )
+                );
+              } else if (data.token !== undefined) {
                 setMessages((prev) =>
                   prev.map((m) =>
                     m.id === assistantMsgId
@@ -497,7 +526,7 @@ export default function ChatInterface({ sessionId, token, mode = "assistant" }: 
         textareaRef.current?.focus();
       }
     },
-    [input, isStreaming, sessionId, token, mode, expertMode, costGuard, attachedFile, sendExpertMessage, sendVisionMessage]
+    [input, isStreaming, sessionId, token, mode, expertMode, grokMode, costGuard, attachedFile, sendExpertMessage, sendVisionMessage]
   );
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -642,6 +671,23 @@ export default function ChatInterface({ sessionId, token, mode = "assistant" }: 
                   >
                     {msg.role === "assistant" ? (
                       <div className="prose prose-invert prose-sm max-w-none prose-p:leading-relaxed prose-p:my-1 prose-headings:text-white prose-headings:font-semibold prose-code:text-saffron-300 prose-code:bg-neutral-900 prose-code:px-1 prose-code:rounded prose-pre:bg-neutral-900 prose-pre:border prose-pre:border-neutral-700">
+                        {/* Generated image display */}
+                        {msg.generatedImageB64 && (
+                          <div className="mb-3">
+                            <img
+                              src={`data:image/png;base64,${msg.generatedImageB64}`}
+                              alt={msg.generatedImagePrompt ?? "Generated image"}
+                              className="max-w-full rounded-xl border border-neutral-700 shadow-lg"
+                            />
+                            <a
+                              href={`data:image/png;base64,${msg.generatedImageB64}`}
+                              download="ira-generated.png"
+                              className="mt-1 inline-block text-[10px] text-violet-400 hover:text-violet-300 no-underline"
+                            >
+                              Download image
+                            </a>
+                          </div>
+                        )}
                         {msg.content && <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content}</ReactMarkdown>}
                         {msg.isStreaming && (
                           <span className="inline-block w-1.5 h-4 bg-saffron-400 ml-0.5 align-middle animate-cursor-blink" />
@@ -845,6 +891,19 @@ export default function ChatInterface({ sessionId, token, mode = "assistant" }: 
                   Cost Guard
                 </button>
               )}
+              <button
+                onClick={() => setGrokMode((v) => !v)}
+                title="Think like Grok: enables Grok personality, real-time web search, and X search"
+                className={clsx(
+                  "flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] border transition-all",
+                  grokMode
+                    ? "bg-emerald-500/20 border-emerald-500/50 text-emerald-300"
+                    : "border-neutral-700 text-neutral-600 hover:text-neutral-400 hover:border-neutral-600"
+                )}
+              >
+                <Brain className="w-3 h-3" />
+                Grok Mode
+              </button>
             </div>
           </div>
         </div>

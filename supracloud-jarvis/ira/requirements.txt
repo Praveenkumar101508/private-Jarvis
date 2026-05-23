@@ -58,3 +58,6 @@ apify-client==1.8.1             # Apify job board scraper
 # ── Phase 6: Browser Automation ────────────────────────────────────────────────
 playwright==1.47.0              # Headless Chromium for browse_and_summarize_website
 requests==2.32.3                # Sync HTTP (used by security_alerts.py)
+
+# ── Real-Time Search (Grok-style web + X search) ──────────────────────────────
+duckduckgo-search>=6.0.0        # DuckDuckGo web search (no API key required)

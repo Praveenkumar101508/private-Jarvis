@@ -43,6 +43,7 @@ class ChatRequest(BaseModel):
     mode: str = "assistant"        # "assistant" | "tutor"
     image_b64: str | None = Field(None, description="Base64-encoded image for vision queries")
     mime_type: str = Field("image/jpeg")
+    grok_mode: bool = False        # Use Grok personality + auto search + image gen tools
 
 
 class ChatResponse(BaseModel):
@@ -237,14 +238,114 @@ async def chat_stream(
 
         return EventSourceResponse(tool_result_streamer())
 
-    system_prompt = _get_agent_system_prompt(active_agent, is_voice=req.is_voice)
+    from utils.search_tools import (
+        get_search_context, is_image_gen_request, is_image_edit_request
+    )
+    from agents.grok_personality import build_grok_system_prompt
 
-    memories = await retrieve(req.message)
-    memory_ctx = "\n".join(m["content"] for m in memories) if memories else ""
+    # ── Grok mode: override personality and auto-enable search ────────────────
+    if req.grok_mode:
+        # Run live search in parallel with memory retrieval
+        memories_task = asyncio.create_task(retrieve(req.message))
+        search_task = asyncio.create_task(get_search_context(req.message))
+        memories_raw, search_ctx = await asyncio.gather(memories_task, search_task)
+        system_prompt = build_grok_system_prompt(context=search_ctx)
+    else:
+        memories_raw = await retrieve(req.message)
+        # Auto-search even without Grok mode if query clearly needs live data
+        search_ctx = await get_search_context(req.message) if not req.is_voice else ""
+        system_prompt = _get_agent_system_prompt(active_agent, is_voice=req.is_voice)
+
+    memory_ctx = "\n".join(m["content"] for m in memories_raw) if memories_raw else ""
+
+    # ── Image generation path ─────────────────────────────────────────────────
+    if is_image_gen_request(req.message) and not req.is_voice:
+        async def image_gen_stream():
+            yield {"data": json.dumps({"token": "Generating your image… "})}
+            try:
+                from api.routes.image_gen import GenerateRequest, _IMAGE_GEN_URL, _REPLICATE_TOKEN
+                if _IMAGE_GEN_URL or _REPLICATE_TOKEN:
+                    from api.routes.image_gen import _generate_sd_webui, _generate_replicate
+                    gen_req = GenerateRequest(
+                        prompt=req.message,
+                        width=1024, height=1024, steps=20,
+                    )
+                    image_b64 = (
+                        await _generate_sd_webui(gen_req) if _IMAGE_GEN_URL
+                        else await _generate_replicate(gen_req)
+                    )
+                    yield {"data": json.dumps({
+                        "image_generated": True,
+                        "image_b64": image_b64,
+                        "mime_type": "image/png",
+                        "prompt": req.message,
+                    })}
+                    final_text = f"Here is your generated image based on: *{req.message}*"
+                else:
+                    final_text = (
+                        "Image generation is not configured yet.\n\n"
+                        "To enable it, add one of these to your `.env`:\n"
+                        "- `IMAGE_GEN_URL=http://your-sd-webui:7860` (Stable Diffusion)\n"
+                        "- `REPLICATE_API_TOKEN=r8_...` (Flux via Replicate)\n\n"
+                        "Once configured, just ask me to *generate* or *draw* something and I will."
+                    )
+            except Exception as e:
+                final_text = f"Image generation failed: {e}"
+
+            for word in final_text.split(" "):
+                yield {"data": json.dumps({"token": word + " "})}
+                await asyncio.sleep(0.01)
+
+            yield {"data": json.dumps({
+                "done": True, "agent": "image_gen",
+                "latency_ms": 0, "session_id": req.session_id,
+            })}
+
+        return EventSourceResponse(image_gen_stream())
+
+    # ── Image edit path (image attached + edit request) ───────────────────────
+    if req.image_b64 and is_image_edit_request(req.message):
+        async def image_edit_stream():
+            yield {"data": json.dumps({"token": "Editing your image… "})}
+            try:
+                from api.routes.image_gen import EditRequest, _IMAGE_GEN_URL, _REPLICATE_TOKEN
+                if _IMAGE_GEN_URL or _REPLICATE_TOKEN:
+                    from api.routes.image_gen import _edit_sd_webui, _edit_replicate
+                    edit_req = EditRequest(image_b64=req.image_b64, instruction=req.message)
+                    image_b64 = (
+                        await _edit_sd_webui(edit_req) if _IMAGE_GEN_URL
+                        else await _edit_replicate(edit_req)
+                    )
+                    yield {"data": json.dumps({
+                        "image_generated": True,
+                        "image_b64": image_b64,
+                        "mime_type": "image/png",
+                        "prompt": req.message,
+                    })}
+                    final_text = "Here is the edited image."
+                else:
+                    final_text = (
+                        "Image editing requires IMAGE_GEN_URL or REPLICATE_API_TOKEN in .env."
+                    )
+            except Exception as e:
+                final_text = f"Image editing failed: {e}"
+
+            for word in final_text.split(" "):
+                yield {"data": json.dumps({"token": word + " "})}
+                await asyncio.sleep(0.01)
+
+            yield {"data": json.dumps({
+                "done": True, "agent": "image_edit",
+                "latency_ms": 0, "session_id": req.session_id,
+            })}
+
+        return EventSourceResponse(image_edit_stream())
 
     messages = [{"role": "system", "content": system_prompt}]
     if memory_ctx:
         messages.append({"role": "system", "content": f"Relevant context from memory:\n{memory_ctx}"})
+    if search_ctx:
+        messages.append({"role": "system", "content": f"Live information:\n{search_ctx}"})
 
     recent = await get_recent_messages(conv_id, limit=10)
     messages.extend(recent)
@@ -311,8 +412,16 @@ async def chat_expert(
     from memory.store import retrieve
 
     owner = _is_owner(_user) or (_is_voice_service(_user) and req.is_voice_owner)
-    memories = await retrieve(req.message)
-    memory_ctx = "\n".join(m["content"] for m in memories) if memories else ""
+
+    # Gather memory + live search in parallel for Expert Mode
+    from utils.search_tools import get_search_context as _get_search_ctx
+    memories_raw, search_ctx = await asyncio.gather(
+        retrieve(req.message),
+        _get_search_ctx(req.message),
+    )
+    memory_ctx = "\n".join(m["content"] for m in memories_raw) if memories_raw else ""
+    if search_ctx:
+        memory_ctx = f"{memory_ctx}\n\n{search_ctx}".strip()
 
     async def expert_generator():
         async for event in stream_expert_mode(
