@@ -160,6 +160,7 @@ class Settings(BaseSettings):
     image_gen_url: str = ""            # SD WebUI / ComfyUI local endpoint
     image_gen_provider: str = "replicate"  # "replicate" | "sd_webui" | "comfyui"
     replicate_api_token: str = ""
+    flux_model: str = "black-forest-labs/flux-schnell"  # Replicate model ID for image gen
 
     # ── Vision Model ──────────────────────────────────────────────────────────
     # Multimodal endpoint for image analysis (Qwen3-VL or LLaVA-NeXT)

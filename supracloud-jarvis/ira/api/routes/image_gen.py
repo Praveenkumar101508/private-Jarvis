@@ -17,20 +17,21 @@ from __future__ import annotations
 import asyncio
 import base64
 import logging
-import os
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from api.middleware.auth import require_auth
+from config import get_settings
 
 router = APIRouter(prefix="/image", tags=["image"])
 logger = logging.getLogger("ira.image_gen")
 
-_IMAGE_GEN_URL = os.getenv("IMAGE_GEN_URL", "").rstrip("/")
-_REPLICATE_TOKEN = os.getenv("REPLICATE_API_TOKEN", "")
-_FLUX_MODEL = os.getenv("FLUX_MODEL", "black-forest-labs/flux-schnell")
+# NOTE: image_gen_url, replicate_api_token, and flux_model are intentionally
+# NOT read at module import time. They are read via get_settings() at request
+# time so that env-var changes take effect without a container restart and so
+# the module is safe to import before the environment is fully initialised.
 
 
 # ── Request models ─────────────────────────────────────────────────────────────
@@ -59,10 +60,14 @@ async def generate_image(req: GenerateRequest, _user: str = Depends(require_auth
     Generate an image from a text prompt.
     Returns: {"image_b64": "<base64 PNG>", "mime_type": "image/png", "prompt": "..."}
     """
-    if _IMAGE_GEN_URL:
-        image_b64 = await _generate_sd_webui(req)
-    elif _REPLICATE_TOKEN:
-        image_b64 = await _generate_replicate(req)
+    cfg = get_settings()
+    image_gen_url = cfg.image_gen_url.rstrip("/")
+    replicate_token = cfg.replicate_api_token
+
+    if image_gen_url:
+        image_b64 = await _generate_sd_webui(req, image_gen_url)
+    elif replicate_token:
+        image_b64 = await _generate_replicate(req, replicate_token, cfg.flux_model)
     else:
         raise HTTPException(
             status_code=503,
@@ -82,10 +87,14 @@ async def edit_image(req: EditRequest, _user: str = Depends(require_auth)):
     Edit an image using a text instruction (InstructPix2Pix style).
     Returns: {"image_b64": "<base64 PNG>", "mime_type": "image/png"}
     """
-    if _IMAGE_GEN_URL:
-        image_b64 = await _edit_sd_webui(req)
-    elif _REPLICATE_TOKEN:
-        image_b64 = await _edit_replicate(req)
+    cfg = get_settings()
+    image_gen_url = cfg.image_gen_url.rstrip("/")
+    replicate_token = cfg.replicate_api_token
+
+    if image_gen_url:
+        image_b64 = await _edit_sd_webui(req, image_gen_url)
+    elif replicate_token:
+        image_b64 = await _edit_replicate(req, replicate_token)
     else:
         raise HTTPException(
             status_code=503,
@@ -100,7 +109,7 @@ async def edit_image(req: EditRequest, _user: str = Depends(require_auth)):
 
 # ── Stable Diffusion WebUI backend ─────────────────────────────────────────────
 
-async def _generate_sd_webui(req: GenerateRequest) -> str:
+async def _generate_sd_webui(req: GenerateRequest, image_gen_url: str) -> str:
     """Call Automatic1111 SD WebUI /sdapi/v1/txt2img endpoint."""
     import httpx
     payload: dict[str, Any] = {
@@ -116,7 +125,7 @@ async def _generate_sd_webui(req: GenerateRequest) -> str:
     }
     try:
         async with httpx.AsyncClient(timeout=120) as client:
-            resp = await client.post(f"{_IMAGE_GEN_URL}/sdapi/v1/txt2img", json=payload)
+            resp = await client.post(f"{image_gen_url}/sdapi/v1/txt2img", json=payload)
             resp.raise_for_status()
             data = resp.json()
         images = data.get("images", [])
@@ -127,7 +136,7 @@ async def _generate_sd_webui(req: GenerateRequest) -> str:
         raise HTTPException(status_code=502, detail=f"SD WebUI error: {e}")
 
 
-async def _edit_sd_webui(req: EditRequest) -> str:
+async def _edit_sd_webui(req: EditRequest, image_gen_url: str) -> str:
     """Call SD WebUI /sdapi/v1/img2img for InstructPix2Pix-style editing."""
     import httpx
     payload: dict[str, Any] = {
@@ -141,7 +150,7 @@ async def _edit_sd_webui(req: EditRequest) -> str:
     }
     try:
         async with httpx.AsyncClient(timeout=120) as client:
-            resp = await client.post(f"{_IMAGE_GEN_URL}/sdapi/v1/img2img", json=payload)
+            resp = await client.post(f"{image_gen_url}/sdapi/v1/img2img", json=payload)
             resp.raise_for_status()
             data = resp.json()
         images = data.get("images", [])
@@ -184,11 +193,11 @@ async def _download_to_b64(url: str) -> str:
         return base64.b64encode(resp.content).decode()
 
 
-async def _generate_replicate(req: GenerateRequest) -> str:
+async def _generate_replicate(req: GenerateRequest, replicate_token: str, flux_model: str) -> str:
     """Use Replicate Flux Schnell for fast, high-quality image generation."""
     import httpx
     headers = {
-        "Authorization": f"Token {_REPLICATE_TOKEN}",
+        "Authorization": f"Token {replicate_token}",
         "Content-Type": "application/json",
     }
     # Flux Schnell via Replicate deployments API
@@ -204,7 +213,7 @@ async def _generate_replicate(req: GenerateRequest) -> str:
     try:
         async with httpx.AsyncClient(timeout=30) as client:
             resp = await client.post(
-                f"https://api.replicate.com/v1/models/{_FLUX_MODEL}/predictions",
+                f"https://api.replicate.com/v1/models/{flux_model}/predictions",
                 headers=headers,
                 json=payload,
             )
@@ -219,11 +228,11 @@ async def _generate_replicate(req: GenerateRequest) -> str:
         raise HTTPException(status_code=502, detail=f"Replicate error: {e}")
 
 
-async def _edit_replicate(req: EditRequest) -> str:
+async def _edit_replicate(req: EditRequest, replicate_token: str) -> str:
     """Use Replicate InstructPix2Pix for image editing."""
     import httpx
     headers = {
-        "Authorization": f"Token {_REPLICATE_TOKEN}",
+        "Authorization": f"Token {replicate_token}",
         "Content-Type": "application/json",
     }
     data_url = f"data:image/png;base64,{req.image_b64}"
