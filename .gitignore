@@ -2,6 +2,17 @@
 .env
 .env.local
 .env.*.local
+!.env.example
+
+# TLS / credentials
+nginx/certs/
+*.key
+*.pem
+*.sqlite
+.cloudflared/
+
+# Generated files
+ira/tailored_resume.md
 
 # Dependencies
 node_modules/

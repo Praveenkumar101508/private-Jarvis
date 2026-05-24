@@ -132,6 +132,7 @@ async def apply_implementation(
     author_name: str = "Praveenkumar",
     author_email: str = "praveenkumar101508@gmail.com",
     dry_run: bool = False,
+    push: bool = False,
 ) -> ApplyResult:
     """
     Extract diffs from LLM output, apply them safely, commit, restart services.
@@ -243,7 +244,8 @@ async def apply_implementation(
         commit_hash = hash_out.strip()
 
         # ── Step 6: Push to remote ────────────────────────────────────────────
-        _run(["git", "push", "origin", "HEAD"], cwd=repo, timeout=60)
+        if push:
+            _run(["git", "push", "origin", "HEAD"], cwd=repo, timeout=60)
 
         # ── Step 7: Restart affected services ─────────────────────────────────
         restarted: list[str] = []

@@ -257,9 +257,9 @@ services:
     volumes:
       - ./livekit/livekit.yaml:/etc/livekit/livekit.yaml:ro
     environment:
-      # Injected into livekit.yaml via env interpolation
       LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:?Set LIVEKIT_API_KEY in .env}
       LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:?Set LIVEKIT_API_SECRET in .env}
+      LIVEKIT_KEYS: "${LIVEKIT_API_KEY}: ${LIVEKIT_API_SECRET}"
     ports:
       - "7880:7880"       # HTTP/WebSocket (API + signalling)
       - "7881:7881"       # RTC over TCP (fallback for UDP-blocked networks)

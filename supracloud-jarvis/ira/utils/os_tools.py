@@ -38,24 +38,33 @@ _ALLOWED_PREFIXES = (
     "python --version", "python3 --version",
     "node --version", "npm --version", "pip list", "pip show",
     "whoami", "hostname", "ipconfig", "ifconfig",
-    "netstat", "curl ", "wget ",
+    "netstat",
     "df ", "free ", "top -b",
 )
 
 
+_ALLOWED_APPS: dict[str, str] = {
+    "browser":   "chrome.exe" if _WIN else "google-chrome",
+    "chrome":    "chrome.exe" if _WIN else "google-chrome",
+    "terminal":  "cmd.exe"    if _WIN else "bash",
+    "notepad":   "notepad.exe" if _WIN else "gedit",
+    "explorer":  "explorer.exe" if _WIN else "nautilus",
+    "calculator": "calc.exe"  if _WIN else "gnome-calculator",
+    "vscode":    "code",
+}
+
+
 async def open_application(app_name: str) -> dict:
-    """Launch a desktop application by friendly name."""
+    """Launch a desktop application by friendly name (allowlist only)."""
     key = app_name.lower().strip()
-    cmd = _APP_MAP.get(key, [app_name])
+
+    if key not in _APP_MAP and key not in _ALLOWED_APPS:
+        raise ValueError(f"App '{app_name}' is not in the permitted application list.")
+
+    cmd = _APP_MAP.get(key) or [_ALLOWED_APPS[key]]
 
     try:
-        if _WIN:
-            # shell=True on Windows requires a string, not a list
-            cmd_str = " ".join(cmd)
-            subprocess.Popen(cmd_str, shell=True, creationflags=subprocess.DETACHED_PROCESS)
-        else:
-            subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-
+        subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         logger.info(f"Launched: {app_name}")
         return {"status": "launched", "application": app_name, "command": " ".join(cmd)}
     except FileNotFoundError:

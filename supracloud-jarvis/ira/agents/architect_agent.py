@@ -575,11 +575,7 @@ _IMPLEMENT_RE = re.compile(
     r"yes,? (do it|implement|build it|go ahead))\b",
     re.I,
 )
-_APPLY_RE = re.compile(
-    r"\b(architect apply|apply (the )?(diff|changes|patch|it|them)|"
-    r"architect dry.?run|dry.?run (the )?(patch|diff))\b",
-    re.I,
-)
+_APPLY_RE = re.compile(r"^architect\s+apply$", re.IGNORECASE)
 _SHOW_CODE_RE = re.compile(
     r"\b(architect show code|show (me )?(the )?(code|diff|implementation)|"
     r"show implementation)\b",

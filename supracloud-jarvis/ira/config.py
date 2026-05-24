@@ -134,7 +134,7 @@ class Settings(BaseSettings):
     webhook_secret: str = ""    # Shared secret for validating inbound webhooks
 
     # ── Owner / Biometric Gate ────────────────────────────────────────────────
-    owner_name: str = "Praveen Kumar"
+    owner_name: str = "Praveen Kumar Kamineti"
     biometric_threshold: float = 0.75   # Cosine similarity floor for voice auth
 
     # ── Career Tools ──────────────────────────────────────────────────────────

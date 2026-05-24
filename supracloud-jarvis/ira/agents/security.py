@@ -86,6 +86,9 @@ async def _fetch_recent_events(limit: int = 20) -> list[dict]:
 
 
 async def security_guardian(state: IRAState) -> IRAState:
+    if not state.get("is_owner"):
+        return {**state, "response": "I can only perform security operations for the verified owner."}
+
     t0 = time.monotonic()
     query = state["user_query"]
     tool_output: str = ""

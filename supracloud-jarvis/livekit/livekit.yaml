@@ -21,15 +21,10 @@ rtc:
     - stun:stun.l.google.com:19302
     - stun:stun1.l.google.com:19302
 
-# Keys — injected at runtime via environment variables
-# LiveKit reads LIVEKIT_API_KEY and LIVEKIT_API_SECRET from env.
-# The keys block below sets the default key pair via env var substitution.
-keys:
-  # Format: <api_key>: <api_secret>
-  # These values are populated from the environment at container start.
-  # Set LIVEKIT_API_KEY and LIVEKIT_API_SECRET in your .env file.
-  # Fallback dev key — override with real credentials via LIVEKIT_API_KEY / LIVEKIT_API_SECRET in .env
-  devkey: devsecret
+# Keys — provided exclusively via the LIVEKIT_KEYS environment variable.
+# Format: LIVEKIT_KEYS="<api_key>: <api_secret>"
+# Set in docker-compose.yml → livekit → environment.
+# No keys block here — LiveKit falls back to LIVEKIT_KEYS when this section is absent.
 
 # ── Room defaults ─────────────────────────────────────────────────────────────
 room:

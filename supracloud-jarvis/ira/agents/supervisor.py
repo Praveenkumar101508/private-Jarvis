@@ -86,7 +86,7 @@ _RESTRICTED_KEYWORDS: frozenset[str] = frozenset({
     "show logs", "show errors", "show config",
     # Personal / owner data
     "my calendar", "my appointment", "my meeting",
-    "personal", "private", "swetha", "owner",
+    "personal", "private", "praveen", "owner",
     "my email", "my phone", "my address",
     # Financial
     "financial", "revenue", "invoice", "payment", "bank",
