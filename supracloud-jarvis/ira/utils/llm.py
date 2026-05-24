@@ -18,6 +18,7 @@ from __future__ import annotations
 
 from typing import AsyncIterator
 
+import httpx
 from openai import AsyncOpenAI
 from tenacity import retry, stop_after_attempt, wait_exponential
 
@@ -27,11 +28,15 @@ from config import get_settings
 _DEEP_AGENTS = {"security", "creator", "researcher"}
 
 # ── Keywords that force deep path ────────────────────────────────────────────
+# Intentionally narrow — only genuinely complex tasks.
+# Removed: 'write a', 'write the', 'build', 'analyse', 'analyze',
+#          'generate code', 'design', 'agent' — too generic, caused
+#          every basic query to hit the expensive 14B model (#29).
 _DEEP_KEYWORDS = frozenset({
-    "code", "implement", "generate code", "write a", "write the", "build",
-    "architecture", "design", "refactor", "debug", "analyse", "analyze",
+    "code", "implement",
+    "architecture", "refactor", "debug",
     "vulnerability", "exploit", "patch", "security", "audit",
-    "langgraph", "agent", "docker", "deployment", "kubernetes",
+    "langgraph", "docker", "deployment", "kubernetes",
     "comprehensive", "detailed", "thorough", "step by step",
     "compare", "contrast", "explain in depth", "full implementation",
     "unit test", "integration test", "review this", "fix this bug",
@@ -85,15 +90,18 @@ def should_use_reasoning(
 
 # ── Client factories ──────────────────────────────────────────────────────────
 
+_LLM_TIMEOUT = httpx.Timeout(connect=5.0, read=120.0, write=30.0, pool=5.0)
+
+
 def _make_vllm_client(base_url: str) -> AsyncOpenAI:
     cfg = get_settings()
-    return AsyncOpenAI(api_key=cfg.vllm_api_key, base_url=base_url)
+    return AsyncOpenAI(api_key=cfg.vllm_api_key, base_url=base_url, timeout=_LLM_TIMEOUT)
 
 
 def _make_ollama_client() -> AsyncOpenAI:
     """Dev-mode client — points at local Ollama (OpenAI-compatible API)."""
     cfg = get_settings()
-    return AsyncOpenAI(api_key="ollama", base_url=cfg.ollama_base_url)
+    return AsyncOpenAI(api_key="ollama", base_url=cfg.ollama_base_url, timeout=_LLM_TIMEOUT)
 
 
 def get_fast_client() -> AsyncOpenAI:
@@ -123,6 +131,30 @@ def get_reasoning_client() -> AsyncOpenAI:
 # ── Core completion function ──────────────────────────────────────────────────
 
 @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=1, max=8))
+async def _complete_no_stream(
+    client: AsyncOpenAI,
+    model: str,
+    messages: list[dict],
+    max_tokens: int,
+    temperature: float,
+) -> str:
+    """
+    Non-streaming completion with automatic Tenacity retry (up to 3 attempts).
+
+    Kept as a private helper so the retry decorator is NEVER applied to
+    streaming requests — retrying a broken stream would restart the generation
+    from scratch and send duplicate tokens to the client.
+    """
+    response = await client.chat.completions.create(
+        model=model,
+        messages=messages,
+        max_tokens=max_tokens,
+        temperature=temperature,
+        stream=False,
+    )
+    return response.choices[0].message.content or ""
+
+
 async def chat_complete(
     messages: list[dict],
     *,
@@ -140,6 +172,9 @@ async def chat_complete(
       use_reasoning=True → reasoning tier (Qwen3-32B or DeepSeek-R1)
       use_deep=True      → deep tier      (Qwen3-14B)
       default            → fast tier      (Qwen3-8B)
+
+    Note: non-streaming calls are retried up to 3× via _complete_no_stream().
+    Streaming calls are NOT retried — mid-stream retry would duplicate tokens.
     """
     cfg = get_settings()
 
@@ -165,18 +200,18 @@ async def chat_complete(
         max_tokens = max_tokens or cfg.fast_max_tokens
         temperature = temperature if temperature is not None else cfg.fast_temperature
 
-    response = await client.chat.completions.create(
-        model=model,
-        messages=messages,
-        max_tokens=max_tokens,
-        temperature=temperature,
-        stream=stream,
-    )
-
     if stream:
+        # No retry — a mid-stream failure cannot be safely replayed
+        response = await client.chat.completions.create(
+            model=model,
+            messages=messages,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            stream=True,
+        )
         return response
 
-    return response.choices[0].message.content or ""
+    return await _complete_no_stream(client, model, messages, max_tokens, temperature)
 
 
 async def stream_tokens(
