@@ -9,11 +9,14 @@ Two operations drive Jarvis's memory:
 from __future__ import annotations
 
 import asyncio
+import logging
 import uuid
 from datetime import datetime
 
 from utils.db import acquire
 from memory.embeddings import embed_one
+
+logger = logging.getLogger("ira.memory")
 
 
 # ── Conversation persistence ───────────────────────────────────────────────────
@@ -44,6 +47,7 @@ async def save_message(
     latency_ms: int | None = None,
     tokens_in: int | None = None,
     tokens_out: int | None = None,
+    user_id: str = "system",   # Fix #34: scope embeddings to the authenticated user
 ) -> str:
     """Persist a message and kick off async embedding storage."""
     msg_id = str(uuid.uuid4())
@@ -57,31 +61,46 @@ async def save_message(
             role, content, model_used, latency_ms, tokens_in, tokens_out,
         )
     # Embed and store asynchronously — keep reference so task isn't GC'd mid-flight
-    _t = asyncio.create_task(_store_embedding(msg_id, content, "message"))
+    _t = asyncio.create_task(_store_embedding(msg_id, content, "message", user_id=user_id))
     _t.add_done_callback(lambda t: t.exception() and logger.warning(f"Embedding task failed: {t.exception()}"))
     return msg_id
 
 
-async def _store_embedding(source_id: str, content: str, source_type: str) -> None:
+async def _store_embedding(
+    source_id: str,
+    content: str,
+    source_type: str,
+    *,
+    user_id: str = "system",   # Fix #34: tag every embedding with the owning user
+) -> None:
     """Embed content and store the vector — runs as a background task."""
     try:
         vector = await embed_one(content)
         vector_str = "[" + ",".join(map(str, vector)) + "]"
         async with acquire() as conn:
             await conn.execute(
-                """INSERT INTO memory_embeddings (source_id, source_type, content, embedding)
-                   VALUES ($1, $2, $3, $4::vector)""",
-                uuid.UUID(source_id), source_type, content, vector_str,
+                """INSERT INTO memory_embeddings
+                   (source_id, source_type, content, embedding, user_id)
+                   VALUES ($1, $2, $3, $4::vector, $5)""",
+                uuid.UUID(source_id), source_type, content, vector_str, user_id,
             )
-    except Exception:
-        pass  # Embedding failure must never crash the main response path
+    except Exception as e:
+        logger.debug(f"Embedding store failed (non-fatal): {e}")
 
 
 # ── Memory retrieval (RAG) ────────────────────────────────────────────────────
 
-async def retrieve(query: str, top_k: int | None = None) -> list[dict]:
+async def retrieve(
+    query: str,
+    user_id: str = "system",  # Fix #34: filter to the calling user's memories only
+    top_k: int | None = None,
+) -> list[dict]:
     """
     Find the top-K most semantically relevant memories for a query.
+
+    Fix #34: results are scoped to ``user_id`` so users cannot see each other's
+    memories. Pass user_id="system" to search across all owner-level memories.
+
     Returns a list of {"content": str, "source_type": str, "similarity": float}.
     """
     from config import get_settings
@@ -96,15 +115,43 @@ async def retrieve(query: str, top_k: int | None = None) -> list[dict]:
             """SELECT content, source_type,
                       1 - (embedding <=> $1::vector) AS similarity
                FROM memory_embeddings
+               WHERE user_id = $3
                ORDER BY embedding <=> $1::vector
                LIMIT $2""",
-            vector_str, k,
+            vector_str, k, user_id,
         )
     return [
         {"content": r["content"], "source_type": r["source_type"], "similarity": float(r["similarity"])}
         for r in rows
         if float(r["similarity"]) > 0.6   # Filter out weak matches
     ]
+
+
+# ── Memory retention (Fix #75) ────────────────────────────────────────────────
+
+async def purge_old_memories(retention_days: int = 90) -> int:
+    """
+    Delete memory embeddings older than ``retention_days``.
+
+    Fix #75: without this the memory_embeddings table grows unbounded. Run
+    weekly via the scheduler. Returns the number of rows deleted.
+
+    Note: messages and conversations are NOT deleted — only the embedding
+    vectors are purged. Chat history remains intact.
+    """
+    try:
+        async with acquire() as conn:
+            result = await conn.execute(
+                "DELETE FROM memory_embeddings WHERE created_at < NOW() - $1 * INTERVAL '1 day'",
+                retention_days,
+            )
+        # asyncpg returns "DELETE N" as the status string
+        count = int(result.split()[-1]) if result and result.startswith("DELETE") else 0
+        logger.info(f"Memory retention: purged {count} embeddings older than {retention_days} days")
+        return count
+    except Exception as e:
+        logger.error(f"Memory retention purge failed: {e}")
+        return 0
 
 
 async def get_recent_messages(conversation_id: str, limit: int = 20) -> list[dict]:

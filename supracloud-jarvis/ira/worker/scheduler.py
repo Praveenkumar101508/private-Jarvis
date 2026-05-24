@@ -187,6 +187,20 @@ def build_scheduler() -> AsyncIOScheduler:
         next_run_time=datetime.now(timezone.utc) + timedelta(hours=12),
     )
 
+    # Memory retention — weekly at 02:00 UTC on Sunday (Fix #75)
+    # Deletes memory_embeddings rows older than 90 days to keep the table
+    # from growing unbounded. Messages + conversations are NOT deleted.
+    scheduler.add_job(
+        _memory_retention,
+        trigger="cron",
+        day_of_week="sun",
+        hour=2,
+        minute=0,
+        id="memory_retention",
+        name="IRA Memory Retention Purge",
+        replace_existing=True,
+    )
+
     return scheduler
 
 
@@ -255,6 +269,16 @@ async def _architect_cycle() -> None:
         await run_background_architect_cycle()
     except Exception as e:
         logger.error(f"Architect evolution cycle failed: {e}", exc_info=True)
+
+
+async def _memory_retention() -> None:
+    """Weekly purge of memory_embeddings older than 90 days. (Fix #75)"""
+    try:
+        from memory.store import purge_old_memories
+        deleted = await purge_old_memories(retention_days=90)
+        logger.info(f"Memory retention complete: {deleted} old embeddings purged")
+    except Exception as e:
+        logger.error(f"Memory retention job failed: {e}", exc_info=True)
 
 
 def get_scheduler() -> AsyncIOScheduler:

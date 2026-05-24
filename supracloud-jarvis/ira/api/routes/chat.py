@@ -265,7 +265,7 @@ async def chat_stream(
 
     # ── Architect Agent: intercept before all other routing ───────────────────
     if is_architect_trigger(req.message):
-        memories_raw = await retrieve(req.message)
+        memories_raw = await retrieve(req.message, user_id=_user)
         memory_ctx = "\n".join(m["content"] for m in memories_raw) if memories_raw else ""
 
         async def architect_proposal_stream():
@@ -356,13 +356,13 @@ async def chat_stream(
 
     # ── Mode selection: Engineer > Grok > Normal ───────────────────────────────
     if req.engineer_mode:
-        memories_raw = await retrieve(req.message)
+        memories_raw = await retrieve(req.message, user_id=_user)
         search_ctx = ""
         system_prompt = build_engineer_prompt()
         use_deep = True
 
     elif req.grok_mode:
-        memories_task = asyncio.create_task(retrieve(req.message))
+        memories_task = asyncio.create_task(retrieve(req.message, user_id=_user))
         search_task = asyncio.create_task(_get_ctx())
         memories_raw, (search_ctx, search_meta) = await asyncio.gather(memories_task, search_task)
         used_live_x = search_meta.get("used_live_x", False)
@@ -370,7 +370,7 @@ async def chat_stream(
         system_prompt = build_grok_system_prompt(context=search_ctx)
 
     else:
-        memories_raw = await retrieve(req.message)
+        memories_raw = await retrieve(req.message, user_id=_user)
         search_ctx, search_meta = await _get_ctx()
         used_live_x = search_meta.get("used_live_x", False)
         deep_search_rounds = search_meta.get("deep_search_rounds", 0)
@@ -593,12 +593,13 @@ async def chat_stream(
 
             from memory.store import save_message
             import logging as _log
-            _tu = asyncio.create_task(save_message(conv_id, "user", req.message))
+            _tu = asyncio.create_task(save_message(conv_id, "user", req.message, user_id=_user))
             _tu.add_done_callback(lambda t: t.exception() and _log.getLogger("ira.chat").warning(f"save_message failed: {t.exception()}"))
             _ta = asyncio.create_task(save_message(
                 conv_id, "assistant", "".join(full_response),
                 model_used="qwen3-reasoning" if use_reasoning else ("qwen3-deep" if use_deep else "qwen3-fast"),
                 latency_ms=latency,
+                user_id=_user,
             ))
             _ta.add_done_callback(lambda t: t.exception() and _log.getLogger("ira.chat").warning(f"save_message failed: {t.exception()}"))
 
@@ -641,7 +642,7 @@ async def chat_expert(
     # Gather memory + live search in parallel for Expert Mode
     from utils.search_tools import get_search_context as _get_search_ctx
     memories_raw, (search_ctx, search_meta) = await asyncio.gather(
-        retrieve(req.message),
+        retrieve(req.message, user_id=_user),
         _get_search_ctx(req.message),
     )
     expert_used_live_x = search_meta.get("used_live_x", False)
