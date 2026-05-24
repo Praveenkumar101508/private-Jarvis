@@ -274,8 +274,9 @@ async def design_download(
     if not entry:
         raise HTTPException(status_code=404, detail="Design not found or expired.")
     file_bytes, filename, mimetype = entry
-    # For HTML/SVG, serve inline so browser can render it
-    disposition = "inline" if mimetype in ("text/html", "image/svg+xml") else f'attachment; filename="{filename}"'
+    # Always force attachment — never serve LLM-generated HTML/SVG inline
+    # (serving inline on the authenticated origin would be stored XSS)
+    disposition = f'attachment; filename="{filename}"'
     return StreamingResponse(
         io.BytesIO(file_bytes),
         media_type=mimetype,

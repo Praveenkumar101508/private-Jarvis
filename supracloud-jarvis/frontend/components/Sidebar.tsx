@@ -89,14 +89,19 @@ export default function Sidebar({ mode, onModeChange, onNewChat, recentChats = [
       if (!listRes.ok) { setBackupStatus("Cannot list backups"); return; }
       const { backups } = await listRes.json();
       if (!backups || backups.length === 0) { setBackupStatus("No backups found"); return; }
-      const latest = backups[0].filename;
+      const filename = backups[0].filename;
+      // Use fetch so the Authorization header is sent — plain <a href> never sends it
+      const res = await fetch(`/api/v1/backup/download/${filename}`, { headers: authHeaders });
+      if (!res.ok) { setBackupStatus(`Download failed: ${res.status}`); return; }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
-      a.href = `/api/v1/backup/download/${latest}`;
-      // Pass auth via a temporary anchor — works for same-origin only
-      a.setAttribute("download", latest);
+      a.href = url;
+      a.download = filename;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
+      URL.revokeObjectURL(url);
     } catch {
       setBackupStatus("Download failed");
     }

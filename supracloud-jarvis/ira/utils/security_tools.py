@@ -210,15 +210,19 @@ async def dispatch_secure_message(message: str) -> dict:
     timestamp = datetime.now(timezone.utc).strftime("%H:%M UTC")
 
     try:
+        import html
         import httpx
-        text = f"📨 *Secure Message via IRA* \\[{timestamp}\\]\n\n{message}"
+        text = (
+            f"📨 <b>Secure Message via IRA</b> [{html.escape(timestamp)}]\n\n"
+            f"{html.escape(message)}"
+        )
         async with httpx.AsyncClient(timeout=10) as client:
             resp = await client.post(
                 f"https://api.telegram.org/bot{cfg.telegram_bot_token}/sendMessage",
                 json={
                     "chat_id": cfg.telegram_chat_id,
                     "text": text,
-                    "parse_mode": "Markdown",
+                    "parse_mode": "HTML",
                     "disable_web_page_preview": True,
                 },
             )

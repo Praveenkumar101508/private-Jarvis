@@ -30,6 +30,24 @@ _ALLOWLIST = frozenset({
     "docker ps", "docker stats", "docker logs",
 })
 
+# Patterns that must never appear in any command argument (path restriction)
+_RESTRICTED_PATH_PATTERNS = (
+    "/proc",
+    "/etc/passwd",
+    "/etc/shadow",
+    ".env",
+    ".ssh",
+    "/root",
+    "/home",
+)
+
+
+def is_safe_path(arg: str) -> bool:
+    """Return True only if the argument contains no restricted path patterns."""
+    lower = arg.lower()
+    return not any(pat in lower for pat in _RESTRICTED_PATH_PATTERNS)
+
+
 _SYSTEM = """\
 You are the Executor module of IRA — a careful, security-first command executor.
 
@@ -117,11 +135,30 @@ async def executor(state: IRAState) -> IRAState:
     extracted_cmd = extracted_cmd.strip()
 
     allowed = extracted_cmd != "NONE" and _is_allowed(extracted_cmd)
+
+    # Path restriction check: parse into parts and reject any restricted arg
+    path_safe = True
+    if allowed and extracted_cmd != "NONE":
+        try:
+            parts = shlex.split(extracted_cmd)
+            for arg in parts[1:]:  # skip the command name itself
+                if not is_safe_path(arg):
+                    path_safe = False
+                    logger.warning(f"Executor blocked restricted path in command: {extracted_cmd!r}")
+                    break
+        except ValueError:
+            path_safe = False
+
+    if not path_safe:
+        allowed = False
+
     await _log_exec_attempt(extracted_cmd, allowed, state.get("session_id", "unknown"))
 
-    # Execute the command if it passes the allowlist
+    # Execute the command if it passes both allowlist and path checks
     exec_context = ""
-    if allowed and extracted_cmd != "NONE":
+    if not path_safe and extracted_cmd != "NONE":
+        exec_context = "\n\nExecution result: Command rejected: restricted path"
+    elif allowed and extracted_cmd != "NONE":
         output, returncode = await _run_command(extracted_cmd)
         exec_context = (
             f"\n\nExecution result (exit code {returncode}):\n"

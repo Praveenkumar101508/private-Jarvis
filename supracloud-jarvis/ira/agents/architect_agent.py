@@ -424,15 +424,14 @@ async def run_background_architect_cycle() -> None:
         )
 
         try:
-            from worker.notifier import send_telegram, send_email
-            if cfg.telegram_bot_token and cfg.telegram_chat_id:
-                await send_telegram(notification_msg)
-                logger.info("Architect proposal notification sent via Telegram")
-            if cfg.smtp_host and cfg.smtp_user:
-                await send_email(
-                    subject="IRA Evolution Team: New Feature Proposal Ready",
-                    body=notification_msg.replace("*", "").replace("_", ""),
-                )
+            from worker.notifier import notify
+            await notify(
+                title="Architect Cycle",
+                body=notification_msg,
+                category="system",
+                priority="info",
+            )
+            logger.info("Architect proposal notification sent")
         except Exception as e:
             logger.warning(f"Architect notification failed (non-critical): {e}")
 

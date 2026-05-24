@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from datetime import datetime, timezone, timedelta
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
@@ -183,7 +184,7 @@ def build_scheduler() -> AsyncIOScheduler:
         id="architect_evolution",
         name="IRA Architect Evolution Team",
         replace_existing=True,
-        next_run_time=None,   # Don't run immediately at startup — wait 12h
+        next_run_time=datetime.now(timezone.utc) + timedelta(hours=12),
     )
 
     return scheduler

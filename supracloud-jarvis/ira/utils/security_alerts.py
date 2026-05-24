@@ -12,6 +12,7 @@ Usage:
 
 from __future__ import annotations
 
+import html as _html
 import logging
 import os
 from typing import Literal
@@ -29,7 +30,6 @@ def send_alert(
     message: str,
     *,
     priority: Priority = "warning",
-    parse_mode: str = "Markdown",
 ) -> bool:
     """
     Send a Telegram message to the owner's chat.
@@ -43,7 +43,7 @@ def send_alert(
         return False
 
     emoji = _EMOJI.get(priority, "⚠️")
-    text = f"{emoji} *IRA Security Alert*\n\n{message}"
+    text = f"{emoji} <b>IRA Security Alert</b>\n\n{_html.escape(message)}"
 
     try:
         resp = requests.post(
@@ -51,7 +51,7 @@ def send_alert(
             json={
                 "chat_id": chat_id,
                 "text": text,
-                "parse_mode": parse_mode,
+                "parse_mode": "HTML",
                 "disable_web_page_preview": True,
             },
             timeout=10,

@@ -1,3 +1,10 @@
+# ── PyTorch (CPU-only — GPU VRAM reserved for vLLM) ────────────────────────────
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.4.1+cpu
+
+# ── Biometric speaker verification ─────────────────────────────────────────────
+speechbrain==1.0.0                      # ECAPA-TDNN speaker embeddings
+
 # ── LiveKit Agents + Voice pipeline ────────────────────────────────────────────
 livekit-agents[silero]==0.11.7          # Core agent SDK + Silero VAD
 livekit==0.17.4                         # LiveKit Python SDK

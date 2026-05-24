@@ -11,6 +11,7 @@ without checking any token. NEVER enable in production.
 
 from __future__ import annotations
 
+import secrets
 from datetime import datetime, timedelta, timezone
 from functools import lru_cache as _lru_cache
 
@@ -109,11 +110,31 @@ def _admin_password_hash() -> str:
     return hash_password(get_settings().ira_admin_password)
 
 
+@_lru_cache(maxsize=1)
+def _dummy_hash() -> str:
+    """Stable dummy hash used for constant-time comparison when username is wrong."""
+    return hash_password("dummy_constant_time_placeholder_xK9mQ2")
+
+
 def authenticate_user(username: str, password: str) -> bool:
-    """Validate credentials against the configured admin account."""
+    """
+    Validate credentials against the configured admin account.
+
+    Always runs bcrypt regardless of whether the username matches — this
+    prevents username enumeration via response-time differences (~1ms early
+    return vs ~100ms bcrypt).
+    """
     cfg = get_settings()
     if cfg.dev_mode:
         return True  # Accept any credentials in dev mode
-    if username != cfg.ira_admin_username:
-        return False
-    return verify_password(password, _admin_password_hash())
+
+    # Constant-time username comparison
+    username_matches = secrets.compare_digest(
+        username.encode("utf-8"),
+        cfg.ira_admin_username.encode("utf-8"),
+    )
+    # Always run bcrypt — pick real hash if username matched, dummy otherwise
+    hash_to_check = _admin_password_hash() if username_matches else _dummy_hash()
+    password_matches = verify_password(password, hash_to_check)
+    # Both must be True — don't short-circuit to preserve timing
+    return username_matches and password_matches

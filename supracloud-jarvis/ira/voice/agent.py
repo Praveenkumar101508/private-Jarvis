@@ -47,6 +47,13 @@ from voice.language import get_greeting, normalise_lang, LANGUAGE_NAMES
 
 logger = logging.getLogger("ira.voice")
 
+# ── Biometric pipeline startup check ─────────────────────────────────────────
+try:
+    from voice.biometrics import verify_owner  # noqa: F401
+    logger.info("Biometric pipeline: ACTIVE")
+except ImportError as _bio_err:
+    logger.warning(f"Biometric pipeline: DISABLED — {_bio_err}")
+
 # ── Configuration ─────────────────────────────────────────────────────────────
 IRA_API_URL = os.getenv("IRA_API_URL", "http://ira-api:8000")
 IRA_API_TOKEN = os.getenv("IRA_API_TOKEN", "")
@@ -245,16 +252,31 @@ async def entrypoint(ctx: JobContext) -> None:
 
     logger.info(f"IRA is listening to participant: {participant.identity}")
 
-    # Capture raw audio for biometric verification + handle language switching
+    # Capture raw audio for biometric verification via AudioStream track subscription
+    async def _capture_audio_for_biometrics(audio_stream) -> None:
+        """
+        Subscribes to the participant's audio track and buffers PCM frames.
+        livekit-agents 0.11.x exposes audio via rtc.AudioStream, not event.audio.
+        """
+        audio_data = b""
+        async for frame in audio_stream:
+            # frame is an rtc.AudioFrame; .data is bytes of int16 PCM
+            if hasattr(frame, "data"):
+                audio_data += bytes(frame.data)
+        if audio_data:
+            ira_llm.set_audio_bytes(audio_data)
+
+    # Subscribe to the participant's microphone track for biometric capture
+    for pub in participant.track_publications.values():
+        if pub.track and pub.track.kind == rtc.TrackKind.KIND_AUDIO:
+            audio_stream = rtc.AudioStream(pub.track)
+            asyncio.ensure_future(_capture_audio_for_biometrics(audio_stream))
+            logger.info("Biometric audio capture: subscribed to participant track")
+            break
+
     @session.on("user_speech_committed")
     def on_user_speech(event):
-        # Pass audio bytes to the LLM adapter so _run() can verify the speaker
-        raw_audio = getattr(event, "audio", b"") or b""
-        if isinstance(raw_audio, (bytes, bytearray)):
-            ira_llm.set_audio_bytes(bytes(raw_audio))
-        elif hasattr(raw_audio, "data"):
-            ira_llm.set_audio_bytes(bytes(raw_audio.data))
-
+        # Language detection from committed speech event
         detected = getattr(event, "language", "en") or "en"
         lang = normalise_lang(detected)
         if lang != "en":

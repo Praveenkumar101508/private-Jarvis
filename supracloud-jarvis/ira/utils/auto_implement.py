@@ -25,6 +25,8 @@ import textwrap
 from pathlib import Path
 from typing import NamedTuple
 
+# subprocess kept only for TimeoutExpired exception type
+
 logger = logging.getLogger("ira.auto_implement")
 
 # The repo root is assumed to be 3 levels up from this file:
@@ -51,16 +53,25 @@ def _find_repo_root() -> Path:
     return _REPO_ROOT
 
 
-def _run(cmd: list[str], cwd: Path, timeout: int = 30) -> tuple[int, str, str]:
-    """Run a subprocess, return (returncode, stdout, stderr)."""
-    result = subprocess.run(
-        cmd,
+async def _run(cmd: list[str], cwd: Path, timeout: int = 30) -> tuple[int, str, str]:
+    """Run a subprocess asynchronously, return (returncode, stdout, stderr)."""
+    proc = await asyncio.create_subprocess_exec(
+        *cmd,
         cwd=str(cwd),
-        capture_output=True,
-        text=True,
-        timeout=timeout,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
     )
-    return result.returncode, result.stdout, result.stderr
+    try:
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+    except asyncio.TimeoutError:
+        proc.kill()
+        await proc.communicate()
+        raise subprocess.TimeoutExpired(cmd, timeout)
+    return (
+        proc.returncode,
+        stdout.decode("utf-8", errors="replace"),
+        stderr.decode("utf-8", errors="replace"),
+    )
 
 
 class ApplyResult(NamedTuple):
@@ -130,7 +141,7 @@ def extract_changed_files(diff_text: str) -> list[str]:
 async def apply_implementation(
     implementation_text: str,
     author_name: str = "Praveenkumar",
-    author_email: str = "praveenkumar101508@gmail.com",
+    author_email: str = "",
     dry_run: bool = False,
     push: bool = False,
 ) -> ApplyResult:
@@ -138,7 +149,15 @@ async def apply_implementation(
     Extract diffs from LLM output, apply them safely, commit, restart services.
 
     dry_run=True: only validates the patch without applying (use for preview).
+    author_email defaults to IRA_GIT_AUTHOR_EMAIL env var.
     """
+    if not author_email:
+        author_email = os.getenv("IRA_GIT_AUTHOR_EMAIL", "")
+        if not author_email:
+            raise ValueError(
+                "IRA_GIT_AUTHOR_EMAIL env var not set — "
+                "add it to .env before using the architect apply pipeline."
+            )
     repo = _find_repo_root()
     diffs = extract_diffs(implementation_text)
 
@@ -299,17 +318,5 @@ async def apply_implementation(
             pass
 
 
-async def apply_implementation_async(
-    implementation_text: str,
-    author_name: str = "Praveenkumar",
-    author_email: str = "praveenkumar101508@gmail.com",
-    dry_run: bool = False,
-) -> ApplyResult:
-    """Async wrapper — runs the blocking apply pipeline in an executor."""
-    loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(
-        None,
-        lambda: asyncio.run(apply_implementation(
-            implementation_text, author_name, author_email, dry_run
-        )),
-    )
+# apply_implementation_async removed — apply_implementation is now natively
+# async (uses asyncio.create_subprocess_exec) and no longer blocks the event loop.
