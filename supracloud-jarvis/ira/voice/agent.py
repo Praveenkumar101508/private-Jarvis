@@ -63,6 +63,10 @@ IRA_API_TOKEN = os.getenv("IRA_API_TOKEN", "")
 # small    : fastest (~0.3-0.5s) — use on Shadow PC / low-memory hosts
 WHISPER_MODEL = os.getenv("WHISPER_MODEL", "large-v3")
 
+# Maximum duration for a single voice session (#32).
+# Guards against abandoned sessions keeping the worker alive indefinitely.
+MAX_SESSION_SECONDS: float = 4 * 3600  # 4 hours
+
 
 # ── IRA LLM Adapter ───────────────────────────────────────────────────────────
 
@@ -270,7 +274,11 @@ async def entrypoint(ctx: JobContext) -> None:
     for pub in participant.track_publications.values():
         if pub.track and pub.track.kind == rtc.TrackKind.KIND_AUDIO:
             audio_stream = rtc.AudioStream(pub.track)
-            asyncio.ensure_future(_capture_audio_for_biometrics(audio_stream))
+            # Store task reference to prevent GC before completion (#asyncio-gc)
+            _bio_task = asyncio.ensure_future(_capture_audio_for_biometrics(audio_stream))
+            _bio_task.add_done_callback(
+                lambda t: t.exception() and logger.warning(f"Biometric audio capture error: {t.exception()}")
+            )
             logger.info("Biometric audio capture: subscribed to participant track")
             break
 
@@ -295,9 +303,17 @@ async def entrypoint(ctx: JobContext) -> None:
 
     logger.info(f"IRA voice session active for {participant.identity}")
 
-    # Keep the agent alive until the participant disconnects
-    await ctx.wait_for_disconnect()
-    logger.info(f"Participant disconnected. IRA voice session ending.")
+    # Keep the agent alive until the participant disconnects — but cap at
+    # MAX_SESSION_SECONDS to prevent zombie sessions if the disconnect event is
+    # never delivered (e.g., hard network drop, container restart). (#32)
+    try:
+        await asyncio.wait_for(ctx.wait_for_disconnect(), timeout=MAX_SESSION_SECONDS)
+        logger.info("Participant disconnected. IRA voice session ending.")
+    except asyncio.TimeoutError:
+        logger.warning(
+            f"Voice session for {participant.identity} reached the "
+            f"{MAX_SESSION_SECONDS / 3600:.0f}h maximum duration. Ending automatically."
+        )
     await ira_llm.aclose()
 
 

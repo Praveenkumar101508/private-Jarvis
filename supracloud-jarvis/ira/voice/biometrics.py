@@ -213,8 +213,15 @@ async def is_owner_authenticated(audio_bytes: bytes, session_id: str = "unknown"
     """
     cfg = get_settings()
 
-    # No audio data — cannot verify
-    if not audio_bytes or len(audio_bytes) < 3200:  # <100ms at 16kHz
+    # Require at least 1 second of audio for a reliable ECAPA-TDNN embedding. (#35)
+    # 16kHz × 16-bit mono = 32 000 bytes/second.
+    # 100ms (3 200 bytes) is far too short — embeddings from very short clips have
+    # high variance and produce excessive false-positives / false-negatives.
+    if not audio_bytes or len(audio_bytes) < 32_000:  # <1s at 16kHz 16-bit mono
+        logger.debug(
+            f"Audio too short for biometric check: {len(audio_bytes)} bytes "
+            f"(need ≥32 000 / 1 s)"
+        )
         return False
 
     # Load the owner's reference profile
