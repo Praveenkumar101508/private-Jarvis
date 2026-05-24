@@ -143,13 +143,15 @@ async def apply_implementation(
     author_name: str = "Praveenkumar",
     author_email: str = "",
     dry_run: bool = False,
-    push: bool = False,
 ) -> ApplyResult:
     """
     Extract diffs from LLM output, apply them safely, commit, restart services.
 
     dry_run=True: only validates the patch without applying (use for preview).
     author_email defaults to IRA_GIT_AUTHOR_EMAIL env var.
+
+    NOTE: git push is intentionally removed. IRA never pushes to remote
+    automatically. Push manually when you are ready.
     """
     if not author_email:
         author_email = os.getenv("IRA_GIT_AUTHOR_EMAIL", "")
@@ -262,11 +264,8 @@ async def apply_implementation(
         _, hash_out, _ = _run(["git", "rev-parse", "--short", "HEAD"], cwd=repo)
         commit_hash = hash_out.strip()
 
-        # ── Step 6: Push to remote ────────────────────────────────────────────
-        if push:
-            _run(["git", "push", "origin", "HEAD"], cwd=repo, timeout=60)
-
-        # ── Step 7: Restart affected services ─────────────────────────────────
+        # ── Step 6: Restart affected services ────────────────────────────────
+        # NOTE: git push intentionally removed — IRA never pushes automatically.
         restarted: list[str] = []
         for svc in services:
             rc, _, _ = _run(
