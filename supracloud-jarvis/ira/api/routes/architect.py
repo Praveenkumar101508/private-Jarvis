@@ -23,14 +23,37 @@ from memory.store import retrieve
 
 router = APIRouter(prefix="/architect", tags=["architect"])
 
-# ── In-memory proposal store (single-user system — no persistence needed) ────
-# Stores the latest proposal + implementation so the user can approve/apply
-_state: dict = {
-    "proposal": None,          # Latest supervisor output text
-    "implementation": None,    # Latest auto-implement output text
-    "feature_name": None,      # Feature being implemented
-    "pending_apply": False,    # True when implementation is ready to apply
+_STATE_TTL = 86400  # 24 h — state is per-user, expires after a day of inactivity
+
+_DEFAULT_STATE: dict = {
+    "proposal": None,
+    "implementation": None,
+    "feature_name": None,
+    "pending_apply": False,
 }
+
+
+async def _get_state(user_id: str) -> dict:
+    """Load architect state for this user from Redis (falls back to defaults)."""
+    try:
+        from utils.redis_client import get_redis
+        redis = get_redis()
+        raw = await redis.get(f"architect:state:{user_id}")
+        if raw:
+            return json.loads(raw)
+    except Exception:
+        pass
+    return dict(_DEFAULT_STATE)
+
+
+async def _set_state(user_id: str, state: dict) -> None:
+    """Persist architect state for this user in Redis with 24 h TTL."""
+    try:
+        from utils.redis_client import get_redis
+        redis = get_redis()
+        await redis.setex(f"architect:state:{user_id}", _STATE_TTL, json.dumps(state))
+    except Exception:
+        pass  # Redis failure must not crash the apply flow
 
 
 # ── Request models ────────────────────────────────────────────────────────────
@@ -79,9 +102,11 @@ async def architect_propose(
         async for event in stream_architect_proposal(req.query, memory_context=memory_ctx):
             # Cache the final proposal for the apply pipeline
             if event.get("architect_done"):
-                _state["proposal"] = event.get("proposal", "")
-                _state["implementation"] = None
-                _state["pending_apply"] = False
+                state = await _get_state(_user)
+                state["proposal"] = event.get("proposal", "")
+                state["implementation"] = None
+                state["pending_apply"] = False
+                await _set_state(_user, state)
             yield {"data": json.dumps(event)}
         yield {"data": json.dumps({"stream_end": True})}
 
@@ -106,7 +131,8 @@ async def architect_implement(
     from agents.architect_agent import stream_auto_implement
 
     # Use provided context or fall back to cached proposal
-    context = req.proposal_context or (_state.get("proposal") or "")
+    cached = await _get_state(_user)
+    context = req.proposal_context or (cached.get("proposal") or "")
 
     async def impl_generator():
         async for event in stream_auto_implement(
@@ -115,9 +141,11 @@ async def architect_implement(
         ):
             # Cache the implementation for the apply step
             if event.get("implement_done"):
-                _state["implementation"] = event.get("implementation", "")
-                _state["feature_name"] = req.feature_name
-                _state["pending_apply"] = True
+                state = await _get_state(_user)
+                state["implementation"] = event.get("implementation", "")
+                state["feature_name"] = req.feature_name
+                state["pending_apply"] = True
+                await _set_state(_user, state)
             yield {"data": json.dumps(event)}
         yield {"data": json.dumps({"stream_end": True})}
 
@@ -137,7 +165,8 @@ async def architect_apply(
     """
     from utils.auto_implement import apply_implementation
 
-    impl = _state.get("implementation")
+    state = await _get_state(_user)
+    impl = state.get("implementation")
     if not impl:
         return {
             "success": False,
@@ -147,8 +176,9 @@ async def architect_apply(
     result = await apply_implementation(impl, dry_run=req.dry_run)
 
     if result.success and not req.dry_run:
-        _state["pending_apply"] = False
-        _state["implementation"] = None
+        state["pending_apply"] = False
+        state["implementation"] = None
+        await _set_state(_user, state)
 
     return {
         "success": result.success,
@@ -166,12 +196,13 @@ async def architect_apply(
 @router.get("/status")
 async def architect_status(_user: str = Depends(require_auth)):
     """Return the current Architect Agent state."""
+    state = await _get_state(_user)
     return {
-        "has_proposal": _state["proposal"] is not None,
-        "has_implementation": _state["implementation"] is not None,
-        "feature_name": _state["feature_name"],
-        "pending_apply": _state["pending_apply"],
-        "proposal_preview": (_state["proposal"] or "")[:500] + "…"
-        if _state.get("proposal") and len(_state["proposal"]) > 500
-        else _state.get("proposal"),
+        "has_proposal": state["proposal"] is not None,
+        "has_implementation": state["implementation"] is not None,
+        "feature_name": state["feature_name"],
+        "pending_apply": state["pending_apply"],
+        "proposal_preview": (state["proposal"] or "")[:500] + "…"
+        if state.get("proposal") and len(state["proposal"]) > 500
+        else state.get("proposal"),
     }

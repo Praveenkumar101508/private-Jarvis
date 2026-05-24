@@ -47,10 +47,22 @@ def _load_model(model_size: str, device: str, compute_type: str) -> WhisperModel
 
 
 def _downsample(audio_bytes: bytes) -> np.ndarray:
-    """Convert 48kHz int16 PCM bytes to 16kHz float32 array for Whisper."""
+    """Convert 48kHz int16 PCM bytes to 16kHz float32 array for Whisper.
+
+    Uses scipy.signal.resample_poly instead of naive decimation (pcm[::3]).
+    Naive slice-based decimation causes aliasing artifacts because it skips
+    samples without first applying a low-pass anti-aliasing filter — this
+    degrades STT accuracy on high-frequency speech sounds (sibilants, etc.).
+    resample_poly applies a polyphase anti-aliasing FIR filter automatically.
+    """
     pcm = np.frombuffer(audio_bytes, dtype=np.int16).astype(np.float32) / 32768.0
-    # Simple decimation (ratio=3): take every Nth sample
-    return pcm[::DOWNSAMPLE_RATIO]
+    try:
+        from scipy.signal import resample_poly
+        return resample_poly(pcm, up=1, down=DOWNSAMPLE_RATIO).astype(np.float32)
+    except ImportError:
+        # Graceful fallback if scipy is not installed — log and use basic decimation
+        logger.warning("scipy not installed; using aliasing-prone decimation. Add scipy to requirements.")
+        return pcm[::DOWNSAMPLE_RATIO]
 
 
 def _transcribe_sync(

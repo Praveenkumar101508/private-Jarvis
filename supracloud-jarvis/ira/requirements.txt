@@ -23,7 +23,7 @@ torch==2.4.1+cpu                # CPU-only torch for embeddings (keeps image sma
 --extra-index-url https://download.pytorch.org/whl/cpu
 
 # ── Auth & Security ────────────────────────────────────────────────────────────
-python-jose[cryptography]==3.3.0
+python-jose[cryptography]==3.4.0
 passlib[bcrypt]==1.7.4
 slowapi==0.1.9                  # Rate limiting for FastAPI
 

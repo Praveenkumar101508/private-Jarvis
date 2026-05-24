@@ -116,8 +116,10 @@ async def run_business_scan() -> None:
     ]
     qualification = await chat_complete(messages, use_deep=False, temperature=0.4, max_tokens=150)
 
-    hot_leads = [l for l in new_leads if "hot" in str(l.get("details", "")).lower()
-                 or "urgent" in str(l.get("details", "")).lower()]
+    # Use the LLM qualification text for hot detection — it already assessed urgency.
+    # Checking raw payload dicts is unreliable (JSONB stringification varies).
+    qual_lower = qualification.lower()
+    hot_leads = [l for l in new_leads if "hot" in qual_lower or "urgent" in qual_lower]
 
     priority = "critical" if hot_leads else "warning" if count >= 3 else "info"
 

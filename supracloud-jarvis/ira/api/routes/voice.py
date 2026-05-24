@@ -82,7 +82,7 @@ async def get_livekit_token(_user: str = Depends(require_auth)):
     return LiveKitTokenResponse(
         token=jwt,
         room=cfg.livekit_room_name,
-        livekit_url=f"wss://{cfg.ira_domain}",
+        livekit_url=f"wss://{cfg.ira_domain}/livekit",
     )
 
 
@@ -134,15 +134,43 @@ async def enroll_voice(
 
     for f in audio_files:
         audio_bytes = await f.read()
-        # Strip WAV header robustly using the wave module (handles variable-length headers)
+        # Validate WAV format: must be 16kHz, mono, 16-bit PCM
         if audio_bytes[:4] == b"RIFF":
-            import wave, io
+            import wave, io as _io
             try:
-                with wave.open(io.BytesIO(audio_bytes)) as wf:
+                with wave.open(_io.BytesIO(audio_bytes)) as wf:
+                    sr = wf.getframerate()
+                    ch = wf.getnchannels()
+                    sw = wf.getsampwidth()
+                    if sr != 16000:
+                        raise HTTPException(
+                            status_code=400,
+                            detail=f"Audio file '{f.filename}' must be 16kHz (got {sr} Hz). "
+                                   "Resample with: ffmpeg -ar 16000 -ac 1 input.wav output.wav",
+                        )
+                    if ch != 1:
+                        raise HTTPException(
+                            status_code=400,
+                            detail=f"Audio file '{f.filename}' must be mono (got {ch} channels). "
+                                   "Downmix with: ffmpeg -ac 1 input.wav output.wav",
+                        )
+                    if sw != 2:
+                        raise HTTPException(
+                            status_code=400,
+                            detail=f"Audio file '{f.filename}' must be 16-bit PCM (got {sw*8}-bit).",
+                        )
                     audio_bytes = wf.readframes(wf.getnframes())
+            except HTTPException:
+                raise
             except Exception:
                 # Fallback: skip standard 44-byte header
                 audio_bytes = audio_bytes[44:]
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail=f"File '{f.filename}' is not a valid WAV file. "
+                       "Only 16kHz mono 16-bit WAV files are accepted for enrolment.",
+            )
 
         embedding = await compute_embedding(audio_bytes)
         if embedding is not None:

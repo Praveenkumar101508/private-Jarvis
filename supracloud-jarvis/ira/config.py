@@ -105,6 +105,8 @@ class Settings(BaseSettings):
     # ── Proactive Intelligence (Phase 4) ──────────────────────────────────────
     # Hour (UTC) to send the morning briefing (default 08:00)
     briefing_hour_utc: int = 8
+    # IANA timezone for end-of-day calculations in briefings (e.g. "Asia/Kolkata")
+    briefing_timezone: str = "UTC"
 
     # ── Notifications: Telegram ───────────────────────────────────────────────
     telegram_bot_token: str = ""

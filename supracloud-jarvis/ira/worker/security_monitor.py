@@ -261,9 +261,66 @@ async def _check_system_health() -> list[dict]:
 # ── SSH auth log monitoring ───────────────────────────────────────────────────
 
 async def _check_ssh_failures() -> list[dict]:
-    """Parse auth.log for failed SSH logins since last scan offset."""
+    """Parse auth.log for failed SSH logins since last scan offset.
+
+    Falls back to reading recent journald output when auth.log is absent
+    (common on systems where the bind-mount file does not exist on the host).
+    """
     if not os.path.exists(SSH_LOG_PATH):
+        return await _check_ssh_failures_journald()
+    return await _check_ssh_failures_file()
+
+
+def _parse_ssh_lines(lines: list[str]) -> list[dict]:
+    """Extract SSH brute-force events from a list of log lines (file or journald)."""
+    from collections import defaultdict
+    ip_failures: dict[str, int] = defaultdict(int)
+    ip_users: dict[str, set] = defaultdict(set)
+
+    for line in lines:
+        m = _SSH_FAIL_RE.search(line) or _SSH_INVALID_RE.search(line)
+        if m:
+            user, ip = m.group(1), m.group(2)
+            ip_failures[ip] += 1
+            ip_users[ip].add(user)
+
+    events = []
+    for ip, count in ip_failures.items():
+        if count >= 3:
+            users_tried = ", ".join(list(ip_users[ip])[:5])
+            events.append({
+                "severity": "high" if count >= 10 else "medium",
+                "event_type": "ssh_brute_force",
+                "source_ip": ip,
+                "description": (
+                    f"SSH brute-force: {count} failed attempts from {ip}. "
+                    f"Usernames tried: {users_tried}"
+                ),
+                "raw_log": "",
+            })
+    return events
+
+
+async def _check_ssh_failures_journald() -> list[dict]:
+    """Fallback: read SSH failures from journald (no file mount required)."""
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "journalctl", "-u", "ssh", "-u", "sshd", "--since", "1 hour ago",
+            "--no-pager", "-q",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=10)
+        lines = stdout.decode(errors="replace").splitlines()
+    except (FileNotFoundError, asyncio.TimeoutError, Exception):
+        # journalctl not available (e.g., inside minimal container) — skip silently
         return []
+
+    return _parse_ssh_lines(lines)
+
+
+async def _check_ssh_failures_file() -> list[dict]:
+    """Parse auth.log for failed SSH logins since last scan offset."""
 
     async with acquire() as conn:
         row = await conn.fetchrow(

@@ -95,5 +95,7 @@ def build_grok_system_prompt(context: str = "") -> str:
     return base
 
 
-# Module-level constant so chat.py can import it like other agents
-GROK_SYSTEM = build_grok_system_prompt()
+# Note: do NOT add a module-level GROK_SYSTEM = build_grok_system_prompt() here.
+# Calling get_settings() at import time runs before the app is fully initialised
+# and causes startup failures under certain test/env conditions.
+# Import build_grok_system_prompt() and call it inside the function that needs it.

@@ -164,5 +164,6 @@ def build_engineer_prompt(context: str = "") -> str:
     return base
 
 
-# Module-level constant for quick import
-ENGINEER_SYSTEM = build_engineer_prompt()
+# Note: do NOT add a module-level ENGINEER_SYSTEM = build_engineer_prompt() here.
+# Calling get_settings() at import time can cause startup failures.
+# Use build_engineer_prompt() lazily inside the function that needs it.

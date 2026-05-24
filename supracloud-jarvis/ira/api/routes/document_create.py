@@ -19,6 +19,7 @@ Libraries:
 
 from __future__ import annotations
 
+import base64
 import io
 import json as _json
 import logging
@@ -39,9 +40,47 @@ from utils.llm import chat_complete
 router = APIRouter(prefix="/document", tags=["document"])
 logger = logging.getLogger("ira.document_create")
 
-# In-memory store for generated documents (keyed by doc_id)
-# In production this should write to the backup_data volume
-_DOC_STORE: dict[str, tuple[bytes, str, str]] = {}  # id → (bytes, filename, mimetype)
+_DOC_TTL = 3600  # 1 hour — documents expire after download window
+
+# ── Redis-backed document store (per-user, TTL-protected) ────────────────────
+# Falls back to a process-local dict when Redis is unavailable (e.g., dev mode).
+_DOC_FALLBACK: dict[str, dict] = {}
+
+
+async def _store_doc(user_id: str, doc_id: str, file_bytes: bytes, filename: str, mimetype: str) -> None:
+    payload = _json.dumps({
+        "data": base64.b64encode(file_bytes).decode(),
+        "filename": filename,
+        "mimetype": mimetype,
+        "owner": user_id,
+    })
+    try:
+        from utils.redis_client import get_redis
+        redis = get_redis()
+        await redis.setex(f"document:{user_id}:{doc_id}", _DOC_TTL, payload)
+    except Exception:
+        _DOC_FALLBACK[f"{user_id}:{doc_id}"] = {
+            "data": file_bytes, "filename": filename, "mimetype": mimetype, "owner": user_id,
+        }
+
+
+async def _get_doc(user_id: str, doc_id: str) -> tuple[bytes, str, str] | None:
+    """Return (bytes, filename, mimetype) for this user's doc, or None if not found/expired."""
+    try:
+        from utils.redis_client import get_redis
+        redis = get_redis()
+        raw = await redis.get(f"document:{user_id}:{doc_id}")
+        if not raw:
+            return None
+        entry = _json.loads(raw)
+        if entry.get("owner") != user_id:
+            return None  # Cross-user access blocked
+        return base64.b64decode(entry["data"]), entry["filename"], entry["mimetype"]
+    except Exception:
+        fb = _DOC_FALLBACK.get(f"{user_id}:{doc_id}")
+        if fb and fb.get("owner") == user_id:
+            return fb["data"], fb["filename"], fb["mimetype"]
+        return None
 
 # Document type detection
 _DOC_CREATE_RE = re.compile(
@@ -154,7 +193,7 @@ def _generate_pdf(content: str, title: str) -> bytes:
             elif line.startswith("# "):
                 story.append(Paragraph(line[2:], styles["Heading1"]))
             elif line.startswith(("- ", "* ", "• ")):
-                text = line[2:].replace("**", "<b>").replace("**", "</b>")
+                text = re.sub(r'\*\*(.+?)\*\*', r'<b>\1</b>', line[2:])
                 story.append(Paragraph(f"• {text}", styles["Normal"]))
             elif re.match(r"^\d+\. ", line):
                 text = re.sub(r"^\d+\. ", "", line)
@@ -377,9 +416,9 @@ async def document_create(
             else:  # xlsx
                 file_bytes = _generate_xlsx(content, title)
 
-            # Step 3: Store and generate download ID
-            doc_id = str(uuid.uuid4())[:8]
-            _DOC_STORE[doc_id] = (file_bytes, filename, _MIME[fmt])
+            # Step 3: Store with full UUID (not truncated 8-char) and per-user key
+            doc_id = str(uuid.uuid4())
+            await _store_doc(_user, doc_id, file_bytes, filename, _MIME[fmt])
 
             latency = int((time.monotonic() - t0) * 1000)
             yield {"data": _json.dumps({
@@ -415,8 +454,8 @@ async def document_download(
     doc_id: str,
     _user: str = Depends(require_auth),
 ):
-    """Download a previously generated document by its ID."""
-    entry = _DOC_STORE.get(doc_id)
+    """Download a previously generated document by its ID (owner-only, 1 h TTL)."""
+    entry = await _get_doc(_user, doc_id)
     if not entry:
         raise HTTPException(status_code=404, detail="Document not found or expired.")
     file_bytes, filename, mimetype = entry

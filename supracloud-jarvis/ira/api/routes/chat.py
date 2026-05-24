@@ -287,8 +287,9 @@ async def chat_stream(
 
     if is_implement_trigger(req.message):
         feature = extract_feature_name(req.message)
-        from api.routes.architect import _state as _arch_state
-        proposal_ctx = _arch_state.get("proposal") or ""
+        from api.routes.architect import _get_state as _arch_get, _set_state as _arch_set
+        cached = await _arch_get(_user)
+        proposal_ctx = cached.get("proposal") or ""
 
         async def architect_impl_stream():
             async for event in stream_auto_implement(feature, proposal_context=proposal_ctx):
@@ -297,9 +298,11 @@ async def chat_stream(
                 elif event.get("implement_chunk"):
                     yield {"data": json.dumps({"token": event["implement_chunk"]})}
                 elif event.get("implement_done"):
-                    _arch_state["implementation"] = event.get("implementation", "")
-                    _arch_state["feature_name"] = feature
-                    _arch_state["pending_apply"] = True
+                    st = await _arch_get(_user)
+                    st["implementation"] = event.get("implementation", "")
+                    st["feature_name"] = feature
+                    st["pending_apply"] = True
+                    await _arch_set(_user, st)
                     yield {"data": json.dumps({
                         "done": True,
                         "agent": "architect",
@@ -311,19 +314,21 @@ async def chat_stream(
         return EventSourceResponse(architect_impl_stream())
 
     if is_apply_trigger(req.message):
-        from api.routes.architect import _state as _arch_state
+        from api.routes.architect import _get_state as _arch_get, _set_state as _arch_set
         from utils.auto_implement import apply_implementation
 
         async def apply_stream():
             yield {"data": json.dumps({"token": "⚙️ Applying implementation — running `git apply`…\n\n"})}
-            impl = _arch_state.get("implementation")
+            st = await _arch_get(_user)
+            impl = st.get("implementation")
             if not impl:
                 yield {"data": json.dumps({"token": "❌ No pending implementation. Run `architect implement [feature]` first.\n"})}
             else:
                 result = await apply_implementation(impl)
                 if result.success:
-                    _arch_state["pending_apply"] = False
-                    _arch_state["implementation"] = None
+                    st["pending_apply"] = False
+                    st["implementation"] = None
+                    await _arch_set(_user, st)
                 msg = result.message + ("\n\n" + result.error if result.error else "")
                 yield {"data": json.dumps({"token": msg})}
             yield {"data": json.dumps({
@@ -818,7 +823,8 @@ async def chat_document_upload(
     session_id = session_id or str(uuid.uuid4())
     conv_id = await ensure_conversation(session_id)
 
-    raw = await file.read()
+    from utils.file_utils import read_with_size_cap
+    raw = await read_with_size_cap(file, max_bytes=50 * 1024 * 1024)
     doc_text = _extract_document_text(raw, file.filename or "", file.content_type or "")
 
     # Truncate to fit context window

@@ -21,6 +21,7 @@ import json
 import logging
 import uuid
 from datetime import datetime, timezone, timedelta
+from zoneinfo import ZoneInfo
 
 from utils.db import acquire
 from utils.llm import chat_complete
@@ -108,11 +109,13 @@ async def _gather_tasks_data() -> dict:
 
 
 async def _gather_calendar_data() -> dict:
-    """Pull today's calendar events."""
+    """Pull today's calendar events using the owner's local timezone."""
+    from config import get_settings
+    _cfg = get_settings()
+    tz = ZoneInfo(getattr(_cfg, "briefing_timezone", "UTC"))
+    _today = datetime.now(tz).date()
+    today_end = datetime(_today.year, _today.month, _today.day, 23, 59, 59, tzinfo=tz)
     async with acquire() as conn:
-        today_end = datetime.now(timezone.utc).replace(
-            hour=23, minute=59, second=59
-        )
         events = await conn.fetch(
             """SELECT title, start_at, end_at, location, attendees
                FROM calendar_events

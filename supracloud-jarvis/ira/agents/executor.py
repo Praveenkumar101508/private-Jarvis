@@ -13,11 +13,14 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import shlex
 import subprocess
 import time
 
 from langchain_core.messages import AIMessage
+
+logger = logging.getLogger("ira.executor")
 
 from agents.state import IRAState
 from utils.llm import chat_complete
@@ -134,11 +137,11 @@ async def executor(state: IRAState) -> IRAState:
     )
     extracted_cmd = extracted_cmd.strip()
 
-    allowed = extracted_cmd != "NONE" and _is_allowed(extracted_cmd)
+    allowed = extracted_cmd.strip().upper() != "NONE" and _is_allowed(extracted_cmd)
 
     # Path restriction check: parse into parts and reject any restricted arg
     path_safe = True
-    if allowed and extracted_cmd != "NONE":
+    if allowed and extracted_cmd.strip().upper() != "NONE":
         try:
             parts = shlex.split(extracted_cmd)
             for arg in parts[1:]:  # skip the command name itself
@@ -156,9 +159,9 @@ async def executor(state: IRAState) -> IRAState:
 
     # Execute the command if it passes both allowlist and path checks
     exec_context = ""
-    if not path_safe and extracted_cmd != "NONE":
+    if not path_safe and extracted_cmd.strip().upper() != "NONE":
         exec_context = "\n\nExecution result: Command rejected: restricted path"
-    elif allowed and extracted_cmd != "NONE":
+    elif allowed and extracted_cmd.strip().upper() != "NONE":
         output, returncode = await _run_command(extracted_cmd)
         exec_context = (
             f"\n\nExecution result (exit code {returncode}):\n"
@@ -184,5 +187,5 @@ async def executor(state: IRAState) -> IRAState:
         "final_response": response,
         "messages": [AIMessage(content=response)],
         "latency_ms": latency,
-        "model_used": "llama-fast",
+        "model_used": "qwen3-fast",
     }

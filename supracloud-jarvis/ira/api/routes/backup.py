@@ -12,6 +12,7 @@ All endpoints require admin authentication (403 for non-admin users).
 from __future__ import annotations
 
 import logging
+import uuid
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
@@ -90,9 +91,11 @@ async def restore_backup(
         raise HTTPException(status_code=400, detail="Upload must be a .sql.gz backup file")
 
     BACKUP_DIR.mkdir(parents=True, exist_ok=True)
-    tmp_path = BACKUP_DIR / f"restore_upload_{file.filename}"
+    # Use a UUID-based name — never trust the client-supplied filename
+    tmp_path = BACKUP_DIR / f"restore_{uuid.uuid4()}.sql.gz"
     try:
-        content = await file.read()
+        from utils.file_utils import read_with_size_cap
+        content = await read_with_size_cap(file, max_bytes=500 * 1024 * 1024)  # 500 MB max for backups
         if len(content) == 0:
             raise HTTPException(status_code=400, detail="Uploaded file is empty")
         tmp_path.write_bytes(content)

@@ -243,9 +243,8 @@ async def video_understand(
     from config import get_settings as _cfg
 
     cfg = _cfg()
-    video_bytes = await file.read()
-    if len(video_bytes) > 100 * 1024 * 1024:  # 100MB limit
-        raise HTTPException(status_code=413, detail="Video file too large. Max 100MB.")
+    from utils.file_utils import read_with_size_cap
+    video_bytes = await read_with_size_cap(file, max_bytes=100 * 1024 * 1024)
 
     frames = _extract_frames_ffmpeg(video_bytes, max_frames=8)
 

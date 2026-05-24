@@ -16,15 +16,23 @@ logger = logging.getLogger("ira.reminders")
 def _next_cron_time(cron_expr: str, after: datetime) -> datetime | None:
     """
     Calculate the next fire time for a cron expression after a given datetime.
-    Uses croniter if available; falls back to a 24-hour advance.
+    Requires croniter — raises ImportError clearly if not installed so the
+    operator knows to add it to requirements.txt (silent 24-h fallback was wrong
+    and would fire recurring reminders at the wrong time).
     """
     try:
         from croniter import croniter
+    except ImportError:
+        raise ImportError(
+            "croniter is required for recurring reminders. "
+            "Add 'croniter>=1.4' to ira/requirements.txt and rebuild."
+        )
+    try:
         itr = croniter(cron_expr, after)
         return itr.get_next(datetime).replace(tzinfo=timezone.utc)
-    except Exception:
-        from datetime import timedelta
-        return after + timedelta(hours=24)
+    except Exception as e:
+        logger.warning(f"Invalid cron expression {cron_expr!r}: {e}")
+        return None
 
 
 async def check_due_reminders() -> None:
@@ -35,7 +43,7 @@ async def check_due_reminders() -> None:
                       t.title AS task_title
                FROM reminders r
                LEFT JOIN tasks t ON r.task_id = t.id
-               WHERE r.sent = FALSE AND r.remind_at <= NOW() + INTERVAL '15 minutes'
+               WHERE r.sent = FALSE AND r.remind_at <= NOW()
                ORDER BY r.remind_at ASC
                LIMIT 20"""
         )

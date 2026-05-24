@@ -267,9 +267,8 @@ async def audio_transcribe(
     """
     _WHISPER_MODEL = "openai/whisper:4d50797290df2f63793a75e2a19c694db87b6c8da52b0a4929dfe87dfe5b3d7"
 
-    audio_bytes = await file.read()
-    if len(audio_bytes) > 50 * 1024 * 1024:  # 50MB limit
-        raise HTTPException(status_code=413, detail="Audio file too large. Max 50MB.")
+    from utils.file_utils import read_with_size_cap
+    audio_bytes = await read_with_size_cap(file, max_bytes=50 * 1024 * 1024)
 
     import base64
     audio_b64 = base64.b64encode(audio_bytes).decode()

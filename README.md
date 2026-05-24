@@ -151,6 +151,62 @@ run_security_scan()
 
 ---
 
+## Deployment Modes
+
+IRA supports three deployment configurations depending on available hardware and budget:
+
+| Mode | Hardware | Models | Use Case |
+|------|----------|--------|----------|
+| **Full-Local (Recommended)** | NVIDIA RTX A4500 20GB+ | Qwen3-8B (fast) + Qwen3-14B (deep) | Maximum privacy — zero cloud calls |
+| **Hybrid** | Any GPU / CPU | Local LLMs + selected cloud APIs | Use Replicate for images, local for chat |
+| **Dev Mode** | Any machine (even CPU-only) | Ollama (qwen3:8b) | Local development without GPU |
+
+### Full-Local Mode (Default)
+Everything runs on your hardware. Set `DEV_MODE=false` in `.env`. vLLM serves two quantized models:
+- **Fast**: `qwen3-fast` (8B) — chat, classification, ~2s latency
+- **Deep**: `qwen3-deep` (14B) — research, code, ~8s latency
+- **Reasoning** (optional): `qwen3-reasoning` (32B+) — Think Mode, DeepSearch
+
+### Dev Mode (CPU Only)
+Set `DEV_MODE=true` to route all LLM calls to a local Ollama instance. No GPU required.
+```bash
+ollama pull qwen3:8b     # recommended
+# then set in .env:
+DEV_MODE=true
+DEV_MODEL=qwen3:8b
+OLLAMA_BASE_URL=http://host.docker.internal:11434/v1
+```
+
+### Known Limitations
+- **Indic language voice** (Hindi, Tamil, etc.) — Whisper large-v3 accuracy varies; Indic speaker enrolment not tested
+- **Biometric gate** — requires speechbrain + torch+cpu installed in `ira-voice` container; disabled if not installed
+- **Recurring reminders** — require `croniter>=1.4` in `ira/requirements.txt`
+- **Voice STT resampling** — requires `scipy>=1.14` for anti-aliasing; falls back to basic decimation without it
+
+---
+
+## Cloud-Dependent Features
+
+The following features require external API keys. IRA works fully without them, but these features will be disabled or degraded:
+
+| Feature | Required Key | Set in `.env` | Free Tier? |
+|---------|-------------|--------------|------------|
+| Image generation | Replicate | `REPLICATE_API_TOKEN` | Yes (limited) |
+| Video generation | Replicate (Kling / Veo) | `REPLICATE_API_TOKEN` | No |
+| Audio transcription (cloud) | Replicate (Whisper) | `REPLICATE_API_TOKEN` | Yes |
+| X / Twitter search | X API v2 | `TWITTER_BEARER_TOKEN` | Yes (Basic) |
+| X search fallback | twitterapi.io | `X_FALLBACK_API_KEY` | $5/month |
+| LinkedIn job scraping | Apify | `APIFY_API_TOKEN` | Yes (limited) |
+| GitHub repo analysis | GitHub API | `GITHUB_TOKEN` | Yes |
+| Telegram alerts | Telegram Bot API | `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID` | Free |
+| Email notifications | Any SMTP | `SMTP_HOST/USER/PASS/TO` | Varies |
+| Calendar (Cal.com) | Cal.com API | `CALCOM_API_KEY` | Yes |
+| Calendar (Google) | GCP service account | `GOOGLE_SERVICE_ACCOUNT_JSON` | Yes |
+
+**Everything else** (chat, memory, research, security monitoring, briefings, voice, biometrics, architect, engineer mode, tutor, document creation) runs entirely on-premises.
+
+---
+
 ## Quick Start (Server Deployment)
 
 ### Prerequisites

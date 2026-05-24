@@ -58,6 +58,19 @@ async def _fetch_business_summary() -> dict:
 async def website_manager(state: IRAState) -> IRAState:
     t0 = time.monotonic()
 
+    # Business data is owner-only — reject if biometric gate not passed
+    if not state.get("is_owner"):
+        return {
+            **state,
+            "final_response": (
+                "Business metrics and lead data are restricted to the owner. "
+                "Please authenticate with your voice biometric to access this information."
+            ),
+            "messages": [AIMessage(content="Business data restricted — owner authentication required.")],
+            "latency_ms": 0,
+            "model_used": "qwen3-fast",
+        }
+
     summary = await _fetch_business_summary()
 
     messages = [{"role": "system", "content": _SYSTEM}]
@@ -86,5 +99,5 @@ async def website_manager(state: IRAState) -> IRAState:
         "final_response": response,
         "messages": [AIMessage(content=response)],
         "latency_ms": latency,
-        "model_used": "qwen-deep" if state.get("use_deep_model") else "llama-fast",
+        "model_used": "qwen3-deep" if state.get("use_deep_model") else "qwen3-fast",
     }
