@@ -97,11 +97,13 @@ async def ws_notifications(
     """
     # Prefer token from Sec-WebSocket-Protocol header (avoids nginx log exposure)
     token: str | None = None
+    selected_subprotocol: str | None = None
     protocol_header = websocket.headers.get("sec-websocket-protocol", "")
     for part in protocol_header.split(","):
         part = part.strip()
         if part.startswith("bearer."):
             token = part[len("bearer."):]
+            selected_subprotocol = part  # must be echoed back in accept() — Fix #69
             break
 
     # Fallback: query param (dev / legacy clients)
@@ -118,7 +120,11 @@ async def ws_notifications(
         await websocket.close(code=4001)
         return
 
-    await websocket.accept()
+    # Fix #69: echo the selected subprotocol back in the handshake response.
+    # Per RFC 6455, if the client offered subprotocols the server MUST reply
+    # with the chosen one; without this, browsers using the standard WebSocket
+    # API reject the connection with a subprotocol mismatch error.
+    await websocket.accept(subprotocol=selected_subprotocol)
     logger.info("WebSocket client connected for real-time notifications")
 
     redis = get_redis()

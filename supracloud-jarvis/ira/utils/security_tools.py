@@ -38,32 +38,67 @@ def _is_external(ip: str) -> bool:
     return bool(ip) and not any(ip.startswith(p) for p in _PRIVATE_PREFIXES)
 
 
-# ── Lockdown state (DB-persisted) ─────────────────────────────────────────────
+# ── Lockdown state (Redis-cached, DB-persisted) ───────────────────────────────
+#
+# Fix #33: the original implementation used a module-level `_lockdown_cache`
+# variable that was process-local. With multi-worker deployments (uvicorn
+# --workers N), worker A could set lockdown=True while worker B retained
+# the old False in its own memory. Now Redis is the shared source of truth,
+# with the DB as the durable persistence layer.
 
-# In-process cache — refreshed from DB on first call after restart
-_lockdown_cache: bool | None = None
+_REDIS_LOCKDOWN_KEY = "ira:lockdown_active"
 
 
 async def get_lockdown_state() -> bool:
-    """Read persisted lockdown state from monitor_state table."""
-    global _lockdown_cache
-    if _lockdown_cache is not None:
-        return _lockdown_cache
+    """
+    Read lockdown state.
+
+    Order of preference:
+      1. Redis cache (fast, shared across all workers in a pod)
+      2. DB fallback (for cold-start before Redis write, or Redis outage)
+    """
+    # 1. Try Redis first
+    try:
+        from utils.redis_client import get_redis
+        redis = get_redis()
+        val = await redis.get(_REDIS_LOCKDOWN_KEY)
+        if val is not None:
+            return val in (b"1", "1")
+    except Exception as e:
+        logger.debug(f"Redis lockdown read failed (falling back to DB): {e}")
+
+    # 2. Fall back to DB and backfill Redis
     try:
         async with acquire() as db:
             row = await db.fetchrow(
                 "SELECT value FROM monitor_state WHERE key='lockdown_active'"
             )
-            _lockdown_cache = row is not None and row["value"] == "1"
+            state = row is not None and row["value"] == "1"
+        # Backfill Redis so subsequent calls are fast
+        try:
+            from utils.redis_client import get_redis
+            redis = get_redis()
+            await redis.set(_REDIS_LOCKDOWN_KEY, "1" if state else "0")
+        except Exception:
+            pass
+        return state
     except Exception:
-        _lockdown_cache = False
-    return _lockdown_cache
+        return False
 
 
 async def _set_lockdown_db(active: bool) -> None:
-    global _lockdown_cache
-    _lockdown_cache = active
+    """Write lockdown state to Redis (immediate, shared) and DB (durable)."""
     value = "1" if active else "0"
+
+    # 1. Update Redis first — all workers see the change instantly
+    try:
+        from utils.redis_client import get_redis
+        redis = get_redis()
+        await redis.set(_REDIS_LOCKDOWN_KEY, value)
+    except Exception as e:
+        logger.warning(f"Failed to update lockdown state in Redis: {e}")
+
+    # 2. Persist to DB for durability across container restarts
     try:
         async with acquire() as db:
             await db.execute(

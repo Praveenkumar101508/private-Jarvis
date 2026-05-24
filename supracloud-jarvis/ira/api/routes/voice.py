@@ -9,6 +9,8 @@ GET  /voice/profile/status → check whether an owner voice profile exists
 from __future__ import annotations
 
 import logging
+import secrets
+import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
 from pydantic import BaseModel
@@ -18,6 +20,11 @@ from config import get_settings
 
 router = APIRouter(prefix="/voice", tags=["voice"])
 logger = logging.getLogger("ira.voice.api")
+
+# Anti-replay challenge TTL — challenges expire after 60 seconds.
+# If the user hasn't spoken the phrase and submitted within 60 s the
+# challenge is stale; the client must request a fresh one.
+_CHALLENGE_TTL = 60  # seconds
 
 
 # ── Response models ───────────────────────────────────────────────────────────
@@ -32,6 +39,12 @@ class EnrolmentResponse(BaseModel):
     status: str
     segments_processed: int
     message: str
+
+
+class ChallengeResponse(BaseModel):
+    challenge_id: str
+    phrase: str
+    expires_in: int  # seconds
 
 
 # ── LiveKit access token factory ──────────────────────────────────────────────
@@ -86,6 +99,90 @@ async def get_livekit_token(_user: str = Depends(require_auth)):
     )
 
 
+# ── Anti-replay challenge ─────────────────────────────────────────────────────
+
+# A pool of short, unambiguous phrases for the user to speak during enrolment.
+# Having variety means the phrase cannot be pre-recorded.
+_CHALLENGE_PHRASES = [
+    "IRA authenticate now",
+    "voice lock open",
+    "secure access granted",
+    "identity confirm",
+    "biometric verify",
+    "owner access code",
+    "unlock voice gate",
+    "speak to proceed",
+]
+
+
+@router.get("/challenge", response_model=ChallengeResponse)
+async def get_voice_challenge(_user: str = Depends(require_auth)):
+    """
+    Issue a one-time anti-replay challenge phrase. (Fix #36)
+
+    The challenge is a random UUID stored in Redis with a 60-second TTL.
+    The caller must include the ``challenge_id`` when submitting enrolment audio.
+    The challenge is consumed (deleted) on first use, so a recorded replay of an
+    earlier enrolment session will fail with 409 Conflict.
+    """
+    cfg = get_settings()
+    if _user != cfg.ira_admin_username:
+        raise HTTPException(
+            status_code=403,
+            detail="Only the system administrator may request a biometric challenge.",
+        )
+
+    challenge_id = str(uuid.uuid4())
+    phrase = secrets.choice(_CHALLENGE_PHRASES)
+
+    try:
+        from utils.redis_client import get_redis
+        redis = get_redis()
+        await redis.setex(f"bio:challenge:{challenge_id}", _CHALLENGE_TTL, phrase)
+    except Exception as e:
+        logger.error(f"Could not store biometric challenge in Redis: {e}")
+        raise HTTPException(
+            status_code=503,
+            detail="Challenge service unavailable — Redis connection failed.",
+        )
+
+    logger.info(f"Issued biometric challenge {challenge_id} to user '{_user}'")
+    return ChallengeResponse(
+        challenge_id=challenge_id,
+        phrase=phrase,
+        expires_in=_CHALLENGE_TTL,
+    )
+
+
+async def _consume_challenge(challenge_id: str) -> None:
+    """
+    Verify a challenge exists (not expired, not already used) and consume it.
+    Raises HTTPException on failure.
+    """
+    try:
+        from utils.redis_client import get_redis
+        redis = get_redis()
+        key = f"bio:challenge:{challenge_id}"
+        # Atomic check-and-delete: returns the value if it existed, None if not
+        phrase = await redis.getdel(key)
+        if phrase is None:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "Challenge not found or already used. "
+                    "Request a fresh challenge from GET /voice/challenge."
+                ),
+            )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Could not verify biometric challenge in Redis: {e}")
+        raise HTTPException(
+            status_code=503,
+            detail="Challenge verification failed — Redis connection error.",
+        )
+
+
 # ── Biometric voice enrolment ─────────────────────────────────────────────────
 
 @router.post("/enroll", response_model=EnrolmentResponse)
@@ -94,12 +191,24 @@ async def enroll_voice(
         ...,
         description="3–10 WAV/PCM audio files (16kHz mono) of the owner speaking.",
     ),
+    challenge_id: str = Form(
+        ...,
+        description=(
+            "One-time challenge ID obtained from GET /voice/challenge. "
+            "Prevents replay attacks — the challenge is consumed on use."
+        ),
+    ),
     _user: str = Depends(require_auth),
 ):
     """
     Owner voice enrolment endpoint.
 
-    Submit 3–10 audio segments (≥3 seconds each, 16kHz mono PCM/WAV).
+    Submit 3–10 audio segments (≥3 seconds each, 16kHz mono PCM/WAV)
+    together with a one-time ``challenge_id`` from GET /voice/challenge.
+
+    Fix #36 (anti-replay): the challenge_id is consumed on first use so that
+    a previously recorded enrolment session cannot be replayed by an attacker.
+
     IRA computes an ECAPA-TDNN embedding for each segment, averages them
     into a robust reference profile, and stores it in the database.
 
@@ -115,6 +224,9 @@ async def enroll_voice(
             status_code=403,
             detail="Only the system administrator may enrol a voice profile.",
         )
+
+    # Consume the anti-replay challenge before processing any audio (#36)
+    await _consume_challenge(challenge_id)
 
     if len(audio_files) < 1:
         raise HTTPException(status_code=400, detail="At least 1 audio file is required.")

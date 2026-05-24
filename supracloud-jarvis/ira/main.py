@@ -125,11 +125,14 @@ def create_app() -> FastAPI:
     allowed_origins = [f"https://{cfg.ira_domain}"]
     if cfg.dev_mode:
         allowed_origins += ["http://localhost:3000", "http://127.0.0.1:3000"]
+    # Fix #45: PATCH and PUT were missing — endpoints that use them (architect
+    # apply, profile updates) would fail CORS preflight in the browser. OPTIONS
+    # is implied by CORSMiddleware but listed explicitly for clarity.
     app.add_middleware(
         CORSMiddleware,
         allow_origins=allowed_origins,
         allow_credentials=True,
-        allow_methods=["GET", "POST", "DELETE"],
+        allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
         allow_headers=["Authorization", "Content-Type"],
     )
 
