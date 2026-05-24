@@ -56,8 +56,9 @@ async def save_message(
             uuid.UUID(conversation_id),
             role, content, model_used, latency_ms, tokens_in, tokens_out,
         )
-    # Embed and store asynchronously — don't block the response
-    asyncio.create_task(_store_embedding(msg_id, content, "message"))
+    # Embed and store asynchronously — keep reference so task isn't GC'd mid-flight
+    _t = asyncio.create_task(_store_embedding(msg_id, content, "message"))
+    _t.add_done_callback(lambda t: t.exception() and logger.warning(f"Embedding task failed: {t.exception()}"))
     return msg_id
 
 

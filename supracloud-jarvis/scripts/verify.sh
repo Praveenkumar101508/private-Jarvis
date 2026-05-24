@@ -50,6 +50,9 @@ CONTAINERS=(
     "ira-livekit"
     "ira-nginx"
     "ira-voice"
+    "ira-api"
+    "ira-worker"
+    "ira-frontend"
 )
 
 for container in "${CONTAINERS[@]}"; do
@@ -115,7 +118,7 @@ fi
 # =============================================================================
 # vLLM FAST PATH
 # =============================================================================
-header "vLLM Fast Path (Llama 3.1 8B)"
+header "vLLM Fast Path (Qwen3-Fast)"
 
 FAST_HEALTH=$(curl -sf "http://localhost:8001/health" 2>/dev/null || echo "")
 if [[ "${FAST_HEALTH}" == *"ok"* ]] || curl -sf "http://localhost:8001/health" &>/dev/null; then
@@ -123,10 +126,10 @@ if [[ "${FAST_HEALTH}" == *"ok"* ]] || curl -sf "http://localhost:8001/health" &
 
     # Check model is loaded
     MODELS=$(curl -sf -H "Authorization: Bearer ${VLLM_API_KEY}" "http://localhost:8001/v1/models" 2>/dev/null || echo "")
-    if [[ "${MODELS}" == *"llama-fast"* ]]; then
-        ok "Model 'llama-fast' loaded"
+    if [[ "${MODELS}" == *"qwen3-fast"* ]]; then
+        ok "Model 'qwen3-fast' loaded"
     else
-        fail "Model 'llama-fast' not yet available (still loading?)"
+        fail "Model 'qwen3-fast' not yet available (still loading?)"
         info "Run: docker logs ira-vllm-fast --tail 20"
     fi
 
@@ -135,7 +138,7 @@ if [[ "${FAST_HEALTH}" == *"ok"* ]] || curl -sf "http://localhost:8001/health" &
     RESPONSE=$(curl -sf -X POST \
         -H "Authorization: Bearer ${VLLM_API_KEY}" \
         -H "Content-Type: application/json" \
-        -d '{"model":"llama-fast","messages":[{"role":"user","content":"Reply with exactly: IRA_ONLINE"}],"max_tokens":10,"temperature":0}' \
+        -d '{"model":"qwen3-fast","messages":[{"role":"user","content":"Reply with exactly: IRA_ONLINE"}],"max_tokens":10,"temperature":0}' \
         "http://localhost:8001/v1/chat/completions" 2>/dev/null || echo "")
 
     if [[ "${RESPONSE}" == *"IRA_ONLINE"* ]] || [[ "${RESPONSE}" == *"content"* ]]; then
@@ -151,16 +154,16 @@ fi
 # =============================================================================
 # vLLM DEEP PATH
 # =============================================================================
-header "vLLM Deep Path (Qwen 2.5 14B)"
+header "vLLM Deep Path (Qwen3-Deep)"
 
 if curl -sf "http://localhost:8002/health" &>/dev/null; then
     ok "vLLM deep endpoint /health → OK"
 
     MODELS=$(curl -sf -H "Authorization: Bearer ${VLLM_API_KEY}" "http://localhost:8002/v1/models" 2>/dev/null || echo "")
-    if [[ "${MODELS}" == *"qwen-deep"* ]]; then
-        ok "Model 'qwen-deep' loaded"
+    if [[ "${MODELS}" == *"qwen3-deep"* ]]; then
+        ok "Model 'qwen3-deep' loaded"
     else
-        fail "Model 'qwen-deep' not yet available (still loading?)"
+        fail "Model 'qwen3-deep' not yet available (still loading?)"
         info "Run: docker logs ira-vllm-deep --tail 20"
     fi
 else
@@ -222,6 +225,17 @@ if command -v nvidia-smi &>/dev/null; then
     ok "GPU utilization: ${GPU_UTIL}"
 else
     fail "nvidia-smi not found"
+fi
+
+# =============================================================================
+# API HEALTH ENDPOINT
+# =============================================================================
+header "API Health"
+
+if curl -sf http://localhost/health &>/dev/null; then
+    ok "Health endpoint http://localhost/health → OK"
+else
+    fail "Health endpoint http://localhost/health — FAIL (nginx or ira-api not ready)"
 fi
 
 # =============================================================================

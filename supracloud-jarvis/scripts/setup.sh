@@ -93,6 +93,8 @@ else
     echo -e "${BOLD}Please provide the following values:${NC}"
     echo ""
 
+    # Suppress trace mode for all secret prompts so passwords never appear in logs
+    { set +x; } 2>/dev/null
     read -rsp "PostgreSQL password: " PG_PASS; echo ""
     [[ -z "${PG_PASS}" ]] && err "PostgreSQL password cannot be empty."
 
@@ -102,8 +104,8 @@ else
     read -rsp "Redis password: " REDIS_PASS; echo ""
     [[ -z "${REDIS_PASS}" ]] && err "Redis password cannot be empty."
 
-    read -rp "HuggingFace token (from https://huggingface.co/settings/tokens): " HF_TOKEN; echo ""
-    [[ -z "${HF_TOKEN}" ]] && warn "HF_TOKEN is empty — required for Llama 3.1 (gated model). Set it in .env before starting."
+    read -rsp "HuggingFace token (from https://huggingface.co/settings/tokens): " HF_TOKEN; echo ""
+    [[ -z "${HF_TOKEN}" ]] && warn "HF_TOKEN is empty — required for gated HuggingFace models. Set it in .env before starting."
 
     read -rp "Your domain (or IP, e.g. 192.168.1.100 or jarvis.yourdomain.com): " DOMAIN; echo ""
     DOMAIN="${DOMAIN:-ira.local}"
@@ -154,6 +156,8 @@ PYEOF
     chmod 600 .env
     ok ".env created and secrets auto-generated."
     echo ""
+    # Suppress trace mode so secrets don't appear in set -x output
+    { set +x; } 2>/dev/null
     echo -e "  ${YELLOW}SAVE these values somewhere safe:${NC}"
     echo -e "  vLLM API Key : ${BOLD}${VLLM_KEY}${NC}"
     echo -e "  LiveKit Key  : ${BOLD}${LIVEKIT_KEY}${NC}"
@@ -213,15 +217,13 @@ header "Step 6: Model Download Info"
 
 echo -e "${YELLOW}Models will be downloaded automatically on first start:${NC}"
 echo ""
-echo -e "  Fast Path: ${BOLD}hugging-quants/Meta-Llama-3.1-8B-Instruct-AWQ-INT4${NC}"
-echo -e "  Deep Path: ${BOLD}Qwen/Qwen2.5-14B-Instruct-AWQ${NC}"
+echo -e "  Fast Path: ${BOLD}Qwen/Qwen3-8B${NC}  (or Qwen3-30B-A3B on cloud)"
+echo -e "  Deep Path: ${BOLD}Qwen/Qwen3-14B${NC} (or Qwen3-72B on cloud)"
 echo ""
 echo -e "  Total download: ~${BOLD}15GB${NC}"
 echo -e "  ${YELLOW}First start will take 5–20 minutes.${NC} Subsequent starts use the cache."
 echo ""
-warn "Llama 3.1 is a gated model. You must:"
-echo "   1. Accept the license at: https://huggingface.co/meta-llama/Llama-3.1-8B-Instruct"
-echo "   2. Set HF_TOKEN in .env with a token that has access."
+info "If using gated HuggingFace models, set HF_TOKEN in .env before starting."
 
 # =============================================================================
 # DONE — NEXT STEPS

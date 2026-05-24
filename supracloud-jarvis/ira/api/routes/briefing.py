@@ -18,9 +18,11 @@ async def trigger_briefing(
 ):
     """Trigger an immediate briefing. Runs asynchronously and delivers via all channels."""
     import asyncio
+    import logging as _log
     from worker.briefing import generate_briefing
-    # Fire and forget — don't make the HTTP call wait for LLM generation
-    asyncio.create_task(generate_briefing(briefing_type))
+    # Fire and forget — keep reference so task isn't silently GC'd
+    _t = asyncio.create_task(generate_briefing(briefing_type))
+    _t.add_done_callback(lambda t: t.exception() and _log.getLogger("ira.briefing").warning(f"Briefing task failed: {t.exception()}"))
     return {"status": "generating", "message": "IRA is preparing your briefing now, Sir."}
 
 

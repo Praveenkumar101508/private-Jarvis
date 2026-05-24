@@ -76,7 +76,8 @@ async def lifespan(app: FastAPI):
 
     # Warm embedding model in background — don't block startup
     import asyncio
-    asyncio.create_task(_warm_embeddings())
+    _t = asyncio.create_task(_warm_embeddings())
+    _t.add_done_callback(lambda t: t.exception() and logger.warning(f"Embedding warm-up failed: {t.exception()}"))
 
     # Initialise LangGraph checkpointer (AsyncPostgresSaver → persistent state)
     await init_checkpointer(cfg.database_dsn)

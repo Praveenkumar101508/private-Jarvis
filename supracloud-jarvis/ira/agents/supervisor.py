@@ -148,9 +148,9 @@ async def classify(state: IRAState) -> IRAState:
     if state.get("mode") == "tutor":
         # Tutor mode overrides everything except security and executor
         agent = "tutor"
-    # 2. URL-dominant messages → digital agent
-    elif _URL_RE.search(raw_query) and len(raw_query.split()) < 30:
-        url = _URL_RE.search(raw_query).group(0)
+    # 2. URL-dominant messages → digital agent (cache match to avoid double regex call)
+    elif (url_match := _URL_RE.search(raw_query)) and len(raw_query.split()) < 30:
+        url = url_match.group(0)
         if not any(site in url for site in ("linkedin.com/jobs", "indeed.com")):
             agent = "digital"
 

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 
 logger = logging.getLogger("ira.tutor_tools")
 
@@ -47,8 +48,7 @@ async def evaluate_student_submission(submission_text: str, topic: str) -> dict:
         )
 
         raw = raw.strip()
-        if raw.startswith("```"):
-            raw = raw.split("\n", 1)[1].rsplit("```", 1)[0].strip()
+        raw = re.sub(r'```\w*\n?(.*?)\n?```', r'\1', raw, flags=re.DOTALL).strip()
 
         result = json.loads(raw)
         logger.info(f"Submission evaluated — correctness: {result.get('correctness')}/10")

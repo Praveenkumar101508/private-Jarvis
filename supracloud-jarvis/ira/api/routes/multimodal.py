@@ -148,7 +148,7 @@ async def _extract_video_frames(video_bytes: bytes) -> list[str]:
 @router.post("/analyse")
 async def multimodal_analyse(
     message: str = Form(default="Analyse all provided content and give me a comprehensive response."),
-    session_id: str = Form(default_factory=lambda: str(uuid.uuid4())),
+    session_id: str = Form(default=None),
     files: list[UploadFile] = File(default=[]),
     _user: str = Depends(require_auth),
 ):
@@ -156,6 +156,7 @@ async def multimodal_analyse(
     Unified multi-modal analysis: accepts any mix of images, video, audio,
     PDF/DOCX documents and text. Fuses all modalities into one coherent response.
     """
+    session_id = session_id or str(uuid.uuid4())
     cfg = get_settings()
 
     async def gen():

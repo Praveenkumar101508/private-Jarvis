@@ -587,12 +587,15 @@ async def chat_stream(
             }
 
             from memory.store import save_message
-            asyncio.create_task(save_message(conv_id, "user", req.message))
-            asyncio.create_task(save_message(
+            import logging as _log
+            _tu = asyncio.create_task(save_message(conv_id, "user", req.message))
+            _tu.add_done_callback(lambda t: t.exception() and _log.getLogger("ira.chat").warning(f"save_message failed: {t.exception()}"))
+            _ta = asyncio.create_task(save_message(
                 conv_id, "assistant", "".join(full_response),
                 model_used="qwen3-reasoning" if use_reasoning else ("qwen3-deep" if use_deep else "qwen3-fast"),
                 latency_ms=latency,
             ))
+            _ta.add_done_callback(lambda t: t.exception() and _log.getLogger("ira.chat").warning(f"save_message failed: {t.exception()}"))
 
         except Exception as e:
             yield {"data": json.dumps({"error": f"Stream interrupted: {str(e)[:100]}"})}
@@ -728,13 +731,16 @@ async def chat_vision(
             yield {"data": json.dumps({"done": True, "agent": "vision", "latency_ms": latency})}
 
             from memory.store import save_message
+            import logging as _log
             final_text = "".join(full_response)
-            asyncio.create_task(save_message(conv_id, "user", req.message))
-            asyncio.create_task(save_message(
+            _tu = asyncio.create_task(save_message(conv_id, "user", req.message))
+            _tu.add_done_callback(lambda t: t.exception() and _log.getLogger("ira.chat").warning(f"save_message failed: {t.exception()}"))
+            _ta = asyncio.create_task(save_message(
                 conv_id, "assistant", final_text,
-                model_used="vision" if vision_url else "llama-fast",
+                model_used="vision" if vision_url else "qwen3-fast",
                 latency_ms=latency,
             ))
+            _ta.add_done_callback(lambda t: t.exception() and _log.getLogger("ira.chat").warning(f"save_message failed: {t.exception()}"))
         except Exception as e:
             yield {"data": json.dumps({"error": f"Vision error: {str(e)[:100]}"})}
 
@@ -780,17 +786,14 @@ def _extract_document_text(content: bytes, filename: str, content_type: str) -> 
         return "[Could not decode document as text]"
 
 
-@router.post("/document")
+@router.post("/document", include_in_schema=False)
 async def chat_document(
     message: str = None,
     session_id: str = None,
     _user: str = Depends(require_auth),
 ):
-    """
-    Placeholder — document upload uses multipart; real handler below.
-    This stub keeps OpenAPI docs clean.
-    """
-    pass  # overridden by the real handler registered below
+    """Hidden stub — document upload is handled by /document/upload."""
+    raise HTTPException(status_code=501, detail="Use /api/v1/chat/document/upload for document analysis.")
 
 
 # Register the real multipart handler manually to avoid FastAPI's form conflicts
@@ -800,7 +803,7 @@ from fastapi import Form, File, UploadFile
 @router.post("/document/upload")
 async def chat_document_upload(
     message: str = Form(...),
-    session_id: str = Form(default_factory=lambda: str(uuid.uuid4())),
+    session_id: str = Form(default=None),
     file: UploadFile = File(...),
     _user: str = Depends(require_auth),
 ):
@@ -812,6 +815,7 @@ async def chat_document_upload(
 
     Returns SSE stream: {"token": "..."} … {"done": true, "agent": "document"}
     """
+    session_id = session_id or str(uuid.uuid4())
     conv_id = await ensure_conversation(session_id)
 
     raw = await file.read()
@@ -854,12 +858,15 @@ async def chat_document_upload(
             })}
 
             from memory.store import save_message
-            asyncio.create_task(save_message(conv_id, "user", f"[Document: {file.filename}] {message}"))
-            asyncio.create_task(save_message(
+            import logging as _log
+            _tu = asyncio.create_task(save_message(conv_id, "user", f"[Document: {file.filename}] {message}"))
+            _tu.add_done_callback(lambda t: t.exception() and _log.getLogger("ira.chat").warning(f"save_message failed: {t.exception()}"))
+            _ta = asyncio.create_task(save_message(
                 conv_id, "assistant", "".join(full_response),
-                model_used="qwen-deep",
+                model_used="qwen3-deep",
                 latency_ms=latency,
             ))
+            _ta.add_done_callback(lambda t: t.exception() and _log.getLogger("ira.chat").warning(f"save_message failed: {t.exception()}"))
         except Exception as e:
             yield {"data": json.dumps({"error": f"Document analysis error: {str(e)[:100]}"})}
 

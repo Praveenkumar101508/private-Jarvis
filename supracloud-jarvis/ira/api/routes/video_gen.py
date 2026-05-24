@@ -231,13 +231,14 @@ def _extract_frames_ffmpeg(video_bytes: bytes, max_frames: int = 8) -> list[str]
 async def video_understand(
     file: UploadFile = File(...),
     message: str = Form(default="Analyse and summarise this video. What is happening? Who is in it?"),
-    session_id: str = Form(default_factory=lambda: str(uuid.uuid4())),
+    session_id: str = Form(default=None),
     _user: str = Depends(require_auth),
 ):
     """
     Upload a video file → extract frames → analyse with vision model.
     Returns an SSE stream of analysis tokens.
     """
+    session_id = session_id or str(uuid.uuid4())
     from utils.llm import stream_tokens
     from config import get_settings as _cfg
 

@@ -38,8 +38,9 @@ async def conversational(state: IRAState) -> IRAState:
         elif isinstance(msg, AIMessage):
             messages.append({"role": "assistant", "content": msg.content})
 
-    # Ensure current query is last
-    messages.append({"role": "user", "content": state["user_query"]})
+    # Ensure current query is last — guard against duplicate if history already ends with it
+    if not messages or messages[-1].get("content") != state["user_query"]:
+        messages.append({"role": "user", "content": state["user_query"]})
 
     response = await chat_complete(
         messages,
