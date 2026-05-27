@@ -131,6 +131,10 @@ class Settings(BaseSettings):
     livekit_api_key: str = ""
     livekit_api_secret: str = ""
     livekit_room_name: str = "ira-voice"
+    # Public WebSocket URL returned to the frontend browser client
+    # e.g. wss://jarvis.yourdomain.com  or  ws://localhost:7880
+    # Falls back to wss://{ira_domain}/livekit if not set
+    livekit_public_url: str = ""
 
     # ── Webhooks ──────────────────────────────────────────────────────────────
     webhook_secret: str = ""    # Shared secret for validating inbound webhooks

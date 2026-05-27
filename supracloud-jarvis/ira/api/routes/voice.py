@@ -92,10 +92,11 @@ async def get_livekit_token(_user: str = Depends(require_auth)):
         logger.error(f"LiveKit token generation failed: {e}")
         raise HTTPException(status_code=500, detail="Failed to generate voice token")
 
+    _livekit_url = cfg.livekit_public_url or f"wss://{cfg.ira_domain}/livekit"
     return LiveKitTokenResponse(
         token=jwt,
         room=cfg.livekit_room_name,
-        livekit_url=f"wss://{cfg.ira_domain}/livekit",
+        livekit_url=_livekit_url,
     )
 
 
