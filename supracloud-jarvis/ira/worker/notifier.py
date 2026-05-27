@@ -120,7 +120,7 @@ async def _send_telegram(title: str, body: str, priority: Priority, cfg) -> None
 # ── Email (SMTP) ──────────────────────────────────────────────────────────────
 
 async def _send_email(title: str, body: str, category: str, cfg) -> None:
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()  # Fix L2: get_event_loop() deprecated in Python 3.10+
     await loop.run_in_executor(None, _send_email_sync, title, body, category, cfg)
 
 

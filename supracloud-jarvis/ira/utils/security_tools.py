@@ -115,7 +115,7 @@ async def _set_lockdown_db(active: bool) -> None:
 
 async def scan_threats() -> dict:
     """Scan all active TCP/UDP connections for unusual external IPs."""
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()  # Fix L3: get_event_loop() deprecated in Python 3.10+
     raw_connections = await loop.run_in_executor(None, psutil.net_connections, "inet")
 
     external: list[dict] = []

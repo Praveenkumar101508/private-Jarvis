@@ -237,7 +237,7 @@ async def apply_implementation(
             )
 
         # ── Step 4: Stage changed files ───────────────────────────────────────
-        _run(["git", "add"] + files_changed, cwd=repo)
+        await _run(["git", "add"] + files_changed, cwd=repo)  # Fix L1: _run is async — must be awaited
 
         # ── Step 5: Commit ────────────────────────────────────────────────────
         full_commit_msg = (
