@@ -34,8 +34,36 @@ from utils.llm import chat_complete
 router = APIRouter(prefix="/design", tags=["design"])
 logger = logging.getLogger("ira.design_tools")
 
-# In-memory store (id → (content_bytes, filename, mimetype))
-_DESIGN_STORE: dict[str, tuple[bytes, str, str]] = {}
+# Fix #89: replace in-memory dict with Redis-backed store.
+# The old dict was per-process (broken with multiple uvicorn workers), lost
+# all artefacts on container restart, and had no TTL (unbounded growth).
+# Redis stores each design for 1 hour — enough time for the user to download.
+_DESIGN_TTL_SECONDS = 3600  # 1 hour
+
+
+async def _store_design(design_id: str, content: bytes, filename: str, mimetype: str) -> None:
+    """Persist a design artefact to Redis with a 1-hour TTL."""
+    import json as _json_store
+    from utils.redis_client import get_redis
+    r = await get_redis()
+    payload = _json_store.dumps({
+        "content_b64": content.decode("latin-1"),  # latin-1 is lossless for arbitrary bytes
+        "filename": filename,
+        "mimetype": mimetype,
+    })
+    await r.set(f"design:{design_id}", payload, ex=_DESIGN_TTL_SECONDS)
+
+
+async def _fetch_design(design_id: str) -> tuple[bytes, str, str] | None:
+    """Retrieve a design artefact from Redis. Returns None if expired or not found."""
+    import json as _json_fetch
+    from utils.redis_client import get_redis
+    r = await get_redis()
+    raw = await r.get(f"design:{design_id}")
+    if raw is None:
+        return None
+    data = _json_fetch.loads(raw)
+    return (data["content_b64"].encode("latin-1"), data["filename"], data["mimetype"])
 
 # Trigger detection
 _DESIGN_RE = re.compile(
@@ -232,7 +260,7 @@ async def design_generate(
                 mimetype = "image/svg+xml"
 
             design_id = str(uuid.uuid4())[:8]
-            _DESIGN_STORE[design_id] = (file_bytes, filename, mimetype)
+            await _store_design(design_id, file_bytes, filename, mimetype)
 
             latency = int((time.monotonic() - t0) * 1000)
             yield {"data": _json.dumps({
@@ -270,9 +298,9 @@ async def design_download(
     _user: str = Depends(require_auth),
 ):
     """Download / preview a generated design artifact."""
-    entry = _DESIGN_STORE.get(design_id)
+    entry = await _fetch_design(design_id)
     if not entry:
-        raise HTTPException(status_code=404, detail="Design not found or expired.")
+        raise HTTPException(status_code=404, detail="Design not found or expired (designs are kept for 1 hour).")
     file_bytes, filename, mimetype = entry
     # Always force attachment — never serve LLM-generated HTML/SVG inline
     # (serving inline on the authenticated origin would be stored XSS)

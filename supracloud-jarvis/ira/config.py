@@ -166,6 +166,11 @@ class Settings(BaseSettings):
     image_gen_provider: str = "replicate"  # "replicate" | "sd_webui" | "comfyui"
     replicate_api_token: str = ""
     flux_model: str = "black-forest-labs/flux-schnell"  # Replicate model ID for image gen
+    # Fix #73: pix2pix model version as config so it survives Replicate model updates
+    replicate_pix2pix_model: str = (
+        "timbrooks/instruct-pix2pix:"
+        "30c1d0b916a6f8efce20493f5d61ee27491ab2a60437c13c588468b9810ec23f"
+    )
 
     # ── Vision Model ──────────────────────────────────────────────────────────
     # Multimodal endpoint for image analysis (Qwen3-VL or LLaVA-NeXT)

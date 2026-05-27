@@ -231,16 +231,16 @@ async def _generate_replicate(req: GenerateRequest, replicate_token: str, flux_m
 async def _edit_replicate(req: EditRequest, replicate_token: str) -> str:
     """Use Replicate InstructPix2Pix for image editing."""
     import httpx
+    # Fix #73: read model version from config so it can be updated via env var
+    # when Replicate deprecates or updates the instruct-pix2pix version hash.
+    pix2pix_model = get_settings().replicate_pix2pix_model
     headers = {
         "Authorization": f"Token {replicate_token}",
         "Content-Type": "application/json",
     }
     data_url = f"data:image/png;base64,{req.image_b64}"
     payload = {
-        "version": (
-            "timbrooks/instruct-pix2pix:"
-            "30c1d0b916a6f8efce20493f5d61ee27491ab2a60437c13c588468b9810ec23f"
-        ),
+        "version": pix2pix_model,
         "input": {
             "image": data_url,
             "prompt": req.instruction,

@@ -386,17 +386,22 @@ async def chat_stream(
     if is_image_gen_request(req.message) and not req.is_voice:
         async def image_gen_stream():
             yield {"data": json.dumps({"token": "Generating your image… "})}
+            # Fix #79: removed imports of _IMAGE_GEN_URL / _REPLICATE_TOKEN which no
+            # longer exist as module-level vars; use get_settings() at request time
+            # and call the helpers with their current signatures.
             try:
-                from api.routes.image_gen import GenerateRequest, _IMAGE_GEN_URL, _REPLICATE_TOKEN
-                if _IMAGE_GEN_URL or _REPLICATE_TOKEN:
-                    from api.routes.image_gen import _generate_sd_webui, _generate_replicate
+                from api.routes.image_gen import GenerateRequest, _generate_sd_webui, _generate_replicate
+                _cfg = get_settings()
+                _image_gen_url = _cfg.image_gen_url.rstrip("/")
+                _replicate_token = _cfg.replicate_api_token
+                if _image_gen_url or _replicate_token:
                     gen_req = GenerateRequest(
                         prompt=req.message,
                         width=1024, height=1024, steps=20,
                     )
                     image_b64 = (
-                        await _generate_sd_webui(gen_req) if _IMAGE_GEN_URL
-                        else await _generate_replicate(gen_req)
+                        await _generate_sd_webui(gen_req, _image_gen_url) if _image_gen_url
+                        else await _generate_replicate(gen_req, _replicate_token, _cfg.flux_model)
                     )
                     yield {"data": json.dumps({
                         "image_generated": True,
@@ -431,14 +436,17 @@ async def chat_stream(
     if req.image_b64 and is_image_edit_request(req.message):
         async def image_edit_stream():
             yield {"data": json.dumps({"token": "Editing your image… "})}
+            # Fix #79: same as image gen — use get_settings() and correct signatures
             try:
-                from api.routes.image_gen import EditRequest, _IMAGE_GEN_URL, _REPLICATE_TOKEN
-                if _IMAGE_GEN_URL or _REPLICATE_TOKEN:
-                    from api.routes.image_gen import _edit_sd_webui, _edit_replicate
+                from api.routes.image_gen import EditRequest, _edit_sd_webui, _edit_replicate
+                _cfg = get_settings()
+                _image_gen_url = _cfg.image_gen_url.rstrip("/")
+                _replicate_token = _cfg.replicate_api_token
+                if _image_gen_url or _replicate_token:
                     edit_req = EditRequest(image_b64=req.image_b64, instruction=req.message)
                     image_b64 = (
-                        await _edit_sd_webui(edit_req) if _IMAGE_GEN_URL
-                        else await _edit_replicate(edit_req)
+                        await _edit_sd_webui(edit_req, _image_gen_url) if _image_gen_url
+                        else await _edit_replicate(edit_req, _replicate_token)
                     )
                     yield {"data": json.dumps({
                         "image_generated": True,
