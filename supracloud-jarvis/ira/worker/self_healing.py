@@ -42,8 +42,9 @@ logger = logging.getLogger("ira.self_healing")
 
 _MAX_API_ERROR_RATE = 0.20     # > 20% error rate triggers healing
 _MAX_LATENCY_P95_MS = 10_000  # > 10s p95 latency triggers investigation
-_MIN_DB_POOL_FREE = 2          # < 2 free DB connections triggers warning
-_REFLECTION_INTERVAL_S = 3600  # Reflect and self-improve every hour
+# Fix L8: _MIN_DB_POOL_FREE and _REFLECTION_INTERVAL_S removed — defined here
+# but never referenced anywhere in the codebase (dead constants).  The DB pool
+# is managed by asyncpg internally; reflection interval is wired in scheduler.py.
 
 
 # ── Diagnostic functions ──────────────────────────────────────────────────────

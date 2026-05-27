@@ -17,6 +17,7 @@ Also triggered: on demand via POST /api/v1/briefing/now
 
 from __future__ import annotations
 
+import asyncio  # Fix L9: moved from inside _gather_all() — function-local imports shadow module scope and confuse static analysis tools
 import json
 import logging
 import uuid
@@ -207,7 +208,6 @@ async def generate_briefing(briefing_type: str = "morning") -> str:
 
 
 async def _gather_all() -> tuple[dict, dict, dict, dict]:
-    import asyncio
     return await asyncio.gather(
         _gather_business_data(),
         _gather_security_data(),
