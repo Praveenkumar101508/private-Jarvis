@@ -65,6 +65,14 @@ limiter = Limiter(key_func=get_remote_address)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     cfg = get_settings()
+    if cfg.dev_mode:
+        logger.warning("=" * 70)
+        logger.warning("⚠️  DEV_MODE IS ENABLED — ALL SECURITY IS DISABLED  ⚠️")
+        logger.warning("   - Authentication bypassed (any token accepted)")
+        logger.warning("   - Biometric gate disabled (all requests treated as owner)")
+        logger.warning("   - All LLM calls routed to local Ollama")
+        logger.warning("   NEVER run with DEV_MODE=true in production!")
+        logger.warning("=" * 70)
     logger.info(f"Jarvis {cfg.ira_version} starting up...")
 
     # Initialise connections
@@ -141,7 +149,8 @@ def create_app() -> FastAPI:
     from fastapi import Depends
 
     @app.post("/auth/token", tags=["auth"], summary="Get a JWT token")
-    async def login(form: OAuth2PasswordRequestForm = Depends()):
+    @limiter.limit("5/minute")
+    async def login(request: Request, form: OAuth2PasswordRequestForm = Depends()):
         if not authenticate_user(form.username, form.password):
             return JSONResponse(
                 status_code=401,
