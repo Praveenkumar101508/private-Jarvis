@@ -375,6 +375,7 @@ async def run_self_reflection() -> None:
             content=f"[Self-Reflection {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}]\n{reflection}",
             model_used="self-reflection",
             latency_ms=0,
+            user_id="system",
         )
 
         logger.info(f"Self-reflection stored: {len(reflection)} chars")

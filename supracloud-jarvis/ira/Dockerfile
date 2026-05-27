@@ -70,13 +70,16 @@ ENV HF_HOME=/home/jarvis/.cache/huggingface
 RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('${HF_MODEL}')" \
     || echo "[IRA] BGE model pre-download skipped — will download on first run"
 
-# Install Playwright Chromium browser + OS dependencies.
-# Fix #78: playwright package is already in requirements.txt (installed in
-# stage 1) — only the browser binary and system deps need to be fetched here.
-# Running pip install playwright again was doubling install time for no benefit.
+# Install Playwright Chromium browser to a deterministic path owned by jarvis.
+# Fix #78: playwright package is already in requirements.txt (stage 1).
+# Fix #15: use PLAYWRIGHT_BROWSERS_PATH so the browser lands in a known location,
+# removing the need for a fallible chown of /root/.cache. The chown now targets
+# /opt/playwright which we create as root, so it always succeeds.
 USER root
-RUN playwright install chromium --with-deps \
-    && chown -R jarvis:jarvis /root/.cache/ms-playwright 2>/dev/null || true
+ENV PLAYWRIGHT_BROWSERS_PATH=/opt/playwright
+RUN mkdir -p /opt/playwright \
+    && playwright install chromium --with-deps \
+    && chown -R jarvis:jarvis /opt/playwright
 USER jarvis
 
 EXPOSE 8000

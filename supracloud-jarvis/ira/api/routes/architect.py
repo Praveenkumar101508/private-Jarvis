@@ -14,12 +14,20 @@ import json
 import time
 import uuid
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
 
 from api.middleware.auth import require_auth
+from config import get_settings
 from memory.store import retrieve
+
+
+def _require_admin(username: str = Depends(require_auth)) -> str:
+    """Restrict access to the configured admin user."""
+    if username != get_settings().ira_admin_username:
+        raise HTTPException(status_code=403, detail="Admin access required for architect apply")
+    return username
 
 router = APIRouter(prefix="/architect", tags=["architect"])
 
@@ -157,7 +165,7 @@ async def architect_implement(
 @router.post("/apply")
 async def architect_apply(
     req: ApplyRequest,
-    _user: str = Depends(require_auth),
+    _user: str = Depends(_require_admin),   # Admin-only: this mutates the working tree
 ):
     """
     Apply the cached implementation diffs + commit + restart services.

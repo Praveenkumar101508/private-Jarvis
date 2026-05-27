@@ -16,6 +16,12 @@
 
 set -euo pipefail
 
+# Guard: abort early if executed with sh instead of bash (bash-isms used below)
+if [ -z "${BASH_VERSION:-}" ]; then
+    echo "ERROR: This script requires bash. Run: bash scripts/setup.sh" >&2
+    exit 1
+fi
+
 # ── Colours ───────────────────────────────────────────────────────────────────
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
 BLUE='\033[0;34m'; BOLD='\033[1m'; NC='\033[0m'
@@ -71,6 +77,18 @@ command -v openssl &>/dev/null || err "openssl not found. Install with: sudo apt
 ok "openssl"
 
 # =============================================================================
+# 1b. SOPS / AGE SECRETS SETUP (optional — skip if already initialised)
+# =============================================================================
+header "Step 1b: Secrets Setup (sops + age)"
+
+if command -v sops &>/dev/null && [[ -f "${HOME}/.config/sops/age/keys.txt" ]]; then
+    ok "sops and age key already configured — skipping init-secrets.sh"
+else
+    info "Running init-secrets.sh to set up sops + age encryption..."
+    bash "${SCRIPT_DIR}/init-secrets.sh" || warn "init-secrets.sh reported an issue — continuing setup. Run it manually later."
+fi
+
+# =============================================================================
 # 2. ENVIRONMENT FILE
 # =============================================================================
 header "Step 2: Environment Configuration"
@@ -83,14 +101,15 @@ else
     # Auto-generate secrets — each one is unique
     VLLM_KEY=$(openssl rand -hex 32)
     IRA_SECRET=$(openssl rand -hex 32)
-    # Mint a long-lived JWT for the voice service (10-year expiry)
+    # Mint a 1-year JWT for the voice service.
+    # Rotate annually: re-run setup.sh or generate manually (see .env.example comment).
     VOICE_TOKEN=$(python3 -c "
 import sys
 try:
     from jose import jwt
     import datetime
     secret = '${IRA_SECRET}'
-    expire = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=3650)
+    expire = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=365)
     token = jwt.encode({'sub': 'ira-voice', 'exp': expire}, secret, algorithm='HS256')
     print(token)
 except ImportError:
@@ -169,6 +188,14 @@ PYEOF
 
     chmod 600 .env
     ok ".env created and secrets auto-generated."
+
+    # Offer to encrypt .env with sops if age key is available
+    if command -v sops &>/dev/null && [[ -f "${HOME}/.config/sops/age/keys.txt" ]]; then
+        info "Encrypting .env with sops (add .env.enc to git instead of .env)..."
+        SOPS_AGE_KEY_FILE="${HOME}/.config/sops/age/keys.txt" \
+            sops --encrypt .env > .env.enc && ok "Created .env.enc (git-safe encrypted copy)" \
+            || warn "sops encrypt failed — .env.enc not created. Commit .env.enc manually later."
+    fi
     echo ""
     # Suppress trace mode so secrets don't appear in set -x output
     { set +x; } 2>/dev/null

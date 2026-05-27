@@ -113,6 +113,8 @@ async def _run_single_agent(
     system: str,
     user_query: str,
     memory_context: str,
+    *,
+    sem: asyncio.Semaphore | None = None,
 ) -> AgentResult:
     t0 = time.monotonic()
     messages = [{"role": "system", "content": system}]
@@ -120,25 +122,31 @@ async def _run_single_agent(
         messages.append({"role": "system", "content": f"Relevant context:\n{memory_context}"})
     messages.append({"role": "user", "content": user_query})
 
-    try:
-        response = await chat_complete(messages, use_deep=True, temperature=0.4, max_tokens=1024)
-        return AgentResult(
-            name=name,
-            label=label,
-            emoji=emoji,
-            content=response,
-            latency_ms=int((time.monotonic() - t0) * 1000),
-        )
-    except Exception as e:
-        logger.error(f"Expert agent '{name}' failed: {e}")
-        return AgentResult(
-            name=name,
-            label=label,
-            emoji=emoji,
-            content=f"[Agent unavailable: {e}]",
-            latency_ms=int((time.monotonic() - t0) * 1000),
-            error=str(e),
-        )
+    async def _call() -> AgentResult:
+        try:
+            response = await chat_complete(messages, use_deep=True, temperature=0.4, max_tokens=1024)
+            return AgentResult(
+                name=name,
+                label=label,
+                emoji=emoji,
+                content=response,
+                latency_ms=int((time.monotonic() - t0) * 1000),
+            )
+        except Exception as e:
+            logger.error(f"Expert agent '{name}' failed: {e}")
+            return AgentResult(
+                name=name,
+                label=label,
+                emoji=emoji,
+                content=f"[Agent unavailable: {e}]",
+                latency_ms=int((time.monotonic() - t0) * 1000),
+                error=str(e),
+            )
+
+    if sem is not None:
+        async with sem:
+            return await _call()
+    return await _call()
 
 
 async def run_expert_mode(state: IRAState) -> IRAState:
@@ -154,12 +162,15 @@ async def run_expert_mode(state: IRAState) -> IRAState:
 
     logger.info(f"Expert Mode: launching 5 parallel agents for query: {query[:80]}...")
 
-    # Launch all 4 specialist agents simultaneously
+    # Semaphore caps how many agents call the LLM simultaneously.
+    sem = asyncio.Semaphore(cfg.expert_concurrency)
+
+    # Launch all 4 specialist agents simultaneously (bounded by sem)
     specialist_tasks = await asyncio.gather(
-        _run_single_agent("researcher", "Researcher", "🔬", _researcher_prompt(owner), query, memory_ctx),
-        _run_single_agent("critic", "Critic", "🛡️", _critic_prompt(owner), query, memory_ctx),
-        _run_single_agent("executor", "Executor", "⚙️", _executor_prompt(owner), query, memory_ctx),
-        _run_single_agent("creator", "Creator", "✨", _creator_prompt(owner), query, memory_ctx),
+        _run_single_agent("researcher", "Researcher", "🔬", _researcher_prompt(owner), query, memory_ctx, sem=sem),
+        _run_single_agent("critic", "Critic", "🛡️", _critic_prompt(owner), query, memory_ctx, sem=sem),
+        _run_single_agent("executor", "Executor", "⚙️", _executor_prompt(owner), query, memory_ctx, sem=sem),
+        _run_single_agent("creator", "Creator", "✨", _creator_prompt(owner), query, memory_ctx, sem=sem),
         return_exceptions=False,
     )
 
@@ -244,6 +255,7 @@ async def stream_expert_mode(
     cfg = get_settings()
     owner = cfg.owner_name
     t0 = time.monotonic()
+    sem = asyncio.Semaphore(cfg.expert_concurrency)
 
     def _user_content(text: str):
         """Build user message content — multimodal if image attached."""
@@ -261,18 +273,19 @@ async def stream_expert_mode(
             messages.append({"role": "system", "content": f"Context:\n{memory_context}"})
         messages.append({"role": "user", "content": _user_content(query)})
         result_chunks = []
-        try:
-            async for token in stream_tokens(messages, use_deep=True):
-                result_chunks.append(token)
-                yield {"agent": name, "label": label, "emoji": emoji, "chunk": token, "done": False}
-        except Exception as e:
-            err = f"[{label} error: {e}]"
-            result_chunks.append(err)
-            yield {"agent": name, "label": label, "emoji": emoji, "chunk": err, "done": False}
+        async with sem:
+            try:
+                async for token in stream_tokens(messages, use_deep=True):
+                    result_chunks.append(token)
+                    yield {"agent": name, "label": label, "emoji": emoji, "chunk": token, "done": False}
+            except Exception as e:
+                err = f"[{label} error: {e}]"
+                result_chunks.append(err)
+                yield {"agent": name, "label": label, "emoji": emoji, "chunk": err, "done": False}
         yield {"agent": name, "label": label, "emoji": emoji,
                "chunk": "", "agent_done": True, "full": "".join(result_chunks)}
 
-    # Run all 4 specialists in parallel via queue
+    # Run all 4 specialists in parallel via queue (bounded by sem)
     results: dict[str, str] = {}
     queue: asyncio.Queue = asyncio.Queue()
 

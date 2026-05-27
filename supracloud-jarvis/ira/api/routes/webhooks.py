@@ -64,7 +64,7 @@ class LeadPayload(BaseModel):
     source: str = "website"
     budget: str | None = None          # e.g. "10k-50k", "enterprise"
     service_interest: str | None = None
-    metadata: dict = {}
+    metadata: dict = Field(default_factory=dict)
 
 
 @router.post("/lead", status_code=201)
@@ -110,20 +110,21 @@ async def receive_lead(
 
     logger.info(f"New lead received: {title} via {payload.source}")
 
-    # Fire an immediate notification for hot leads (email or urgent keywords)
-    urgent_keywords = {"urgent", "asap", "immediately", "enterprise", "critical"}
+    # Fire an immediate notification for hot leads (keywords + budget read from config)
+    cfg = get_settings()
+    urgent_keywords = {kw.strip().lower() for kw in cfg.hot_lead_keywords.split(",") if kw.strip()}
+    hot_budgets = {b.strip().lower() for b in cfg.hot_lead_budgets.split(",") if b.strip()}
     is_hot = (
         any(kw in (payload.message or "").lower() for kw in urgent_keywords)
-        or payload.budget in ("enterprise", "250k+", "100k-250k")
+        or (payload.budget or "").lower() in hot_budgets
     )
 
     if is_hot:
         try:
             from worker.notifier import notify
-            owner_name = get_settings().owner_name
             await notify(
                 f"🔥 Hot Lead: {payload.name}",
-                f"{owner_name}, a high-priority lead just arrived.\n\n"
+                f"{cfg.owner_name}, a high-priority lead just arrived.\n\n"
                 f"Name: {payload.name}\n"
                 f"Email: {payload.email}\n"
                 f"Company: {payload.company or 'N/A'}\n"
@@ -155,7 +156,7 @@ class BookingPayload(BaseModel):
     duration_minutes: int = 60
     notes: str | None = None
     source: str = "calcom"
-    metadata: dict = {}
+    metadata: dict = Field(default_factory=dict)
 
 
 @router.post("/booking", status_code=201)
@@ -218,21 +219,63 @@ async def receive_booking(
 
 # ── LiveKit room events ────────────────────────────────────────────────────────
 
+def _verify_livekit_signature(body: bytes, authorization: str | None) -> dict:
+    """
+    Verify a LiveKit webhook using the official JWT body-hash scheme.
+
+    LiveKit signs requests by placing a JWT in the Authorization header.
+    The JWT payload includes a sha256 field that is the hex-encoded SHA-256 of
+    the raw request body.  livekit-api's WebhookReceiver handles all of this.
+
+    Falls back to the generic shared-secret check when LiveKit credentials are
+    not configured (e.g. dev mode with a third-party webhook sender).
+    """
+    cfg = get_settings()
+
+    if cfg.livekit_api_key and cfg.livekit_api_secret:
+        # Official LiveKit signature verification via JWT body-hash
+        try:
+            from livekit.api import WebhookReceiver  # type: ignore[import]
+            receiver = WebhookReceiver(
+                api_key=cfg.livekit_api_key,
+                api_secret=cfg.livekit_api_secret,
+            )
+            event = receiver.receive(body.decode(), authorization or "")
+            return json.loads(body)
+        except Exception as exc:
+            logger.warning("LiveKit webhook signature verification failed: %s", exc)
+            raise HTTPException(status_code=401, detail="Invalid LiveKit webhook signature")
+
+    # Fallback: shared secret check (dev / non-LiveKit callers)
+    if not cfg.webhook_secret:
+        raise HTTPException(
+            status_code=503,
+            detail="Neither LiveKit credentials nor WEBHOOK_SECRET are configured.",
+        )
+    if not hmac.compare_digest(authorization or "", cfg.webhook_secret):
+        raise HTTPException(status_code=401, detail="Invalid webhook secret. Request rejected.")
+
+    try:
+        return json.loads(body)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON payload")
+
+
 @router.post("/livekit")
 async def livekit_events(
     request: Request,
-    x_webhook_secret: str | None = Header(None),
+    authorization: str | None = Header(None),
 ):
     """
     Receive LiveKit room event notifications.
     Used to track voice session starts/ends and participant joins.
-    """
-    _validate_webhook_secret(x_webhook_secret)
 
-    try:
-        body = await request.json()
-    except Exception:
-        raise HTTPException(status_code=400, detail="Invalid JSON payload")
+    Security: uses LiveKit's official JWT body-hash scheme when
+    LIVEKIT_API_KEY / LIVEKIT_API_SECRET are set; falls back to the
+    shared WEBHOOK_SECRET header for non-LiveKit senders.
+    """
+    raw_body = await request.body()
+    body = _verify_livekit_signature(raw_body, authorization)
 
     event = body.get("event", "unknown")
     room = body.get("room", {}).get("name", "unknown")

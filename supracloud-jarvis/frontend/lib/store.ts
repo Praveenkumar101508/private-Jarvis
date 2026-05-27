@@ -70,7 +70,7 @@ export const useAuthStore = create<AuthState>()(
       logout: () => set({ token: "", isAuthenticated: false, livekitToken: "", livekitUrl: "" }),
     }),
     {
-      name: "ira-auth",
+      name: "ira:auth:v1",
       storage: createJSONStorage(() => sessionStorage),
       partialize: (state) => ({ token: state.token }),
     }

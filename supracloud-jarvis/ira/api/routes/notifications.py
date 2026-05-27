@@ -39,14 +39,22 @@ async def list_notifications(
     unread_only: bool = Query(False),
     _user: str = Depends(require_auth),
 ):
-    where = "WHERE read=FALSE" if unread_only else ""
     async with acquire() as conn:
-        rows = await conn.fetch(
-            f"""SELECT id, category, title, body, priority, channels_sent, read, created_at
-                FROM notifications {where}
-                ORDER BY created_at DESC LIMIT $1""",
-            limit,
-        )
+        if unread_only:
+            rows = await conn.fetch(
+                """SELECT id, category, title, body, priority, channels_sent, read, created_at
+                   FROM notifications
+                   WHERE read = FALSE
+                   ORDER BY created_at DESC LIMIT $1""",
+                limit,
+            )
+        else:
+            rows = await conn.fetch(
+                """SELECT id, category, title, body, priority, channels_sent, read, created_at
+                   FROM notifications
+                   ORDER BY created_at DESC LIMIT $1""",
+                limit,
+            )
     return [
         {
             "id": str(r["id"]),

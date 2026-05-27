@@ -138,6 +138,9 @@ class Settings(BaseSettings):
 
     # ── Webhooks ──────────────────────────────────────────────────────────────
     webhook_secret: str = ""    # Shared secret for validating inbound webhooks
+    # Hot-lead detection — comma-separated lists; change without redeploying code
+    hot_lead_keywords: str = "urgent,asap,immediately,enterprise,critical"
+    hot_lead_budgets: str = "enterprise,250k+,100k-250k"
 
     # ── Owner / Biometric Gate ────────────────────────────────────────────────
     owner_name: str = "Praveen Kumar Kamineti"
@@ -205,6 +208,11 @@ class Settings(BaseSettings):
     # Cloud upgrade: set VLLM_VISION_URL=http://vllm-vision:8004/v1 with Qwen3-VL-72B
     vllm_vision_url: str = ""
     vllm_vision_model: str = "qwen3-vl"
+
+    # ── Expert Mode ───────────────────────────────────────────────────────────
+    # Max specialist agents that may call the LLM at the same time.
+    # Lower to 2 if the vLLM server saturates under full fan-out.
+    expert_concurrency: int = 4
 
     # ── Dev Mode (Shadow PC / local development) ──────────────────────────────
     # DEV_MODE=true routes LLM calls to a local Ollama instance,

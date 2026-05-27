@@ -226,6 +226,12 @@ export default function ChatInterface({ sessionId, token, mode = "assistant" }: 
     );
   }, []);
 
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
+
   const handleFileAttach = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -233,6 +239,7 @@ export default function ChatInterface({ sessionId, token, mode = "assistant" }: 
     const reader = new FileReader();
     if (isImage) {
       reader.onload = (ev) => {
+        if (!mountedRef.current) return;
         const dataUrl = ev.target?.result as string;
         const base64 = dataUrl.split(",")[1] ?? "";
         setAttachedFile({ name: file.name, dataUrl, base64, mimeType: file.type, fileType: "image" });
@@ -241,6 +248,7 @@ export default function ChatInterface({ sessionId, token, mode = "assistant" }: 
     } else {
       // Documents, video, audio — read as ArrayBuffer, store raw bytes for FormData upload
       reader.onload = (ev) => {
+        if (!mountedRef.current) return;
         const buf = ev.target?.result as ArrayBuffer;
         const bytes = new Uint8Array(buf);
         setAttachedFile({
@@ -309,11 +317,16 @@ export default function ChatInterface({ sessionId, token, mode = "assistant" }: 
         const reader = res.body.getReader();
         const decoder = new TextDecoder();
         let buf = "";
+        const MAX_BUF = 2 * 1024 * 1024; // 2 MB guard — abort on runaway stream
 
         while (true) {
           const { done, value } = await reader.read();
           if (done) break;
           buf += decoder.decode(value, { stream: true });
+          if (buf.length > MAX_BUF) {
+            controller.abort();
+            break;
+          }
           const lines = buf.split("\n");
           buf = lines.pop() ?? "";
 
@@ -425,11 +438,16 @@ export default function ChatInterface({ sessionId, token, mode = "assistant" }: 
         const reader = res.body.getReader();
         const decoder = new TextDecoder();
         let buf = "";
+        const MAX_BUF = 2 * 1024 * 1024; // 2 MB guard — abort on runaway stream
 
         while (true) {
           const { done, value } = await reader.read();
           if (done) break;
           buf += decoder.decode(value, { stream: true });
+          if (buf.length > MAX_BUF) {
+            controller.abort();
+            break;
+          }
           const lines = buf.split("\n");
           buf = lines.pop() ?? "";
           for (const line of lines) {
@@ -691,11 +709,16 @@ export default function ChatInterface({ sessionId, token, mode = "assistant" }: 
         const reader = res.body.getReader();
         const decoder = new TextDecoder();
         let buf = "";
+        const MAX_BUF = 2 * 1024 * 1024; // 2 MB guard — abort on runaway stream
 
         while (true) {
           const { done, value } = await reader.read();
           if (done) break;
           buf += decoder.decode(value, { stream: true });
+          if (buf.length > MAX_BUF) {
+            controller.abort();
+            break;
+          }
 
           const lines = buf.split("\n");
           buf = lines.pop() ?? "";

@@ -142,15 +142,16 @@ async def apply_implementation(
     implementation_text: str,
     author_name: str | None = None,   # Fix #76: derived from OWNER_NAME if not supplied
     author_email: str = "",
-    dry_run: bool = False,
+    dry_run: bool = True,             # Safe default: always validate before applying
 ) -> ApplyResult:
     """
     Extract diffs from LLM output, apply them safely, commit, restart services.
 
-    dry_run=True: only validates the patch without applying (use for preview).
+    dry_run=True (default): only validates the patch without applying.
+    Pass dry_run=False explicitly to actually apply changes.
     author_email defaults to IRA_GIT_AUTHOR_EMAIL env var.
 
-    NOTE: git push is intentionally removed. IRA never pushes to remote
+    NOTE: git push is intentionally absent. IRA never pushes to remote
     automatically. Push manually when you are ready.
     """
     # Fix #76: derive author name from OWNER_NAME env var so git commits use the
@@ -212,6 +213,10 @@ async def apply_implementation(
             )
 
         if dry_run:
+            logger.info(
+                "Dry-run validation passed for %d file(s): %s",
+                len(files_changed), ", ".join(files_changed),
+            )
             return ApplyResult(
                 success=True,
                 message="Dry-run validation passed — patch is safe to apply.",
@@ -220,6 +225,11 @@ async def apply_implementation(
                 services_restarted=[],
                 error="",
             )
+
+        logger.warning(
+            "APPLYING patch to working tree — %d file(s): %s",
+            len(files_changed), ", ".join(files_changed),
+        )
 
         # ── Step 3: Apply patch ───────────────────────────────────────────────
         code, out, err = await _run(

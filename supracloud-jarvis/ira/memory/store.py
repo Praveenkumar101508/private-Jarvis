@@ -53,7 +53,7 @@ async def save_message(
     latency_ms: int | None = None,
     tokens_in: int | None = None,
     tokens_out: int | None = None,
-    user_id: str = "system",   # Fix #34: scope embeddings to the authenticated user
+    user_id: str,   # Fix P31: required — every embedding must be scoped to a user
 ) -> str:
     """Persist a message and kick off async embedding storage."""
     msg_id = str(uuid.uuid4())

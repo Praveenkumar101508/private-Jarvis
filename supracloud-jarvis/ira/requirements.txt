@@ -21,6 +21,7 @@ redis[asyncio]==5.2.0           # Async Redis
 
 # ── Embeddings / RAG ──────────────────────────────────────────────────────────
 sentence-transformers==3.3.0    # BGE-large-en-v1.5 (CPU)
+scikit-learn==1.5.2             # Transitive dep of sentence-transformers — pinned to prevent silent upgrades
 numpy==1.26.4
 torch==2.4.1+cpu                # CPU-only torch for embeddings (keeps image small)
 --extra-index-url https://download.pytorch.org/whl/cpu
@@ -28,6 +29,7 @@ torch==2.4.1+cpu                # CPU-only torch for embeddings (keeps image sma
 # ── Auth & Security ────────────────────────────────────────────────────────────
 python-jose[cryptography]==3.4.0
 passlib[bcrypt]==1.7.4
+email-validator>=2.0,<3          # Required by pydantic.EmailStr (used in webhooks.py)
 slowapi==0.1.9                  # Rate limiting for FastAPI
 
 # ── Streaming ─────────────────────────────────────────────────────────────────

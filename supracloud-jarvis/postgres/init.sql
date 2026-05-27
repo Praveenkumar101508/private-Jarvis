@@ -54,8 +54,31 @@ CREATE TABLE IF NOT EXISTS memory_embeddings (
     metadata    JSONB DEFAULT '{}'
 );
 
--- HNSW index for fast approximate nearest-neighbour search
--- m=16, ef_construction=64 is a good balance of speed and recall for personal-scale deployments
+-- HNSW index for fast approximate nearest-neighbour search.
+--
+-- Parameters chosen for a personal-scale deployment (~100k–1M rows):
+--
+--   m = 16  (max bidirectional links per node)
+--     Controls graph density and memory usage.
+--     Higher m → better recall + lower query latency, but more index RAM.
+--     Range: 2–100.  Default: 16.  Typical choices: 8 (low RAM) / 16 (balanced) / 32 (high recall).
+--     For a single-user assistant 16 is the sweet spot.
+--
+--   ef_construction = 64  (search width during index build)
+--     Controls build quality — how many candidates are evaluated when inserting each node.
+--     Higher → better recall and slower index build time (not query time).
+--     Range: ≥ 2*m.  Default: 64.  64 at m=16 gives >95% recall on typical embeddings.
+--
+--   vector_cosine_ops (distance metric)
+--     BGE-large-en-v1.5 embeddings are L2-normalised, so cosine similarity is the
+--     correct metric.  Using inner-product (vector_ip_ops) would give identical
+--     results on normalised vectors but cosine_ops is clearer and safer.
+--
+-- Tuning guidance:
+--   If recall drops below 90% at scale, increase m to 32 and ef_construction to 128,
+--   then rebuild: DROP INDEX idx_memory_embedding_hnsw; followed by this CREATE.
+--   At query time, SET hnsw.ef_search = 100 (session or per-query) to trade
+--   a few ms of latency for higher recall without touching the index.
 CREATE INDEX IF NOT EXISTS idx_memory_embedding_hnsw
     ON memory_embeddings USING hnsw (embedding vector_cosine_ops)
     WITH (m = 16, ef_construction = 64);
@@ -159,6 +182,13 @@ CREATE TRIGGER trg_agents_updated_at
 
 -- =============================================================================
 -- Seed: system conversation for Jarvis bootstrap messages
+--
+-- The UUID '00000000-0000-0000-0000-000000000001' is a fixed sentinel value.
+-- Hard-coding it (rather than uuid_generate_v4()) lets application code and
+-- other seed files reference it as a stable foreign key without requiring a
+-- prior SELECT.  It is intentionally not a real v4 UUID — the nil-prefix
+-- makes it visually distinct from auto-generated rows in queries and logs.
+-- Do NOT change this value; doing so will break any rows that reference it.
 -- =============================================================================
 INSERT INTO conversations (id, session_id, title)
 VALUES (

@@ -19,7 +19,12 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from datetime import datetime, timezone, timedelta
+
+# Healthcheck: write a fresh timestamp here on every security-scan tick.
+# The compose healthcheck verifies this file exists and is < 120 s old.
+WORKER_HEARTBEAT_FILE = os.getenv("WORKER_HEARTBEAT_FILE", "/tmp/ira_worker_tick")
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
@@ -207,6 +212,20 @@ def build_scheduler() -> AsyncIOScheduler:
         replace_existing=True,
     )
 
+    # Model performance retention — weekly at 02:30 UTC on Sunday (Fix P30)
+    # model_performance grows by 1 row per LLM call — unbounded without a purge.
+    # Keep 30 days (enough for monthly trend analysis); older rows are noise.
+    scheduler.add_job(
+        _model_perf_retention,
+        trigger="cron",
+        day_of_week="sun",
+        hour=2,
+        minute=30,
+        id="model_perf_retention",
+        name="IRA Model Performance Retention Purge",
+        replace_existing=True,
+    )
+
     return scheduler
 
 
@@ -285,6 +304,9 @@ async def _sync_calendar() -> None:
 
 async def _self_healing_check() -> None:
     try:
+        # Touch the heartbeat file so the Docker healthcheck knows the scheduler is alive
+        with open(WORKER_HEARTBEAT_FILE, "w") as _hb:
+            _hb.write(datetime.now(timezone.utc).isoformat())
         await run_self_healing_check()
     except Exception as e:
         logger.error(f"Self-healing check failed: {e}", exc_info=True)
@@ -329,6 +351,21 @@ async def _memory_retention() -> None:
         logger.info(f"Memory retention complete: {deleted} old embeddings purged")
     except Exception as e:
         logger.error(f"Memory retention job failed: {e}", exc_info=True)
+
+
+async def _model_perf_retention() -> None:
+    """Weekly purge of model_performance rows older than 30 days. (Fix P30)"""
+    try:
+        from utils.db import acquire
+        async with acquire() as conn:
+            result = await conn.execute(
+                "DELETE FROM model_performance WHERE created_at < NOW() - INTERVAL '30 days'"
+            )
+        # asyncpg returns "DELETE <n>" as the status string
+        count = int(result.split()[-1]) if result else 0
+        logger.info(f"Model performance retention: {count} old rows purged")
+    except Exception as e:
+        logger.error(f"Model performance retention job failed: {e}", exc_info=True)
 
 
 def get_scheduler() -> AsyncIOScheduler:
