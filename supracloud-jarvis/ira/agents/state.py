@@ -6,7 +6,7 @@ All nodes read from and write to this shared state dict.
 from __future__ import annotations
 
 from typing import Annotated
-from typing_extensions import TypedDict
+from typing_extensions import TypedDict, NotRequired
 from langgraph.graph.message import add_messages
 from langchain_core.messages import BaseMessage
 
@@ -43,3 +43,10 @@ class IRAState(TypedDict):
     is_owner: bool
     # "admin" → full access, "public" → restricted domains blocked
     clearance_level: str
+
+    # ── Expert Mode metadata ─────────────────────────────────────────────────
+    # Fix #93: declare expert_agents so it is recognised by the LangGraph
+    # state schema and the checkpointer — avoids "unknown field" warnings and
+    # the mypy type:ignore suppression in expert_mode.py.
+    # NotRequired: only present when run_expert_mode() populates the state.
+    expert_agents: NotRequired[list[dict]]

@@ -26,7 +26,7 @@ from api.middleware.auth import require_auth
 from agents.graph import run_graph
 from memory.store import ensure_conversation, get_recent_messages, retrieve
 from utils.llm import stream_tokens, should_use_deep, should_use_reasoning
-from utils.redis_client import cache_get, cache_set
+from utils.redis_client import cache_get, cache_set, get_redis
 from config import get_settings
 
 router = APIRouter(prefix="/chat", tags=["chat"])
@@ -96,15 +96,18 @@ async def _check_expert_rate_limit(username: str) -> tuple[bool, int]:
     """
     Increment the per-user Expert Mode counter and check against the limit.
     Returns (allowed, calls_remaining). Fails open if Redis is unavailable.
+
+    Fix #46: INCR and EXPIRE are sent in a single pipeline so the TTL is
+    always set, even if two concurrent first-calls race or the process
+    crashes between the two commands. Without the pipeline the key could
+    become immortal, permanently locking a user after 3 sessions.
     """
     key = f"expert_rate:{username}"
     try:
-        from utils.redis_client import get_redis
-        redis = get_redis()
-        count = await redis.incr(key)
-        if count == 1:
-            # First call in this window — set the TTL
-            await redis.expire(key, _EXPERT_RATE_WINDOW)
+        pipe = get_redis().pipeline(transaction=False)
+        pipe.incr(key)
+        pipe.expire(key, _EXPERT_RATE_WINDOW)
+        count, _ = await pipe.execute()
         remaining = max(0, _EXPERT_RATE_LIMIT - count)
         return count <= _EXPERT_RATE_LIMIT, remaining
     except Exception:

@@ -129,7 +129,7 @@ async def get_upcoming_events(hours: int = 24) -> list[dict]:
         rows = await conn.fetch(
             """SELECT title, start_at, end_at, location, attendees
                FROM calendar_events
-               WHERE start_at BETWEEN NOW() AND NOW() + ($1 * INTERVAL '1 hour')
+               WHERE start_at BETWEEN NOW() AND NOW() + make_interval(hours => $1)
                AND status = 'confirmed'
                ORDER BY start_at ASC""",
             hours,

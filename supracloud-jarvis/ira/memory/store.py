@@ -18,6 +18,12 @@ from memory.embeddings import embed_one
 
 logger = logging.getLogger("ira.memory")
 
+# Fix #44: module-level set keeps strong references to background embedding tasks
+# so Python's garbage collector cannot collect them before they finish.
+# The asyncio event loop only holds a *weak* reference to tasks; without a live
+# strong reference the task can be silently dropped mid-execution.
+_background_tasks: set[asyncio.Task] = set()
+
 
 # ── Conversation persistence ───────────────────────────────────────────────────
 
@@ -60,8 +66,11 @@ async def save_message(
             uuid.UUID(conversation_id),
             role, content, model_used, latency_ms, tokens_in, tokens_out,
         )
-    # Embed and store asynchronously — keep reference so task isn't GC'd mid-flight
+    # Fix #44: keep a strong reference in the module-level set so the task
+    # cannot be GC'd before it finishes; discard on completion to prevent growth.
     _t = asyncio.create_task(_store_embedding(msg_id, content, "message", user_id=user_id))
+    _background_tasks.add(_t)
+    _t.add_done_callback(_background_tasks.discard)
     _t.add_done_callback(lambda t: t.exception() and logger.warning(f"Embedding task failed: {t.exception()}"))
     return msg_id
 
@@ -142,7 +151,9 @@ async def purge_old_memories(retention_days: int = 90) -> int:
     try:
         async with acquire() as conn:
             result = await conn.execute(
-                "DELETE FROM memory_embeddings WHERE created_at < NOW() - $1 * INTERVAL '1 day'",
+                # Fix #94: make_interval() avoids asyncpg type-inference ambiguity
+                # with parameterised interval arithmetic ($1 * INTERVAL '1 day').
+                "DELETE FROM memory_embeddings WHERE created_at < NOW() - make_interval(days => $1)",
                 retention_days,
             )
         # asyncpg returns "DELETE N" as the status string

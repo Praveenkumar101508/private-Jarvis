@@ -220,7 +220,7 @@ async def run_expert_mode(state: IRAState) -> IRAState:
         "active_agent": "expert_mode",
         "model_used": "expert-parallel",
         "latency_ms": total_latency,
-        "expert_agents": agent_details,  # type: ignore[typeddict-unknown-key]
+        "expert_agents": agent_details,  # Fix #93: field now declared in IRAState
     }
 
 

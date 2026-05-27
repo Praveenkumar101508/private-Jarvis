@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 from fastapi import APIRouter, Depends, Query
-from pydantic import BaseModel
 
 from api.middleware.auth import require_auth
 from utils.db import acquire
@@ -20,7 +19,8 @@ _background_tasks: set[asyncio.Task] = set()
 
 @router.post("/now")
 async def trigger_briefing(
-    briefing_type: str = Query("morning", regex="^(morning|evening|security|business)$"),
+    # Fix #90: Pydantic v2 renamed regex= to pattern= (regex= was deprecated in v1)
+    briefing_type: str = Query("morning", pattern="^(morning|evening|security|business)$"),
     _user: str = Depends(require_auth),
 ):
     """Trigger an immediate briefing. Runs asynchronously and delivers via all channels."""
