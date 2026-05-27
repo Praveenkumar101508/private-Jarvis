@@ -63,7 +63,7 @@ async def get_lockdown_state() -> bool:
         redis = get_redis()
         val = await redis.get(_REDIS_LOCKDOWN_KEY)
         if val is not None:
-            return val in (b"1", "1")
+            return val == "1"
     except Exception as e:
         logger.debug(f"Redis lockdown read failed (falling back to DB): {e}")
 
