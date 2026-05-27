@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import shlex
 import subprocess
 import time
@@ -49,6 +50,23 @@ def is_safe_path(arg: str) -> bool:
     """Return True only if the argument contains no restricted path patterns."""
     lower = arg.lower()
     return not any(pat in lower for pat in _RESTRICTED_PATH_PATTERNS)
+
+
+# ── Layer 1: Shell metacharacter rejection ────────────────────────────────────
+_SHELL_METACHAR_RE = re.compile(r'[;&|`$(){}]')
+
+def _has_shell_metacharacters(cmd: str) -> bool:
+    return bool(_SHELL_METACHAR_RE.search(cmd))
+
+
+# ── Layer 3: Hard-blocked commands (override allowlist) ───────────────────────
+_BLOCKED_COMMANDS = frozenset({
+    "rm", "mkfs", "dd", "fdisk", "reboot", "shutdown", "halt",
+    "poweroff", "init", "kill", "killall", "pkill", "chmod", "chown",
+    "passwd", "useradd", "userdel", "visudo", "crontab",
+    "iptables", "ufw", "systemctl", "service",
+    "wget", "curl",   # use requests/httpx from within IRA instead
+})
 
 
 _SYSTEM = """\
@@ -136,6 +154,29 @@ async def executor(state: IRAState) -> IRAState:
         parse_messages, use_deep=False, max_tokens=100, temperature=0
     )
     extracted_cmd = extracted_cmd.strip()
+
+    # Layer 1: Reject shell metacharacters immediately — before any allowlist check
+    if extracted_cmd.strip().upper() != "NONE" and _has_shell_metacharacters(extracted_cmd):
+        await _log_exec_attempt(extracted_cmd, False, state.get("session_id", "unknown"))
+        return {
+            **state,
+            "final_response": "Command rejected: shell metacharacters are not permitted for security reasons.",
+            "messages": [AIMessage(content="Command rejected: shell metacharacters are not permitted for security reasons.")],
+            "latency_ms": int((time.monotonic() - t0) * 1000),
+            "model_used": "qwen3-fast",
+        }
+
+    # Layer 3: Block known dangerous commands before allowlist check
+    first_token = extracted_cmd.strip().split()[0].lower() if extracted_cmd.strip() else ""
+    if first_token in _BLOCKED_COMMANDS:
+        await _log_exec_attempt(extracted_cmd, False, state.get("session_id", "unknown"))
+        return {
+            **state,
+            "final_response": f"Command '{first_token}' is blocked for security reasons.",
+            "messages": [AIMessage(content=f"Command '{first_token}' is blocked for security reasons.")],
+            "latency_ms": int((time.monotonic() - t0) * 1000),
+            "model_used": "qwen3-fast",
+        }
 
     allowed = extracted_cmd.strip().upper() != "NONE" and _is_allowed(extracted_cmd)
 
