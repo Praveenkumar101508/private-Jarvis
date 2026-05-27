@@ -21,9 +21,9 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
-from functools import lru_cache
 from typing import AsyncIterator
 
 import numpy as np
@@ -82,18 +82,35 @@ def _split_sentences(text: str) -> list[str]:
     return parts if parts else [text]
 
 
-@lru_cache(maxsize=1)
+# Fix #124: thread-safe Kokoro model cache.
+# lru_cache is NOT safe against concurrent first-calls in Python < 3.12 — two
+# threads can both execute the function body before the cache is populated,
+# loading the model twice and doubling memory use. Double-checked locking
+# ensures the model is constructed exactly once regardless of thread count.
+_kokoro_model: object = None   # Kokoro instance or None if load failed
+_kokoro_loaded: bool = False   # True once load was attempted (success or fail)
+_kokoro_lock = threading.Lock()
+
+
 def _load_kokoro(voice: str):
-    """Load and cache the Kokoro ONNX model."""
-    try:
-        from kokoro_onnx import Kokoro
-        logger.info(f"Loading Kokoro TTS with voice '{voice}'...")
-        model = Kokoro("kokoro-v0_19.onnx", "voices.bin")
-        logger.info("Kokoro TTS ready.")
-        return model
-    except Exception as e:
-        logger.error(f"Kokoro load failed: {e}. TTS will produce silence.")
-        return None
+    """Load and cache the Kokoro ONNX model (Fix #124: thread-safe singleton)."""
+    global _kokoro_model, _kokoro_loaded
+    if _kokoro_loaded:              # Fast path — already loaded, no lock needed
+        return _kokoro_model
+    with _kokoro_lock:
+        if _kokoro_loaded:          # Second check inside lock (race guard)
+            return _kokoro_model
+        try:
+            from kokoro_onnx import Kokoro
+            logger.info(f"Loading Kokoro TTS with voice '{voice}'...")
+            _kokoro_model = Kokoro("kokoro-v0_19.onnx", "voices.bin")
+            logger.info("Kokoro TTS ready.")
+        except Exception as e:
+            logger.error(f"Kokoro load failed: {e}. TTS will produce silence.")
+            _kokoro_model = None
+        finally:
+            _kokoro_loaded = True
+        return _kokoro_model
 
 
 def _resample_24k_to_48k(audio_24k: np.ndarray) -> np.ndarray:

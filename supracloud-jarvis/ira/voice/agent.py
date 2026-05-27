@@ -63,6 +63,11 @@ IRA_API_TOKEN = os.getenv("IRA_API_TOKEN", "")
 # small    : fastest (~0.3-0.5s) — use on Shadow PC / low-memory hosts
 WHISPER_MODEL = os.getenv("WHISPER_MODEL", "large-v3")
 
+# Fix #123: Kokoro voice loaded from IRA_VOICE env var (set in .env.example).
+# Allows switching voice without rebuilding the image — "af_bella" (warm) or
+# "af_heart" (softer). Falls back to af_bella if the env var is not set.
+IRA_VOICE = os.getenv("IRA_VOICE", "af_bella")
+
 # Maximum duration for a single voice session (#32).
 # Guards against abandoned sessions keeping the worker alive indefinitely.
 MAX_SESSION_SECONDS: float = 4 * 3600  # 4 hours
@@ -225,7 +230,7 @@ async def entrypoint(ctx: JobContext) -> None:
 
     # Initialise components
     stt = IRAFasterWhisperSTT(model_size=WHISPER_MODEL, device="cpu", compute_type="int8")
-    tts_engine = IRAKokoroTTS(voice="af_bella", speed=1.05)
+    tts_engine = IRAKokoroTTS(voice=IRA_VOICE, speed=1.05)  # Fix #123: voice from env
     vad = silero.VAD.load(
         min_silence_duration=0.3,   # 300ms — slightly longer pause before cutting off
         min_speech_duration=0.1,    # 100ms — catches "wait", "stop", single words

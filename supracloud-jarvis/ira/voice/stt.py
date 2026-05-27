@@ -16,9 +16,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
-from functools import lru_cache
 from typing import AsyncIterator
 
 import numpy as np
@@ -38,12 +38,52 @@ WHISPER_SAMPLE_RATE = 16_000
 DOWNSAMPLE_RATIO = LIVEKIT_SAMPLE_RATE // WHISPER_SAMPLE_RATE  # = 3
 
 
-@lru_cache(maxsize=1)
+# Fix #124: thread-safe Whisper model cache — same double-checked locking pattern
+# as _load_kokoro in tts.py, preventing duplicate model loads on concurrent calls.
+# Fix #129: model download errors are caught and re-raised with a descriptive
+# message so operators know to check disk space and network connectivity rather
+# than seeing a bare exception from the Hugging Face downloader.
+_whisper_model: WhisperModel | None = None
+_whisper_loaded: bool = False
+_whisper_lock = threading.Lock()
+
+
 def _load_model(model_size: str, device: str, compute_type: str) -> WhisperModel:
-    logger.info(f"Loading Whisper {model_size} on {device} ({compute_type})...")
-    model = WhisperModel(model_size, device=device, compute_type=compute_type)
-    logger.info("Whisper model loaded.")
-    return model
+    """Load and cache the Whisper model (Fix #124: thread-safe, Fix #129: clear errors)."""
+    global _whisper_model, _whisper_loaded
+    if _whisper_loaded:             # Fast path
+        if _whisper_model is None:
+            raise RuntimeError(
+                f"Whisper {model_size} is unavailable — check startup logs for the download error."
+            )
+        return _whisper_model
+    with _whisper_lock:
+        if _whisper_loaded:         # Race guard
+            if _whisper_model is None:
+                raise RuntimeError(
+                    f"Whisper {model_size} is unavailable — check startup logs for the download error."
+                )
+            return _whisper_model
+        logger.info(f"Loading Whisper {model_size} on {device} ({compute_type})...")
+        try:
+            _whisper_model = WhisperModel(model_size, device=device, compute_type=compute_type)
+            logger.info("Whisper model loaded.")
+        except Exception as e:
+            # Fix #129: surface download/init errors with actionable context so the
+            # operator knows what to fix (disk space, network, CUDA availability).
+            logger.error(
+                f"Whisper {model_size} failed to load: {e}. "
+                f"Ensure network access is available for the initial model download "
+                f"and that the host has sufficient disk space (~3 GB for large-v3)."
+            )
+            _whisper_model = None
+        finally:
+            _whisper_loaded = True
+        if _whisper_model is None:
+            raise RuntimeError(
+                f"Whisper {model_size} is unavailable — see above error for details."
+            )
+        return _whisper_model
 
 
 def _downsample(audio_bytes: bytes) -> np.ndarray:
