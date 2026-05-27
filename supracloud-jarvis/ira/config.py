@@ -159,6 +159,29 @@ class Settings(BaseSettings):
     x_fallback_api_url: str = "https://api.twitterapi.io"
     x_fallback_api_key: str = ""
 
+    # ── Database Backup ───────────────────────────────────────────────────────
+    # Fix L5: moved from module-level os.getenv() in backup.py to lazy config
+    backup_dir: str = "/backups"          # Path to the backup volume (BACKUP_DIR)
+    backup_keep: int = 7                  # Number of most-recent backups to retain
+
+    # ── Security Monitor Log Paths ────────────────────────────────────────────
+    # Fix L16: moved from module-level os.getenv() in security_monitor.py to lazy config
+    nginx_log_path: str = "/var/log/nginx/access.log"
+    ssh_log_path: str = "/var/log/auth.log"   # /var/log/secure on RHEL/CentOS
+
+    # ── Replicate Audio/Music Models ──────────────────────────────────────────
+    # Fix L15: moved from module-level os.getenv() in audio_gen.py to lazy config
+    replicate_music_model: str = (
+        "meta/musicgen:671ac645ce5e552cc63a54a2bbff63fcf798043055d2dac5fc9e36a837eedcfb"
+    )
+    replicate_music_stereo_model: str = "meta/musicgen-stereo-melody-large"
+    replicate_bark_model: str = (
+        "suno-ai/bark:b76242b40d67c76ab6742e987628a2a9ac019e11d56ab96c4e91ce03b79b2787"
+    )
+    replicate_sfx_model: str = (
+        "haoheliu/audio-ldm:b61392adecdd660326fc9cfc5398182437dbe5e97b5decfb36e1a36de68b5b95"
+    )
+
     # ── Image Generation ──────────────────────────────────────────────────────
     # Provider: "replicate" (cloud, Flux Schnell) | "sd_webui" (local SD WebUI) | "comfyui"
     # Cloud upgrade: "replicate" with REPLICATE_API_TOKEN gives instant Flux Pro access

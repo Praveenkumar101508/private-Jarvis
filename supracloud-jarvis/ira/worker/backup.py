@@ -23,8 +23,9 @@ from config import get_settings
 
 logger = logging.getLogger("ira.backup")
 
-BACKUP_DIR = Path(os.getenv("BACKUP_DIR", "/backups"))
-KEEP_BACKUPS = int(os.getenv("BACKUP_KEEP", "7"))
+# Fix L5: BACKUP_DIR and KEEP_BACKUPS removed from module level — they were read
+# via os.getenv() at import time (same anti-pattern as Fix #58).  Values are now
+# derived from get_settings() inside each function so the config is always current.
 
 
 def _backup_filename(ts: datetime) -> str:
@@ -33,13 +34,14 @@ def _backup_filename(ts: datetime) -> str:
 
 async def run_database_backup() -> Path | None:
     """
-    Run pg_dump, gzip the output, and save to BACKUP_DIR.
+    Run pg_dump, gzip the output, and save to the configured backup directory.
     Returns the Path to the created file, or None on failure.
     """
-    BACKUP_DIR.mkdir(parents=True, exist_ok=True)
     cfg = get_settings()
+    backup_dir = Path(cfg.backup_dir)
+    backup_dir.mkdir(parents=True, exist_ok=True)
     ts = datetime.now(timezone.utc)
-    out_path = BACKUP_DIR / _backup_filename(ts)
+    out_path = backup_dir / _backup_filename(ts)
 
     env = {**os.environ, "PGPASSWORD": cfg.postgres_password}
 
@@ -89,17 +91,21 @@ async def run_database_backup() -> Path | None:
 
 
 def _prune_old_backups() -> None:
-    """Delete backups beyond the retention limit (newest KEEP_BACKUPS kept)."""
-    backups = sorted(BACKUP_DIR.glob("ira_backup_*.sql.gz"), reverse=True)
-    for old in backups[KEEP_BACKUPS:]:
+    """Delete backups beyond the retention limit (keep newest N)."""
+    cfg = get_settings()
+    backup_dir = Path(cfg.backup_dir)
+    keep = cfg.backup_keep
+    backups = sorted(backup_dir.glob("ira_backup_*.sql.gz"), reverse=True)
+    for old in backups[keep:]:
         old.unlink(missing_ok=True)
         logger.info(f"Pruned old backup: {old.name}")
 
 
 def list_backups() -> list[dict]:
     """Return metadata for all available backups, newest first."""
-    BACKUP_DIR.mkdir(parents=True, exist_ok=True)
-    backups = sorted(BACKUP_DIR.glob("ira_backup_*.sql.gz"), reverse=True)
+    backup_dir = Path(get_settings().backup_dir)
+    backup_dir.mkdir(parents=True, exist_ok=True)
+    backups = sorted(backup_dir.glob("ira_backup_*.sql.gz"), reverse=True)
     result = []
     for p in backups:
         stat = p.stat()
@@ -118,9 +124,10 @@ async def restore_from_file(gz_path: Path) -> tuple[bool, str]:
     Returns (success, message).
     """
     cfg = get_settings()
+    backup_dir = Path(cfg.backup_dir)
     env = {**os.environ, "PGPASSWORD": cfg.postgres_password}
     ts = datetime.now(timezone.utc)
-    temp_sql = BACKUP_DIR / f"restore_temp_{ts.strftime('%Y%m%d_%H%M%S')}.sql"
+    temp_sql = backup_dir / f"restore_temp_{ts.strftime('%Y%m%d_%H%M%S')}.sql"
 
     try:
         # Decompress to a temporary plain SQL file

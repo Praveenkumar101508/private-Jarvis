@@ -15,15 +15,14 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
 import re
 from typing import NamedTuple
 
 logger = logging.getLogger("ira.x_search")
 
-_BEARER_TOKEN = os.getenv("TWITTER_BEARER_TOKEN", "")
-_FALLBACK_URL = os.getenv("X_FALLBACK_API_URL", "https://api.twitterapi.io").rstrip("/")
-_FALLBACK_KEY = os.getenv("X_FALLBACK_API_KEY", "")
+# Fix L4: API credentials are now read lazily from get_settings() inside each
+# function — not at module import time.  This matches Fix #58 (config anti-pattern):
+# module-level os.getenv() reads stale values when env vars are set after import.
 
 # ── Country / Language detection ──────────────────────────────────────────────
 # Each tuple: (compiled regex, ISO 3166-1 alpha-2, space-separated lang codes)
@@ -80,11 +79,13 @@ _COUNTRY_PATTERNS: list[tuple[re.Pattern, str, str]] = [
     ), "CN", "zh"),
 ]
 
+# Fix L10: removed hardcoded celebrity/politician names (elon musk, trump, modi, etc.)
+# from _CELEBRITY_RE.  Hard-coding individual names is fragile (new public figures are
+# missed; names clash with innocent words like "elon" as a first name in other contexts).
+# Country patterns in _COUNTRY_PATTERNS already route country-specific leader queries
+# (e.g. "modi" → India, "trump" → US).  Role-based terms are sufficient here.
 _CELEBRITY_RE = re.compile(
-    r"\b(elon musk|elon|musk|donald trump|trump|taylor swift|narendra modi|modi|"
-    r"ratan tata|mukesh ambani|ambani|virat kohli|kohli|sachin tendulkar|"
-    r"shah rukh khan|shah rukh|salman khan|deepika padukone|priyanka chopra|"
-    r"what (is|are|did|does) .{0,40} (saying?|think|tweet|post)|"
+    r"\b(what (is|are|did|does) .{0,40} (saying?|think|tweet|post)|"
     r"opinion of|according to|celebrity|actor|actress|singer|"
     r"ceo|founder|politician|president|prime minister|senator)\b",
     re.I,
@@ -144,7 +145,9 @@ def _build_x_query(query: str, country_code: str | None, langs: str | None) -> s
 async def _official_search(
     query: str, max_results: int, country_code: str | None, langs: str | None,
 ) -> list[XResult]:
-    if not _BEARER_TOKEN:
+    from config import get_settings
+    bearer_token = get_settings().twitter_bearer_token  # Fix L4: lazy read
+    if not bearer_token:
         return []
 
     x_query = _build_x_query(query, country_code, langs)
@@ -160,7 +163,7 @@ async def _official_search(
         async with httpx.AsyncClient(timeout=10) as client:
             resp = await client.get(
                 "https://api.twitter.com/2/tweets/search/recent",
-                headers={"Authorization": f"Bearer {_BEARER_TOKEN}"},
+                headers={"Authorization": f"Bearer {bearer_token}"},
                 params=params,
             )
             resp.raise_for_status()
@@ -199,7 +202,11 @@ async def _fallback_search(
     Call the configured cheap X API provider (default: twitterapi.io).
     Set X_FALLBACK_API_URL and X_FALLBACK_API_KEY in .env to activate.
     """
-    if not _FALLBACK_KEY:
+    from config import get_settings
+    cfg = get_settings()
+    fallback_key = cfg.x_fallback_api_key          # Fix L4: lazy read
+    fallback_url = cfg.x_fallback_api_url.rstrip("/")
+    if not fallback_key:
         return []
 
     x_query = _build_x_query(query, country_code, langs)
@@ -209,10 +216,10 @@ async def _fallback_search(
     try:
         import httpx
         params = {"query": x_query, "queryType": "Latest", "count": min(max_results, 20)}
-        headers = {"X-API-Key": _FALLBACK_KEY}
+        headers = {"X-API-Key": fallback_key}
         async with httpx.AsyncClient(timeout=15) as client:
             resp = await client.get(
-                f"{_FALLBACK_URL}/twitter/tweet/advanced_search",
+                f"{fallback_url}/twitter/tweet/advanced_search",
                 params=params,
                 headers=headers,
             )
@@ -233,7 +240,7 @@ async def _fallback_search(
                 retweets=t.get("retweetCount", 0),
                 country_code=country_code or "",
             ))
-        logger.info(f"Fallback X API ({_FALLBACK_URL}): {len(results)} results")
+        logger.info(f"Fallback X API ({fallback_url}): {len(results)} results")
         return results
     except Exception as e:
         logger.warning(f"Fallback X API failed: {e}")

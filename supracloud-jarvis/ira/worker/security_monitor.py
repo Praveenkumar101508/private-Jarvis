@@ -54,9 +54,8 @@ _SCANNER_UA = re.compile(
 )
 _PATH_TRAVERSAL = re.compile(r"\.\./|%2e%2e/|%252e", re.I)
 
-# Log paths — volumes mounted in the worker container
-NGINX_LOG_PATH = os.getenv("NGINX_LOG_PATH", "/var/log/nginx/access.log")
-SSH_LOG_PATH = os.getenv("SSH_LOG_PATH", "/var/log/auth.log")  # /var/log/secure on RHEL
+# Fix L16: log paths removed from module level — read lazily via get_settings()
+# (same os.getenv() at import-time anti-pattern as Fix #58).
 
 _SSH_FAIL_RE = re.compile(
     r"Failed password for (?:invalid user )?(\S+) from ([\d.]+) port \d+ ssh",
@@ -170,7 +169,8 @@ def _analyse_lines(lines: list[str]) -> list[dict]:
 
 async def _read_new_log_lines() -> list[str]:
     """Read new nginx log lines since last scan using stored file offset."""
-    if not os.path.exists(NGINX_LOG_PATH):
+    nginx_log = get_settings().nginx_log_path  # Fix L16: lazy read from config
+    if not os.path.exists(nginx_log):
         return []
 
     async with acquire() as conn:
@@ -180,7 +180,7 @@ async def _read_new_log_lines() -> list[str]:
         offset = int(row["value"]) if row else 0
 
     try:
-        with open(NGINX_LOG_PATH, "r", errors="replace") as f:
+        with open(nginx_log, "r", errors="replace") as f:
             f.seek(offset)
             lines = f.readlines()
             new_offset = f.tell()
@@ -271,7 +271,7 @@ async def _check_ssh_failures() -> list[dict]:
     Falls back to reading recent journald output when auth.log is absent
     (common on systems where the bind-mount file does not exist on the host).
     """
-    if not os.path.exists(SSH_LOG_PATH):
+    if not os.path.exists(get_settings().ssh_log_path):  # Fix L16: lazy read from config
         return await _check_ssh_failures_journald()
     return await _check_ssh_failures_file()
 
@@ -325,7 +325,13 @@ async def _check_ssh_failures_journald() -> list[dict]:
 
 
 async def _check_ssh_failures_file() -> list[dict]:
-    """Parse auth.log for failed SSH logins since last scan offset."""
+    """Parse auth.log for failed SSH logins since last scan offset.
+
+    Fix L6: IP-tracking loop removed — delegated to _parse_ssh_lines() to avoid
+    code duplication with _check_ssh_failures_journald(). The Telegram push for
+    time-critical attacks (count >= 5) is handled here from the returned events.
+    """
+    ssh_log = get_settings().ssh_log_path  # Fix L16: lazy read from config
 
     async with acquire() as conn:
         row = await conn.fetchrow(
@@ -334,7 +340,7 @@ async def _check_ssh_failures_file() -> list[dict]:
         offset = int(row["value"]) if row else 0
 
     try:
-        with open(SSH_LOG_PATH, "r", errors="replace") as f:
+        with open(ssh_log, "r", errors="replace") as f:
             f.seek(offset)
             lines = f.readlines()
             new_offset = f.tell()
@@ -349,42 +355,27 @@ async def _check_ssh_failures_file() -> list[dict]:
                 str(new_offset),
             )
 
-    ip_failures: dict[str, int] = defaultdict(int)
-    ip_users: dict[str, set] = defaultdict(set)
+    # Delegate event detection to shared helper — eliminates duplicate IP-tracking loop
+    events = _parse_ssh_lines(lines)
 
-    for line in lines:
-        m = _SSH_FAIL_RE.search(line) or _SSH_INVALID_RE.search(line)
-        if m:
-            user, ip = m.group(1), m.group(2)
-            ip_failures[ip] += 1
-            ip_users[ip].add(user)
+    # Direct Telegram push for time-critical SSH attacks (>= 5 attempts)
+    # Extract count from standardised description written by _parse_ssh_lines()
+    import re as _re
+    for ev in events:
+        m = _re.search(r"(\d+) failed attempts", ev.get("description", ""))
+        count = int(m.group(1)) if m else 0
+        if count >= 5:
+            ssh_msg = (
+                f"{get_settings().owner_name}, *{count} failed SSH logins* "
+                f"from `{ev['source_ip']}`.\n\n"
+                f"Say _\"IRA, scan threats\"_ to investigate."
+            )
+            loop = asyncio.get_running_loop()
+            await loop.run_in_executor(
+                None,
+                lambda msg=ssh_msg: send_alert(msg, priority="critical"),
+            )
 
-    events = []
-    for ip, count in ip_failures.items():
-        if count >= 3:
-            users_tried = ", ".join(list(ip_users[ip])[:5])
-            events.append({
-                "severity": "high" if count >= 10 else "medium",
-                "event_type": "ssh_brute_force",
-                "source_ip": ip,
-                "description": (
-                    f"SSH brute-force: {count} failed attempts from {ip}. "
-                    f"Usernames tried: {users_tried}"
-                ),
-                "raw_log": "",
-            })
-            # Direct Telegram push for SSH attacks (time-critical)
-            if count >= 5:
-                ssh_msg = (
-                    f"{get_settings().owner_name}, *{count} failed SSH logins* from `{ip}`.\n"
-                    f"Usernames tried: {users_tried}\n\n"
-                    f"Say _\"IRA, scan threats\"_ to investigate."
-                )
-                loop = asyncio.get_running_loop()
-                await loop.run_in_executor(
-                    None,
-                    lambda: send_alert(ssh_msg, priority="critical"),
-                )
     return events
 
 
@@ -422,10 +413,10 @@ async def run_security_scan() -> None:
         if "source_ip" not in ev
     ]
 
-    # 3. Write events to DB
+    # 4. Write events to DB  (Fix L7: was "3." — duplicate of the check-system-health step)
     new_highs = await _write_security_events(all_events)
 
-    # 4. Alert if significant threats found
+    # 5. Alert if significant threats found
     if new_highs > 0:
         threat_summary = "\n".join(
             f"• [{e['severity'].upper()}] {e['description']}"
@@ -439,7 +430,7 @@ async def run_security_scan() -> None:
             priority="critical" if any(e["severity"] == "critical" for e in all_events) else "warning",
         )
 
-    # 5. Hourly: alert if unresolved criticals still open
+    # 6. Hourly: alert if unresolved criticals still open
     criticals = await _check_unresolved_criticals()
     if criticals > 0:
         logger.warning(f"{criticals} unresolved critical security events")

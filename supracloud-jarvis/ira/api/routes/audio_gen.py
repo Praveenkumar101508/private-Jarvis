@@ -23,7 +23,6 @@ from __future__ import annotations
 import asyncio
 import json as _json
 import logging
-import os
 import re
 import time
 import uuid
@@ -41,11 +40,9 @@ from config import get_settings
 router = APIRouter(prefix="/audio", tags=["audio"])
 logger = logging.getLogger("ira.audio_gen")
 
-# Replicate model IDs
-_MUSIC_GEN_MODEL = os.getenv("REPLICATE_MUSIC_MODEL", "meta/musicgen:671ac645ce5e552cc63a54a2bbff63fcf798043055d2dac5fc9e36a837eedcfb")
-_MUSIC_STEREO_MODEL = os.getenv("REPLICATE_MUSIC_STEREO_MODEL", "meta/musicgen-stereo-melody-large")
-_BARK_TTS_MODEL = os.getenv("REPLICATE_BARK_MODEL", "suno-ai/bark:b76242b40d67c76ab6742e987628a2a9ac019e11d56ab96c4e91ce03b79b2787")
-_SOUND_EFFECT_MODEL = os.getenv("REPLICATE_SFX_MODEL", "haoheliu/audio-ldm:b61392adecdd660326fc9cfc5398182437dbe5e97b5decfb36e1a36de68b5b95")
+# Fix L15: Replicate model IDs removed from module level — were read via os.getenv()
+# at import time (same anti-pattern as Fix #58).  Values are now read lazily from
+# get_settings() inside each handler function.  Defaults live in config.py Settings.
 
 # Trigger detection
 _AUDIO_GEN_RE = re.compile(
@@ -95,7 +92,8 @@ class AudioGenRequest(BaseModel):
 
 async def _generate_replicate_audio(req: AudioGenRequest, audio_type: str) -> str:
     """Call Replicate to generate audio. Returns audio URL."""
-    token = get_settings().replicate_api_token
+    cfg = get_settings()
+    token = cfg.replicate_api_token
     if not token:
         raise HTTPException(
             status_code=503,
@@ -112,8 +110,9 @@ async def _generate_replicate_audio(req: AudioGenRequest, audio_type: str) -> st
         "Prefer": "wait=300",
     }
 
+    # Fix L15: model IDs read lazily from config instead of module-level os.getenv()
     if audio_type == "music":
-        model = _MUSIC_GEN_MODEL
+        model = cfg.replicate_music_model
         input_payload = {
             "prompt": req.prompt,
             "duration": req.duration,
@@ -122,14 +121,14 @@ async def _generate_replicate_audio(req: AudioGenRequest, audio_type: str) -> st
             "normalization_strategy": "peak",
         }
     elif audio_type == "sfx":
-        model = _SOUND_EFFECT_MODEL
+        model = cfg.replicate_sfx_model
         input_payload = {
             "text": req.prompt,
             "duration_in_seconds": min(req.duration, 30),
             "guidance_scale": 2.5,
         }
     else:  # tts
-        model = _BARK_TTS_MODEL
+        model = cfg.replicate_bark_model
         input_payload = {
             "prompt": req.prompt[:500],
             "history_prompt": req.voice or "v2/en_speaker_6",
