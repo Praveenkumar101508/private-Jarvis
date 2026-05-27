@@ -13,15 +13,15 @@
   "icons": [
     {
       "src": "/icons/icon-192x192.svg",
-      "sizes": "192x192",
+      "sizes": "any",
       "type": "image/svg+xml",
-      "purpose": "any maskable"
+      "purpose": "any"
     },
     {
       "src": "/icons/icon-512x512.svg",
-      "sizes": "512x512",
+      "sizes": "any",
       "type": "image/svg+xml",
-      "purpose": "any maskable"
+      "purpose": "maskable"
     }
   ],
   "shortcuts": [
@@ -30,7 +30,7 @@
       "short_name": "Voice",
       "description": "Open IRA in voice mode",
       "url": "/?mode=voice",
-      "icons": [{ "src": "/icons/icon-192x192.svg", "sizes": "192x192" }]
+      "icons": [{ "src": "/icons/icon-192x192.svg", "sizes": "any" }]
     }
   ]
 }

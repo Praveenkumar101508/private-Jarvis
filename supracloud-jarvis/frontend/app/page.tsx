@@ -10,6 +10,8 @@ export default function Home() {
   const [token, setToken] = useState<string>("");
   const [livekitToken, setLivekitToken] = useState<string>("");
   const [livekitUrl, setLivekitUrl] = useState<string>("");
+  // Fix #101: detect ?mode=voice from the PWA manifest shortcut
+  const [autoVoice, setAutoVoice] = useState(false);
   const [sessionId, setSessionId] = useState<string>(() =>
     typeof crypto !== "undefined" ? crypto.randomUUID() : Math.random().toString(36).slice(2)
   );
@@ -21,6 +23,15 @@ export default function Home() {
   const [mode, setMode] = useState<AppMode>("assistant");
   // chatKey forces ChatInterface to remount (clears messages) on New Chat
   const [chatKey, setChatKey] = useState(0);
+
+  useEffect(() => {
+    // Fix #101: read ?mode=voice query param set by the PWA manifest shortcut
+    // so the VoiceOrb auto-connects when the user launches IRA in voice mode.
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get("mode") === "voice") setAutoVoice(true);
+    }
+  }, []);
 
   useEffect(() => {
     // Fix #67: use sessionStorage instead of localStorage.
@@ -225,6 +236,7 @@ export default function Home() {
             <VoiceOrb
               livekitUrl={livekitUrl || process.env.NEXT_PUBLIC_LIVEKIT_URL || "ws://localhost:7880"}
               livekitToken={livekitToken}
+              autoConnect={autoVoice}
             />
             <button
               onClick={logout}

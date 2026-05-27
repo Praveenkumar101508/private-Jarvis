@@ -7,7 +7,10 @@ FROM node:20-alpine AS builder
 WORKDIR /app
 
 COPY package*.json ./
-RUN npm ci --prefer-offline
+# Fix #98: use npm install instead of npm ci --prefer-offline.
+# npm ci fails when package-lock.json is absent or stale, and
+# --prefer-offline is useless in Docker (no warm npm cache to hit).
+RUN npm install
 
 COPY . .
 RUN npm run build

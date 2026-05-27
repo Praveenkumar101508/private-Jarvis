@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { Mic, MicOff, Volume2 } from "lucide-react";
 import clsx from "clsx";
 
@@ -9,16 +9,21 @@ type VoiceState = "idle" | "connecting" | "listening" | "thinking" | "speaking";
 interface Props {
   livekitUrl: string;
   livekitToken: string;
+  // Fix #101: when true, automatically connect once the token is available
+  // (used by the ?mode=voice PWA shortcut in manifest.json).
+  autoConnect?: boolean;
 }
 
-export default function VoiceOrb({ livekitUrl, livekitToken }: Props) {
+export default function VoiceOrb({ livekitUrl, livekitToken, autoConnect = false }: Props) {
   const [voiceState, setVoiceState] = useState<VoiceState>("idle");
   const [room, setRoom] = useState<any>(null);
   const [error, setError] = useState("");
+  // Fix #101: prevent double-connect if effect fires more than once
+  const autoConnectedRef = useRef(false);
 
   const isActive = voiceState !== "idle";
 
-  const handleToggle = async () => {
+  const handleToggle = useCallback(async () => {
     if (isActive) {
       // Disconnect
       if (room) {
@@ -67,7 +72,16 @@ export default function VoiceOrb({ livekitUrl, livekitToken }: Props) {
       setError("Mic error — check browser permissions.");
       setVoiceState("idle");
     }
-  };
+  }, [livekitUrl, livekitToken, isActive, room]);
+
+  // Fix #101: auto-connect when ?mode=voice is in the URL (PWA shortcut).
+  // Wait until the token is available before connecting.
+  useEffect(() => {
+    if (autoConnect && livekitToken && !isActive && !autoConnectedRef.current) {
+      autoConnectedRef.current = true;
+      handleToggle();
+    }
+  }, [autoConnect, livekitToken, isActive, handleToggle]);
 
   // Cleanup on unmount
   useEffect(() => {
