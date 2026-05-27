@@ -49,15 +49,16 @@ CREATE TABLE IF NOT EXISTS memory_embeddings (
     source_type TEXT NOT NULL,            -- 'message' | 'document' | 'fact'
     content     TEXT NOT NULL,            -- Raw text that was embedded
     embedding   vector(1024),            -- BGE-large-en-v1.5 = 1024 dimensions
+    user_id     TEXT NOT NULL DEFAULT 'system',  -- per-user memory isolation (Fix #34)
     created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     metadata    JSONB DEFAULT '{}'
 );
 
--- IVFFlat index for fast approximate nearest-neighbour search
--- lists=100 is optimal for up to ~1M rows; increase for larger datasets
-CREATE INDEX IF NOT EXISTS idx_memory_embedding_cosine
-    ON memory_embeddings USING ivfflat (embedding vector_cosine_ops)
-    WITH (lists = 100);
+-- HNSW index for fast approximate nearest-neighbour search
+-- m=16, ef_construction=64 is a good balance of speed and recall for personal-scale deployments
+CREATE INDEX IF NOT EXISTS idx_memory_embedding_hnsw
+    ON memory_embeddings USING hnsw (embedding vector_cosine_ops)
+    WITH (m = 16, ef_construction = 64);
 
 -- =============================================================================
 -- REGISTERED AGENTS
