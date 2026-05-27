@@ -5,12 +5,15 @@ python-multipart==0.0.12
 
 # ── LLM / Agent framework ──────────────────────────────────────────────────────
 openai==1.54.4                  # OpenAI-compatible client for vLLM
-langgraph==0.2.53               # Hierarchical multi-agent graph
-langgraph-checkpoint-postgres>=2.0.0  # Persistent graph state (AsyncPostgresSaver)
-psycopg[binary]>=3.1.0          # psycopg3 async driver required by AsyncPostgresSaver
-langchain==0.3.7
-langchain-openai==0.2.9
-langchain-core==0.3.19
+# Fix #122: upgrade langchain stack — aligned patch releases, verified compatible
+langgraph==0.2.73               # Hierarchical multi-agent graph
+langgraph-checkpoint-postgres==2.0.14  # Fix #120: pinned (was >=2.0.0)
+# Fix #121: psycopg3 serves both async (LangGraph) and sync (APScheduler via
+#   SQLAlchemy postgresql+psycopg:// dialect) — removes the psycopg2-binary dep.
+psycopg[binary]==3.2.3          # Fix #120: pinned (was >=3.1.0)
+langchain==0.3.13
+langchain-openai==0.2.14
+langchain-core==0.3.28
 
 # ── Data layer ─────────────────────────────────────────────────────────────────
 asyncpg==0.30.0                 # Async PostgreSQL
@@ -33,7 +36,8 @@ sse-starlette==2.1.3            # Server-Sent Events for streaming responses
 # ── Proactive Intelligence (Phase 4) ──────────────────────────────────────────
 apscheduler==3.10.4             # Job scheduler (cron + interval)
 SQLAlchemy==2.0.36              # APScheduler PostgreSQL job store backend
-psycopg2-binary==2.9.10         # Sync Postgres driver for APScheduler
+# Fix #121: psycopg2-binary removed — APScheduler now uses psycopg3 sync via
+#   SQLAlchemy's postgresql+psycopg:// dialect (see scheduler.py _make_pg_url)
 
 # ── Utilities ─────────────────────────────────────────────────────────────────
 pydantic==2.9.2
@@ -60,16 +64,16 @@ playwright==1.47.0              # Headless Chromium for browse_and_summarize_web
 requests==2.32.3                # Sync HTTP (used by security_alerts.py)
 
 # ── Real-Time Search (Grok-style web + X search) ──────────────────────────────
-duckduckgo-search>=6.0.0        # DuckDuckGo web search (no API key required)
+duckduckgo-search==6.4.3        # Fix #120: pinned (was >=6.0.0)
 
 # ── Document Analysis (Grok-style PDF/DOCX/TXT upload) ───────────────────────
-pypdf>=4.0.0                    # PDF text extraction for /chat/document
-python-docx>=1.0.0              # Word document text extraction + DOCX generation
+pypdf==5.1.0                    # Fix #120: pinned (was >=4.0.0)
+python-docx==1.1.2              # Fix #120: pinned (was >=1.0.0)
 
 # ── Feature #4: Native Document Generation ────────────────────────────────────
-reportlab>=4.0.0                # PDF generation (Feature #4)
-python-pptx>=1.0.0              # PowerPoint generation (Feature #4)
-openpyxl>=3.1.0                 # Excel generation (Feature #4)
+reportlab==4.2.5                # Fix #120: pinned (was >=4.0.0)
+python-pptx==1.0.2              # Fix #120: pinned (was >=1.0.0)
+openpyxl==3.1.5                 # Fix #120: pinned (was >=3.1.0)
 
 # ── Feature #6: Audio Generation (Replicate MusicGen / Bark TTS / Whisper) ────
 # No extra deps — uses Replicate API via httpx (already listed above)

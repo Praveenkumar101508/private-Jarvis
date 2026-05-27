@@ -40,9 +40,15 @@ _scheduler: AsyncIOScheduler | None = None
 
 
 def _make_pg_url(cfg) -> str:
-    """Build synchronous SQLAlchemy PostgreSQL URL for APScheduler job store."""
+    """Build synchronous SQLAlchemy PostgreSQL URL for APScheduler job store.
+
+    Fix #121: use postgresql+psycopg:// (psycopg3 sync dialect) instead of
+    postgresql+psycopg2:// so psycopg2-binary is no longer required — psycopg3
+    serves both the async path (LangGraph AsyncPostgresSaver) and this sync path.
+    SQLAlchemy 2.0+ supports the psycopg3 sync dialect natively.
+    """
     return (
-        f"postgresql+psycopg2://{cfg.postgres_user}:{cfg.postgres_password}"
+        f"postgresql+psycopg://{cfg.postgres_user}:{cfg.postgres_password}"
         f"@{cfg.postgres_host}:{cfg.postgres_port}/{cfg.postgres_db}"
     )
 
