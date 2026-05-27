@@ -19,11 +19,19 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Cache pip packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('supracloud-jarvis/ira/requirements-test.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
       - name: Install test dependencies
         working-directory: supracloud-jarvis/ira
         run: |
           pip install --upgrade pip
-          pip install -r requirements.txt
+          pip install -r requirements-test.txt
 
       - name: Run unit tests (no Docker required)
         working-directory: supracloud-jarvis/ira
@@ -35,9 +43,7 @@ jobs:
           REDIS_PASSWORD: "ci-test"
           VLLM_API_KEY: "ci-test"
         run: |
-          python -m pytest tests/ -v --tb=short \
-            --ignore=tests/test_integration.py \
-            -k "not integration"
+          python -m pytest tests/ -v --tb=short
 
       - name: Check no auto-push in auto_implement.py
         run: |
