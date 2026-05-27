@@ -34,6 +34,7 @@ class IRAState(TypedDict):
     latency_ms: int
     model_used: str
     is_voice: bool            # True when request originates from voice pipeline
+    user_id: str              # Authenticated username — scopes memory storage and retrieval
     error: str | None
 
     # ── Biometric / Access control ─────────────────────────────────────────────

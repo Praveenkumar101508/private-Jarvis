@@ -44,7 +44,7 @@ from config import get_settings
 
 async def retrieve_memory(state: IRAState) -> IRAState:
     """Fetch top-K relevant memories and format them for prompt injection."""
-    memories = await retrieve(state["user_query"])
+    memories = await retrieve(state["user_query"], user_id=state.get("user_id", "system"))
     if not memories:
         return {**state, "memory_context": ""}
 
@@ -124,6 +124,7 @@ async def store_interaction(state: IRAState) -> IRAState:
         conv_id,
         role="user",
         content=state["user_query"],
+        user_id=state.get("user_id", "system"),
     )
     await save_message(
         conv_id,
@@ -131,6 +132,7 @@ async def store_interaction(state: IRAState) -> IRAState:
         content=state["final_response"],
         model_used=state.get("model_used"),
         latency_ms=state.get("latency_ms"),
+        user_id=state.get("user_id", "system"),
     )
     return state
 
@@ -251,6 +253,7 @@ async def run_graph(
     is_owner: bool = False,
     mode: str = "assistant",
     is_voice: bool = False,
+    user_id: str = "system",
 ) -> IRAState:
     """
     Execute the full agent graph for a single user turn.
@@ -280,6 +283,7 @@ async def run_graph(
         "is_owner": is_owner,
         "clearance_level": "admin" if is_owner else "public",
         "is_voice": is_voice,
+        "user_id": user_id,
         "error": None,
     }
 

@@ -137,6 +137,7 @@ async def chat(
         is_owner=owner,
         mode=req.mode,
         is_voice=req.is_voice,
+        user_id=_user,
     )
 
     result = ChatResponse(
@@ -232,6 +233,7 @@ async def chat_stream(
             is_owner=owner,
             mode=req.mode,
             is_voice=req.is_voice,
+            user_id=_user,
         )
         final_text = full_state.get("final_response", "I encountered an issue processing that request.")
 
