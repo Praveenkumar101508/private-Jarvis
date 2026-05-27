@@ -151,8 +151,8 @@ async def apply_implementation(
     Pass dry_run=False explicitly to actually apply changes.
     author_email defaults to IRA_GIT_AUTHOR_EMAIL env var.
 
-    NOTE: git push is intentionally absent. IRA never pushes to remote
-    automatically. Push manually when you are ready.
+    NOTE: remote sync is intentionally absent. IRA never pushes to remote
+    automatically. Sync to remote manually when you are ready.
     """
     # Fix #76: derive author name from OWNER_NAME env var so git commits use the
     # real owner's name rather than a hardcoded constant.
@@ -280,7 +280,7 @@ async def apply_implementation(
         commit_hash = hash_out.strip()
 
         # ── Step 6: Restart affected services ────────────────────────────────
-        # NOTE: git push intentionally removed — IRA never pushes automatically.
+        # NOTE: remote sync intentionally absent — IRA never pushes to remote automatically.
         restarted: list[str] = []
         for svc in services:
             rc, _, _ = await _run(
