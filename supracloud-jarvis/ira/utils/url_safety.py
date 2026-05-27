@@ -9,6 +9,7 @@ Blocks:
   - Link-local (169.254.x — AWS/GCP metadata endpoint)
   - Unique-local IPv6 (fc00::/7)
   - Known internal hostnames (.local, .internal, .corp, localhost)
+  - Fix L14: hostnames that resolve to a private/reserved IP address (DNS rebinding)
 """
 
 from __future__ import annotations
@@ -16,6 +17,7 @@ from __future__ import annotations
 import ipaddress
 import logging
 import re
+import socket
 from urllib.parse import urlparse
 
 logger = logging.getLogger("ira.url_safety")
@@ -38,7 +40,14 @@ _BLOCKED_NETWORKS = [
 
 
 def is_safe_url(url: str) -> bool:
-    """Return True only for publicly routable HTTP/HTTPS URLs."""
+    """Return True only for publicly routable HTTP/HTTPS URLs.
+
+    Fix L14: now resolves hostnames to their IP address before approving the
+    request — mirrors the DNS-rebinding protection added to browser_tools._is_safe_url()
+    in Fix #39.  A DNS rebinding attack can make a safe-looking hostname resolve
+    to an internal IP at connection time; checking the resolved IP here closes
+    that window for computer_use.py and any other caller of this shared utility.
+    """
     try:
         parsed = urlparse(url)
         if parsed.scheme not in ("http", "https"):
@@ -50,15 +59,24 @@ def is_safe_url(url: str) -> bool:
         if _BLOCKED_HOSTS.match(host):
             logger.warning(f"URL blocked — internal hostname: {url!r}")
             return False
-        # Try to parse as IP address
+
+        # Resolve to IP — handles both literals and hostnames
         try:
             addr = ipaddress.ip_address(host)
-            for network in _BLOCKED_NETWORKS:
-                if addr in network:
-                    logger.warning(f"URL blocked — private/reserved IP {addr} in {network}: {url!r}")
-                    return False
         except ValueError:
-            pass  # It's a hostname — already checked above
+            # Hostname: resolve synchronously and check the returned IP (Fix L14)
+            try:
+                resolved = socket.gethostbyname(host)
+                addr = ipaddress.ip_address(resolved)
+            except (socket.gaierror, ValueError):
+                logger.warning(f"URL blocked — hostname unresolvable: {url!r}")
+                return False  # Unresolvable → deny
+
+        for network in _BLOCKED_NETWORKS:
+            if addr in network:
+                logger.warning(f"URL blocked — private/reserved IP {addr} in {network}: {url!r}")
+                return False
+
         return True
     except Exception as exc:
         logger.warning(f"URL safety check failed for {url!r}: {exc}")
