@@ -83,7 +83,21 @@ else
     # Auto-generate secrets — each one is unique
     VLLM_KEY=$(openssl rand -hex 32)
     IRA_SECRET=$(openssl rand -hex 32)
-    VOICE_TOKEN=$(openssl rand -hex 32)
+    # Mint a long-lived JWT for the voice service (10-year expiry)
+    VOICE_TOKEN=$(python3 -c "
+import sys
+try:
+    from jose import jwt
+    import datetime
+    secret = '${IRA_SECRET}'
+    expire = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=3650)
+    token = jwt.encode({'sub': 'ira-voice', 'exp': expire}, secret, algorithm='HS256')
+    print(token)
+except ImportError:
+    # jose not available during setup — use a placeholder; run setup again after install
+    print('REPLACE_WITH_JWT_AFTER_INSTALL')
+    sys.exit(0)
+")
     WEBHOOK_SECRET_VAL=$(openssl rand -hex 32)
     LIVEKIT_KEY=$(openssl rand -hex 16)
     LIVEKIT_SECRET=$(openssl rand -hex 32)
