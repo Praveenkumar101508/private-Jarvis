@@ -415,18 +415,20 @@ async def run_background_architect_cycle() -> None:
 
         # Send notification so the user knows there is something new
         cfg = get_settings()
+        # Fix #80: "Architect Cycle" title was too cryptic — the user needs to
+        # understand at a glance that there is an actionable proposal waiting.
         notification_msg = (
-            f"🏛️ *IRA Evolution Team has a new proposal for you, {cfg.owner_name}!*\n\n"
+            f"🏛️ *IRA Evolution Team — New Feature Proposal Ready, {cfg.owner_name}!*\n\n"
             "Your 5-agent engineering team completed their 12-hour analysis cycle "
-            "and has a feature proposal ready.\n\n"
-            "Type **`architect`** in the IRA chat to see the full debate and proposal.\n\n"
+            "and has a feature proposal ready for your review.\n\n"
+            "Type **`architect propose`** in the IRA chat to see the full debate and proposal.\n\n"
             "_Nothing has been implemented — awaiting your approval._"
         )
 
         try:
             from worker.notifier import notify
             await notify(
-                title="Architect Cycle",
+                title="IRA Evolution Team — New Proposal Ready",
                 body=notification_msg,
                 category="system",
                 priority="info",

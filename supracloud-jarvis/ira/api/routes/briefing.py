@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 
@@ -10,6 +11,12 @@ from utils.db import acquire
 
 router = APIRouter(prefix="/briefing", tags=["briefing"])
 
+# Fix #91: keep strong references to background briefing tasks so Python's
+# garbage collector cannot collect them before they finish.  The asyncio
+# event loop only keeps a *weak* reference to tasks; without a live strong
+# reference the task can be silently dropped mid-execution.
+_background_tasks: set[asyncio.Task] = set()
+
 
 @router.post("/now")
 async def trigger_briefing(
@@ -17,12 +24,20 @@ async def trigger_briefing(
     _user: str = Depends(require_auth),
 ):
     """Trigger an immediate briefing. Runs asynchronously and delivers via all channels."""
-    import asyncio
     import logging as _log
     from worker.briefing import generate_briefing
-    # Fire and forget — keep reference so task isn't silently GC'd
+
+    # Fix #91: store in module-level set so the task cannot be GC'd before it
+    # finishes.  The discard callback removes it once done to avoid the set
+    # growing unbounded.
     _t = asyncio.create_task(generate_briefing(briefing_type))
-    _t.add_done_callback(lambda t: t.exception() and _log.getLogger("ira.briefing").warning(f"Briefing task failed: {t.exception()}"))
+    _background_tasks.add(_t)
+    _t.add_done_callback(_background_tasks.discard)
+    _t.add_done_callback(
+        lambda t: t.exception() and _log.getLogger("ira.briefing").warning(
+            f"Briefing task failed: {t.exception()}"
+        )
+    )
     return {"status": "generating", "message": "IRA is preparing your briefing now, Sir."}
 
 

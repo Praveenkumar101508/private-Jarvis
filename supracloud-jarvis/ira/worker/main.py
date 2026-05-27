@@ -52,12 +52,18 @@ async def main() -> None:
     # Block until SIGTERM / SIGINT
     stop_event = asyncio.Event()
 
-    def _shutdown(sig, frame):
-        logger.info(f"Received signal {sig}. Shutting down...")
+    # Fix #74: use loop.add_signal_handler() instead of signal.signal().
+    # signal.signal() is not async-safe — it can interrupt the event loop
+    # at arbitrary await points and signal.set() inside a raw signal handler
+    # is not thread-safe for asyncio.  loop.add_signal_handler() uses a
+    # self-pipe to deliver the signal safely to the running event loop.
+    def _request_shutdown():
+        logger.info("Shutdown signal received. Stopping gracefully...")
         stop_event.set()
 
-    signal.signal(signal.SIGTERM, _shutdown)
-    signal.signal(signal.SIGINT, _shutdown)
+    loop = asyncio.get_running_loop()
+    loop.add_signal_handler(signal.SIGTERM, _request_shutdown)
+    loop.add_signal_handler(signal.SIGINT, _request_shutdown)
 
     await stop_event.wait()
 

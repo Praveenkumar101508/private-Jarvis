@@ -45,9 +45,11 @@ _XSS_PATTERN = re.compile(
     r"document\.cookie|<iframe|<svg.*?on\w+)",
     re.I,
 )
+# Fix #70: removed python-requests/, go-http-client, curl/\d, wget/\d — these
+# match huge swaths of legitimate traffic (Python services, k8s probes, CI
+# scripts) and produce noisy false positives. Only named security tools are kept.
 _SCANNER_UA = re.compile(
-    r"(?:nmap|nikto|sqlmap|dirbuster|masscan|zgrab|nuclei|burpsuite|"
-    r"python-requests/|go-http-client|curl/\d|wget/\d)",
+    r"(?:nmap|nikto|sqlmap|dirbuster|masscan|zgrab|nuclei|burpsuite)",
     re.I,
 )
 _PATH_TRAVERSAL = re.compile(r"\.\./|%2e%2e/|%252e", re.I)
@@ -222,7 +224,10 @@ async def _write_security_events(events: list[dict]) -> int:
 async def _check_system_health() -> list[dict]:
     """Check CPU, memory, and disk for anomalies."""
     events = []
-    cpu = psutil.cpu_percent(interval=1)
+    # Fix #71: cpu_percent(interval=1) sleeps for 1 second in the calling thread.
+    # Running it in an executor prevents blocking the asyncio event loop.
+    loop = asyncio.get_running_loop()
+    cpu = await loop.run_in_executor(None, lambda: psutil.cpu_percent(interval=1))
     mem = psutil.virtual_memory()
     disk = psutil.disk_usage("/")
 

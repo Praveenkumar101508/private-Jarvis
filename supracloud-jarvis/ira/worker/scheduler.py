@@ -219,9 +219,53 @@ async def _evening_summary() -> None:
 
 
 async def _security_digest() -> None:
+    """
+    Fix #72: generate a 6-hour security digest from the DB instead of
+    re-running the scan.  The old implementation called run_security_scan()
+    which would re-process logs rather than summarise what happened.
+    """
     try:
-        from worker.security_monitor import run_security_scan
-        await run_security_scan()
+        from utils.db import acquire
+        from worker.notifier import notify
+        from config import get_settings
+
+        async with acquire() as conn:
+            rows = await conn.fetch(
+                """SELECT severity, event_type, source_ip, description, created_at
+                   FROM security_events
+                   WHERE created_at > NOW() - INTERVAL '6 hours'
+                   ORDER BY created_at DESC
+                   LIMIT 20"""
+            )
+
+        if not rows:
+            logger.debug("Security digest: no events in last 6 hours")
+            return
+
+        cfg = get_settings()
+        total = len(rows)
+        critical = sum(1 for r in rows if r["severity"] == "critical")
+        high = sum(1 for r in rows if r["severity"] == "high")
+
+        lines = "\n".join(
+            f"• [{r['severity'].upper()}] {r['event_type']} — {r['description'][:80]}"
+            for r in rows[:10]
+        )
+        summary = (
+            f"🔐 *6-hour Security Digest* — {total} event(s), "
+            f"{critical} critical, {high} high\n\n{lines}"
+        )
+        if total > 10:
+            summary += f"\n…and {total - 10} more events"
+
+        priority = "critical" if critical > 0 else ("warning" if high > 0 else "info")
+        await notify(
+            f"Security Digest — {total} event(s) in last 6h",
+            summary,
+            category="security",
+            priority=priority,
+        )
+        logger.info(f"Security digest sent: {total} events ({critical} critical, {high} high)")
     except Exception as e:
         logger.error(f"Security digest failed: {e}", exc_info=True)
 
