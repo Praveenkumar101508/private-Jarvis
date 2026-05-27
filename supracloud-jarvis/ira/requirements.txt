@@ -65,7 +65,7 @@ playwright==1.47.0              # Headless Chromium for browse_and_summarize_web
 requests==2.32.3                # Sync HTTP (used by security_alerts.py)
 
 # ── Real-Time Search (Grok-style web + X search) ──────────────────────────────
-duckduckgo-search==6.4.3        # Fix #120: pinned (was >=6.0.0)
+duckduckgo-search==6.4.2        # Fix #120: pinned (6.4.3 was never released — last 6.x)
 
 # ── Document Analysis (Grok-style PDF/DOCX/TXT upload) ───────────────────────
 pypdf==5.1.0                    # Fix #120: pinned (was >=4.0.0)
