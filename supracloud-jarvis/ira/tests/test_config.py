@@ -54,7 +54,9 @@ def test_redis_url_format():
 
 
 def test_dev_mode_default_false():
-    with patch.dict(os.environ, _REQUIRED_ENV):
+    # Explicitly unset DEV_MODE in case the CI runner has it set
+    env = {**_REQUIRED_ENV, "DEV_MODE": "false"}
+    with patch.dict(os.environ, env):
         _clear_settings()
         from config import get_settings
         s = get_settings()
