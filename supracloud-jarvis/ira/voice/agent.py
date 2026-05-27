@@ -49,8 +49,8 @@ logger = logging.getLogger("ira.voice")
 
 # ── Biometric pipeline startup check ─────────────────────────────────────────
 try:
-    from voice.biometrics import verify_owner  # noqa: F401
-    logger.info("Biometric pipeline: ACTIVE")
+    from voice.biometrics import is_owner_authenticated  # noqa: F401
+    logger.info("Biometric pipeline: ACTIVE — ECAPA-TDNN speaker verification ready")
 except ImportError as _bio_err:
     logger.warning(f"Biometric pipeline: DISABLED — {_bio_err}")
 
