@@ -181,8 +181,19 @@ async def _read_new_log_lines() -> list[str]:
 
     try:
         with open(nginx_log, "r", errors="replace") as f:
+            MAX_LINES_PER_SCAN = 50_000   # ~50MB of typical nginx log lines
             f.seek(offset)
-            lines = f.readlines()
+            lines = []
+            for _ in range(MAX_LINES_PER_SCAN):
+                line = f.readline()
+                if not line:
+                    break
+                lines.append(line)
+            if len(lines) == MAX_LINES_PER_SCAN:
+                logger.warning(
+                    f"Security monitor: log read capped at {MAX_LINES_PER_SCAN} lines. "
+                    "Some events may be skipped this cycle — will catch up next scan."
+                )
             new_offset = f.tell()
 
         if new_offset > offset:
@@ -341,8 +352,14 @@ async def _check_ssh_failures_file() -> list[dict]:
 
     try:
         with open(ssh_log, "r", errors="replace") as f:
+            MAX_LINES_PER_SCAN = 10_000   # auth.log is less verbose than nginx
             f.seek(offset)
-            lines = f.readlines()
+            lines = []
+            for _ in range(MAX_LINES_PER_SCAN):
+                line = f.readline()
+                if not line:
+                    break
+                lines.append(line)
             new_offset = f.tell()
     except PermissionError:
         logger.debug("No permission to read SSH log — mount with correct volume")
