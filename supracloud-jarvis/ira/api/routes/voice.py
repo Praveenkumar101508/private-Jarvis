@@ -229,8 +229,8 @@ async def enroll_voice(
     # Consume the anti-replay challenge before processing any audio (#36)
     await _consume_challenge(challenge_id)
 
-    if len(audio_files) < 1:
-        raise HTTPException(status_code=400, detail="At least 1 audio file is required.")
+    if len(audio_files) < 3:
+        raise HTTPException(status_code=400, detail="At least 3 audio files are required for a reliable voice profile. Submit 3–10 segments.")
     if len(audio_files) > 10:
         raise HTTPException(status_code=400, detail="Maximum 10 audio files per enrolment.")
 

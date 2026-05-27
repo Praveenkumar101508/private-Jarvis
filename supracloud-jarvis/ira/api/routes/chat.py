@@ -88,7 +88,7 @@ def _stable_hash(text: str) -> str:
 
 # ── Expert Mode rate limiting ─────────────────────────────────────────────────
 
-_EXPERT_RATE_LIMIT = 3     # max Expert Mode calls per user per hour
+_EXPERT_RATE_LIMIT = 20    # max Expert Mode calls per user per hour (personal AI — raised from 3)
 _EXPERT_RATE_WINDOW = 3600  # sliding window in seconds
 
 
@@ -702,7 +702,7 @@ async def chat_vision(
     fast text model with a graceful degradation note.
     """
     conv_id = await ensure_conversation(req.session_id)
-    vision_url = os.getenv("VLLM_VISION_URL", "")
+    vision_url = get_settings().vllm_vision_url
     data_url = f"data:{req.mime_type};base64,{req.image_b64}"
 
     if vision_url:
