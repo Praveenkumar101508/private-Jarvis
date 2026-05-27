@@ -261,34 +261,16 @@ async def entrypoint(ctx: JobContext) -> None:
 
     logger.info(f"IRA is listening to participant: {participant.identity}")
 
-    # Capture raw audio for biometric verification via AudioStream track subscription
-    async def _capture_audio_for_biometrics(audio_stream) -> None:
-        """
-        Subscribes to the participant's audio track and buffers PCM frames.
-        livekit-agents 0.11.x exposes audio via rtc.AudioStream, not event.audio.
-        """
-        audio_data = b""
-        async for frame in audio_stream:
-            # frame is an rtc.AudioFrame; .data is bytes of int16 PCM
-            if hasattr(frame, "data"):
-                audio_data += bytes(frame.data)
-        if audio_data:
-            ira_llm.set_audio_bytes(audio_data)
-
-    # Subscribe to the participant's microphone track for biometric capture
-    for pub in participant.track_publications.values():
-        if pub.track and pub.track.kind == rtc.TrackKind.KIND_AUDIO:
-            audio_stream = rtc.AudioStream(pub.track)
-            # Store task reference to prevent GC before completion (#asyncio-gc)
-            _bio_task = asyncio.ensure_future(_capture_audio_for_biometrics(audio_stream))
-            _bio_task.add_done_callback(
-                lambda t: t.exception() and logger.warning(f"Biometric audio capture error: {t.exception()}")
-            )
-            logger.info("Biometric audio capture: subscribed to participant track")
-            break
-
     @session.on("user_speech_committed")
     def on_user_speech(event):
+        # Capture per-utterance audio for biometric verification
+        # livekit-agents 0.11.x surfaces audio bytes in the speech_committed event
+        if hasattr(event, "audio") and event.audio:
+            try:
+                ira_llm.set_audio_bytes(bytes(event.audio))
+            except Exception as e:
+                logger.debug(f"Biometric audio capture skipped: {e}")
+
         # Language detection from committed speech event
         detected = getattr(event, "language", "en") or "en"
         lang = normalise_lang(detected)
