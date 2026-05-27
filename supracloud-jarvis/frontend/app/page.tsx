@@ -9,6 +9,7 @@ import StatusBar from "@/components/StatusBar";
 export default function Home() {
   const [token, setToken] = useState<string>("");
   const [livekitToken, setLivekitToken] = useState<string>("");
+  const [livekitUrl, setLivekitUrl] = useState<string>("");
   const [sessionId, setSessionId] = useState<string>(() =>
     typeof crypto !== "undefined" ? crypto.randomUUID() : Math.random().toString(36).slice(2)
   );
@@ -22,7 +23,12 @@ export default function Home() {
   const [chatKey, setChatKey] = useState(0);
 
   useEffect(() => {
-    const stored = localStorage.getItem("ira_token");
+    // Fix #67: use sessionStorage instead of localStorage.
+    // localStorage persists indefinitely and is readable by any XSS script on
+    // the same origin across browser restarts. sessionStorage scopes the token
+    // to the current tab/window and is cleared when the tab closes, reducing
+    // the attack window. (The real fix is httpOnly cookies — future Phase 5.)
+    const stored = sessionStorage.getItem("ira_token");
     if (stored) {
       setToken(stored);
       setIsAuthenticated(true);
@@ -38,6 +44,10 @@ export default function Home() {
       if (res.ok) {
         const data = await res.json();
         setLivekitToken(data.token ?? "");
+        // Fix #97: use the URL returned by the server instead of a hardcoded
+        // env var so the frontend works correctly whether pointing at localhost,
+        // a LAN IP, or a production domain without a Next.js rebuild.
+        if (data.livekit_url) setLivekitUrl(data.livekit_url);
       }
     } catch {
       console.warn("[IRA] LiveKit token fetch failed — voice disabled");
@@ -60,7 +70,7 @@ export default function Home() {
       }
       const data = await res.json();
       const authToken = data.access_token;
-      localStorage.setItem("ira_token", authToken);
+      sessionStorage.setItem("ira_token", authToken);
       setToken(authToken);
       setIsAuthenticated(true);
       await fetchLivekitToken(authToken);
@@ -72,9 +82,10 @@ export default function Home() {
   };
 
   const logout = () => {
-    localStorage.removeItem("ira_token");
+    sessionStorage.removeItem("ira_token");
     setToken("");
     setLivekitToken("");
+    setLivekitUrl("");
     setIsAuthenticated(false);
     setPassword("");
   };
@@ -212,7 +223,7 @@ export default function Home() {
           <div className="flex items-center gap-3">
             <StatusBar token={token} />
             <VoiceOrb
-              livekitUrl={process.env.NEXT_PUBLIC_LIVEKIT_URL || "ws://localhost:7880"}
+              livekitUrl={livekitUrl || process.env.NEXT_PUBLIC_LIVEKIT_URL || "ws://localhost:7880"}
               livekitToken={livekitToken}
             />
             <button

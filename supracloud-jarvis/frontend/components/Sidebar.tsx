@@ -1,10 +1,13 @@
 "use client";
 
 import { useState, useRef } from "react";
-import { Shield, GraduationCap, Bot, ChevronLeft, ChevronRight, Clock, Download, HardDrive, Upload, RefreshCw } from "lucide-react";
+// Fix #95: Shield import removed along with bodyguard mode
+import { GraduationCap, Bot, ChevronLeft, ChevronRight, Clock, Download, HardDrive, Upload, RefreshCw } from "lucide-react";
 import clsx from "clsx";
 
-export type AppMode = "assistant" | "tutor" | "bodyguard";
+// Fix #95: bodyguard mode removed — it duplicated security features already
+// available in assistant mode and caused confusion about IRA's role.
+export type AppMode = "assistant" | "tutor";
 
 interface ConversationItem {
   id: string;
@@ -35,13 +38,6 @@ const MODES: { id: AppMode; label: string; icon: React.ReactNode; accent: string
     icon: <GraduationCap className="w-4 h-4" />,
     accent: "text-indigo-400 border-indigo-500/60 bg-indigo-500/10",
     description: "Socratic learning mode",
-  },
-  {
-    id: "bodyguard",
-    label: "Bodyguard",
-    icon: <Shield className="w-4 h-4" />,
-    accent: "text-red-400 border-red-500/60 bg-red-500/10",
-    description: "Security monitoring",
   },
 ];
 

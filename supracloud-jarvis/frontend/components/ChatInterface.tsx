@@ -108,7 +108,7 @@ function estimateExpertTokens(text: string): number {
   return Math.ceil((text.length / 4) * 5 + 2000);
 }
 
-// Suggestion chips per mode
+// Suggestion chips per mode (Fix #95: bodyguard mode removed)
 const SUGGESTIONS: Record<AppMode, string[]> = {
   assistant: [
     "What can you do?",
@@ -121,12 +121,6 @@ const SUGGESTIONS: Record<AppMode, string[]> = {
     "Explain async/await",
     "Review my Python code",
     "Teach me LangGraph",
-  ],
-  bodyguard: [
-    "Scan for threats",
-    "Check SSH logs",
-    "Lock down the system",
-    "Show security events",
   ],
 };
 
@@ -173,6 +167,16 @@ export default function ChatInterface({ sessionId, token, mode = "assistant" }: 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
+
+  // Fix #96: abort any in-flight SSE request when the component unmounts
+  // (triggered by "New Chat" which increments chatKey and remounts this component).
+  // Without this the reader loop continues writing state after unmount, causing
+  // "Can't perform a React state update on an unmounted component" warnings.
+  useEffect(() => {
+    return () => {
+      abortRef.current?.abort();
+    };
+  }, []);
 
   // Auto-resize textarea
   useEffect(() => {
@@ -247,6 +251,23 @@ export default function ChatInterface({ sessionId, token, mode = "assistant" }: 
       const controller = new AbortController();
       abortRef.current = controller;
 
+      // Fix #68: batch SSE token appends via rAF — reduces re-renders from
+      // ~100/sec to the monitor refresh rate (~60fps).
+      let visionPendingTokens = "";
+      let visionRafId: number | null = null;
+      const flushVisionTokens = () => {
+        const batch = visionPendingTokens;
+        visionPendingTokens = "";
+        visionRafId = null;
+        if (batch) {
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === assistantMsgId ? { ...m, content: m.content + batch } : m
+            )
+          );
+        }
+      };
+
       try {
         const res = await fetch("/api/v1/chat/vision", {
           method: "POST",
@@ -280,11 +301,11 @@ export default function ChatInterface({ sessionId, token, mode = "assistant" }: 
             try {
               const data = JSON.parse(raw);
               if (data.token !== undefined) {
-                setMessages((prev) =>
-                  prev.map((m) =>
-                    m.id === assistantMsgId ? { ...m, content: m.content + data.token } : m
-                  )
-                );
+                // Fix #68: buffer and flush via rAF
+                visionPendingTokens += data.token;
+                if (visionRafId === null) {
+                  visionRafId = requestAnimationFrame(flushVisionTokens);
+                }
               } else if (data.done) {
                 setMessages((prev) =>
                   prev.map((m) =>
@@ -316,6 +337,11 @@ export default function ChatInterface({ sessionId, token, mode = "assistant" }: 
           );
         }
       } finally {
+        // Fix #68: flush any buffered tokens before cleanup
+        if (visionRafId !== null) {
+          cancelAnimationFrame(visionRafId);
+          flushVisionTokens();
+        }
         setIsStreaming(false);
         setStreamingId(null);
         abortRef.current = null;
@@ -341,6 +367,22 @@ export default function ChatInterface({ sessionId, token, mode = "assistant" }: 
 
       const controller = new AbortController();
       abortRef.current = controller;
+
+      // Fix #68: rAF-batched token updates for document streaming
+      let docPendingTokens = "";
+      let docRafId: number | null = null;
+      const flushDocTokens = () => {
+        const batch = docPendingTokens;
+        docPendingTokens = "";
+        docRafId = null;
+        if (batch) {
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === assistantMsgId ? { ...m, content: m.content + batch } : m
+            )
+          );
+        }
+      };
 
       try {
         const form = new FormData();
@@ -374,9 +416,11 @@ export default function ChatInterface({ sessionId, token, mode = "assistant" }: 
             try {
               const data = JSON.parse(raw);
               if (data.token !== undefined) {
-                setMessages((prev) =>
-                  prev.map((m) => m.id === assistantMsgId ? { ...m, content: m.content + data.token } : m)
-                );
+                // Fix #68: buffer and flush via rAF
+                docPendingTokens += data.token;
+                if (docRafId === null) {
+                  docRafId = requestAnimationFrame(flushDocTokens);
+                }
               } else if (data.done) {
                 setMessages((prev) =>
                   prev.map((m) => m.id === assistantMsgId
@@ -402,6 +446,11 @@ export default function ChatInterface({ sessionId, token, mode = "assistant" }: 
           );
         }
       } finally {
+        // Fix #68: flush remaining buffered tokens
+        if (docRafId !== null) {
+          cancelAnimationFrame(docRafId);
+          flushDocTokens();
+        }
         setIsStreaming(false);
         setStreamingId(null);
         abortRef.current = null;
@@ -577,6 +626,23 @@ export default function ChatInterface({ sessionId, token, mode = "assistant" }: 
       const controller = new AbortController();
       abortRef.current = controller;
 
+      // Fix #68: rAF-batched token updates — caps re-renders at monitor refresh
+      // rate (~60fps) instead of one per SSE token (~100+/sec during fast output).
+      let pendingTokens = "";
+      let rafId: number | null = null;
+      const flushTokens = () => {
+        const batch = pendingTokens;
+        pendingTokens = "";
+        rafId = null;
+        if (batch) {
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === assistantMsgId ? { ...m, content: m.content + batch } : m
+            )
+          );
+        }
+      };
+
       try {
         const res = await fetch("/api/v1/chat/stream", {
           method: "POST",
@@ -588,7 +654,7 @@ export default function ChatInterface({ sessionId, token, mode = "assistant" }: 
             message: content,
             session_id: sessionId,
             stream: true,
-            mode: mode === "bodyguard" ? "assistant" : mode,
+            mode,
             grok_mode: grokMode,
             engineer_mode: engineerMode,
             think_mode: thinkMode,
@@ -676,13 +742,11 @@ export default function ChatInterface({ sessionId, token, mode = "assistant" }: 
                   )
                 );
               } else if (data.token !== undefined) {
-                setMessages((prev) =>
-                  prev.map((m) =>
-                    m.id === assistantMsgId
-                      ? { ...m, content: m.content + data.token }
-                      : m
-                  )
-                );
+                // Fix #68: buffer tokens, flush once per animation frame
+                pendingTokens += data.token;
+                if (rafId === null) {
+                  rafId = requestAnimationFrame(flushTokens);
+                }
               } else if (data.done) {
                 setMessages((prev) =>
                   prev.map((m) =>
@@ -731,6 +795,11 @@ export default function ChatInterface({ sessionId, token, mode = "assistant" }: 
           );
         }
       } finally {
+        // Fix #68: flush any remaining buffered tokens synchronously
+        if (rafId !== null) {
+          cancelAnimationFrame(rafId);
+          flushTokens();
+        }
         setIsStreaming(false);
         setStreamingId(null);
         abortRef.current = null;
@@ -747,20 +816,16 @@ export default function ChatInterface({ sessionId, token, mode = "assistant" }: 
     }
   };
 
+  // Fix #95: bodyguard mode removed — only "assistant" and "tutor" remain
   const isTutor = mode === "tutor";
-  const isBodyguard = mode === "bodyguard";
   const hasUrl = URL_RE.test(input);
 
   const accentSend = isTutor
     ? "bg-indigo-500 hover:bg-indigo-600 text-white"
-    : isBodyguard
-    ? "bg-red-500 hover:bg-red-600 text-white"
     : "bg-saffron-500 hover:bg-saffron-600 text-white";
 
   const accentBorder = isTutor
     ? "focus-within:border-indigo-500/50"
-    : isBodyguard
-    ? "focus-within:border-red-500/50"
     : "focus-within:border-saffron-500/40";
 
   const suggestions = SUGGESTIONS[mode] ?? SUGGESTIONS.assistant;
@@ -813,27 +878,19 @@ export default function ChatInterface({ sessionId, token, mode = "assistant" }: 
                 "w-20 h-20 rounded-full flex items-center justify-center mb-5 border",
                 isTutor
                   ? "bg-indigo-500/10 border-indigo-500/20"
-                  : isBodyguard
-                  ? "bg-red-500/10 border-red-500/20"
                   : "bg-saffron-500/10 border-saffron-500/20"
               )}
             >
               <span className="text-4xl">
-                {isTutor ? "🎓" : isBodyguard ? "🛡" : "✦"}
+                {isTutor ? "🎓" : "✦"}
               </span>
             </div>
             <h2 className="text-xl font-semibold text-white mb-1">
-              {isTutor
-                ? "Supracloud Tutor"
-                : isBodyguard
-                ? "IRA Bodyguard Mode"
-                : "Hello, I am IRA"}
+              {isTutor ? "Supracloud Tutor" : "Hello, I am IRA"}
             </h2>
             <p className="text-neutral-500 text-sm max-w-xs leading-relaxed mb-6">
               {isTutor
                 ? "I won't give you the answer — I'll help you find it. What are you learning today?"
-                : isBodyguard
-                ? "Active security monitoring. Ask me to scan threats, check logs, or lock down."
                 : "Your Intelligent Responsive Assistant. Paste a URL, ask anything, or use the mic."}
             </p>
             {/* Suggestion chips */}
@@ -846,8 +903,6 @@ export default function ChatInterface({ sessionId, token, mode = "assistant" }: 
                     "px-3 py-1.5 rounded-full text-xs border transition-all duration-150",
                     isTutor
                       ? "border-indigo-500/30 text-indigo-400 hover:bg-indigo-500/10"
-                      : isBodyguard
-                      ? "border-red-500/30 text-red-400 hover:bg-red-500/10"
                       : "border-saffron-500/30 text-saffron-400 hover:bg-saffron-500/10"
                   )}
                 >
@@ -1176,8 +1231,6 @@ export default function ChatInterface({ sessionId, token, mode = "assistant" }: 
               placeholder={
                 isTutor
                   ? "Submit your code or question…"
-                  : isBodyguard
-                  ? "Ask IRA to scan threats, check logs, or lock down…"
                   : "Ask IRA anything, or paste a URL…"
               }
               rows={1}
@@ -1224,7 +1277,6 @@ export default function ChatInterface({ sessionId, token, mode = "assistant" }: 
             <p className="text-[11px] text-neutral-700">
               Enter to send · Shift+Enter for new line
               {isTutor && " · Tutor mode enabled"}
-              {isBodyguard && " · Bodyguard active"}
             </p>
             <div className="flex items-center gap-1.5">
               <button
