@@ -17,15 +17,18 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+from datetime import date as _date
 
 logger = logging.getLogger("ira.search")
 
-# Detect queries that benefit from real-time web search
+# Fix #77: generate current and next-year tokens at module load time so the
+# pattern stays accurate without code changes across year boundaries.
+_THIS_YEAR = _date.today().year
 _SEARCH_RE = re.compile(
-    r"\b(today|yesterday|this week|this month|current|latest|recent|breaking|"
-    r"news|now|2024|2025|2026|price of|stock price|weather|who is|"
-    r"what is happening|just announced|just released|search for|look up|find|"
-    r"trending|viral|x\.com|twitter|tweet)\b",
+    rf"\b(today|yesterday|this week|this month|current|latest|recent|breaking|"
+    rf"news|now|{_THIS_YEAR}|{_THIS_YEAR + 1}|price of|stock price|weather|who is|"
+    rf"what is happening|just announced|just released|search for|look up|find|"
+    rf"trending|viral|x\.com|twitter|tweet)\b",
     re.I,
 )
 

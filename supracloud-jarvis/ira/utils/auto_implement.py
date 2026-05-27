@@ -140,7 +140,7 @@ def extract_changed_files(diff_text: str) -> list[str]:
 
 async def apply_implementation(
     implementation_text: str,
-    author_name: str = "Praveenkumar",
+    author_name: str | None = None,   # Fix #76: derived from OWNER_NAME if not supplied
     author_email: str = "",
     dry_run: bool = False,
 ) -> ApplyResult:
@@ -153,6 +153,11 @@ async def apply_implementation(
     NOTE: git push is intentionally removed. IRA never pushes to remote
     automatically. Push manually when you are ready.
     """
+    # Fix #76: derive author name from OWNER_NAME env var so git commits use the
+    # real owner's name rather than a hardcoded constant.
+    if author_name is None:
+        from config import get_settings
+        author_name = get_settings().owner_name.split()[0]  # first name only
     if not author_email:
         author_email = os.getenv("IRA_GIT_AUTHOR_EMAIL", "")
         if not author_email:

@@ -86,7 +86,10 @@ _RESTRICTED_KEYWORDS: frozenset[str] = frozenset({
     "show logs", "show errors", "show config",
     # Personal / owner data
     "my calendar", "my appointment", "my meeting",
-    "personal", "private", "praveen",
+    "personal", "private",
+    # Fix #76: owner's first name removed from the static set — it is added
+    # dynamically in is_restricted_domain() via cfg.owner_name so it works
+    # for any owner without a code change.
     "my email", "my phone", "my address",
     # System control commands (specific phrases only — 'owner' removed: too generic)
     "lockdown system", "shutdown ira", "delete backups", "disable security",
@@ -105,10 +108,18 @@ _RESTRICTED_KEYWORDS: frozenset[str] = frozenset({
 def is_restricted_domain(query: str) -> bool:
     """
     Return True if the query touches any owner-gated restricted domain.
-    Pure function — no I/O, safe to call anywhere.
+
+    Fix #76: the owner's first name is checked dynamically (read from
+    cfg.owner_name at call time) rather than being hardcoded in the static
+    keyword set — works for any deployment without a code change.
     """
+    from config import get_settings
     q = query.lower()
-    return any(kw in q for kw in _RESTRICTED_KEYWORDS)
+    if any(kw in q for kw in _RESTRICTED_KEYWORDS):
+        return True
+    # Owner's first name (e.g. "Praveen") should gate personal data queries
+    owner_first = get_settings().owner_name.split()[0].lower()
+    return bool(owner_first and owner_first in q)
 
 
 # ── LLM fallback router ───────────────────────────────────────────────────────

@@ -9,7 +9,8 @@ from __future__ import annotations
 import ipaddress
 import logging
 import re
-from urllib.parse import urlparse
+import socket
+from urllib.parse import urlparse, urlunparse
 
 logger = logging.getLogger("ira.browser_tools")
 
@@ -18,21 +19,55 @@ _BLOCKED_HOSTS = re.compile(
     r"^(localhost|.*\.local|.*\.internal|.*\.corp)$", re.I
 )
 
+def _sanitize_url(url: str) -> str:
+    """Fix #41: strip embedded credentials and URL fragments before use.
+
+    A URL like http://user:pass@internal-host/ leaks credentials into logs
+    and bypasses hostname checks if the netloc includes auth info. Rebuilding
+    without credentials and without a fragment prevents both issues.
+    """
+    try:
+        p = urlparse(url)
+        # Reconstruct netloc without user:pass — keep host and port only
+        netloc = p.hostname or ""
+        if p.port:
+            netloc = f"{netloc}:{p.port}"
+        return urlunparse((p.scheme, netloc, p.path, p.params, p.query, ""))
+    except Exception:
+        return url
+
+
 def _is_safe_url(url: str) -> bool:
-    """Return True only for publicly routable HTTP/HTTPS URLs."""
+    """Return True only for publicly routable HTTP/HTTPS URLs.
+
+    Fix #39: resolves the hostname to an IP address before approving the
+    request — a DNS rebinding attack can make a safe-looking hostname resolve
+    to an internal IP at the moment Playwright opens the connection. Checking
+    the resolved IP here closes that window by blocking the request before
+    the browser is even launched.
+    """
     try:
         parsed = urlparse(url)
         if parsed.scheme not in ("http", "https"):
             return False
         host = parsed.hostname or ""
+        if not host:
+            return False
         if _BLOCKED_HOSTS.match(host):
             return False
+        # Determine the IP — either the host is already an IP literal, or we
+        # resolve it synchronously (Fix #39: DNS rebinding protection).
         try:
             addr = ipaddress.ip_address(host)
-            if addr.is_private or addr.is_loopback or addr.is_link_local or addr.is_reserved:
-                return False
         except ValueError:
-            pass  # hostname, not IP — allowed
+            # Hostname — resolve and check the returned IP
+            try:
+                resolved = socket.gethostbyname(host)
+                addr = ipaddress.ip_address(resolved)
+            except (socket.gaierror, ValueError):
+                return False  # Unresolvable → deny
+        if addr.is_private or addr.is_loopback or addr.is_link_local or addr.is_reserved or addr.is_multicast:
+            return False
         return True
     except Exception:
         return False
@@ -53,6 +88,8 @@ async def browse_and_summarize_website(url: str, query: str) -> dict:
     and use IRA's fast LLM to answer `query` based on what's on the page.
     Returns a structured dict with the answer, page title, and a brief excerpt.
     """
+    # Fix #41: strip embedded credentials and fragments before any checks or logging
+    url = _sanitize_url(url)
     if not _is_safe_url(url):
         return {
             "error": "URL blocked for security reasons. Only public HTTP/HTTPS URLs are allowed.",
@@ -76,7 +113,14 @@ async def browse_and_summarize_website(url: str, query: str) -> dict:
         async with async_playwright() as p:
             browser = await p.chromium.launch(
                 headless=True,
-                args=["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu"],
+                args=[
+                    # Fix #40: --no-sandbox is required when Chromium runs as root
+                    # inside a Docker container. The container itself is the sandbox;
+                    # removing this flag would crash Chromium on startup in that env.
+                    "--no-sandbox",
+                    "--disable-dev-shm-usage",  # prevent /dev/shm exhaustion in Docker
+                    "--disable-gpu",
+                ],
             )
             context = await browser.new_context(
                 user_agent=(
