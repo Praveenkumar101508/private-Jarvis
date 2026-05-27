@@ -105,13 +105,15 @@ _PRIORITY_EMOJI = {"info": "ℹ️", "warning": "⚠️", "critical": "🚨"}
 
 async def _send_telegram(title: str, body: str, priority: Priority, cfg) -> None:
     emoji = _PRIORITY_EMOJI.get(priority, "ℹ️")
-    text = f"{emoji} *{title}*\n\n{body}"
+    safe_title = html.escape(str(title))
+    safe_body  = html.escape(str(body))
+    text = f"{emoji} <b>{safe_title}</b>\n\n{safe_body}"
     url = f"https://api.telegram.org/bot{cfg.telegram_bot_token}/sendMessage"
     async with httpx.AsyncClient(timeout=10) as client:
         resp = await client.post(url, json={
             "chat_id": cfg.telegram_chat_id,
             "text": text,
-            "parse_mode": "Markdown",
+            "parse_mode": "HTML",
             "disable_web_page_preview": True,
         })
         resp.raise_for_status()
