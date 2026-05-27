@@ -85,5 +85,5 @@ async def tutor_agent(state: IRAState) -> IRAState:
         "final_response": response,
         "messages": [AIMessage(content=response)],
         "latency_ms": latency,
-        "model_used": "llama-fast",
+        "model_used": "qwen3-fast",  # Fix L12: was "llama-fast" — matches config.vllm_fast_model
     }

@@ -96,7 +96,7 @@ async def meta_agent_creator(state: IRAState) -> IRAState:
         "final_response": response,
         "messages": [AIMessage(content=response)],
         "latency_ms": latency,
-        "model_used": "qwen-deep",
+        "model_used": "qwen3-deep",  # Fix L11: was "qwen-deep" — matches config.vllm_deep_model
     }
 
 

@@ -48,7 +48,7 @@ async def conversational(state: IRAState) -> IRAState:
     )
 
     latency = int((time.monotonic() - t0) * 1000)
-    cfg_model = "qwen-deep" if state.get("use_deep_model") else "llama-fast"
+    cfg_model = "qwen3-deep" if state.get("use_deep_model") else "qwen3-fast"  # Fix L11+L12: stale names
 
     return {
         **state,

@@ -144,7 +144,7 @@ async def chat(
         session_id=req.session_id,
         conversation_id=conv_id,
         agent_used=state.get("active_agent", "conversational"),
-        model_used=state.get("model_used", "llama-fast"),
+        model_used=state.get("model_used", "qwen3-fast"),  # Fix L12: was "llama-fast" fallback default
         latency_ms=state.get("latency_ms", 0),
     )
 
@@ -185,7 +185,7 @@ async def chat_stream(
         "final_response": "",
         "stream_tokens": [],
         "latency_ms": 0,
-        "model_used": "llama-fast",
+        "model_used": "qwen3-fast",  # Fix L12: was "llama-fast" initial state default
         "is_owner": owner,
         "clearance_level": "admin" if owner else "public",
         "is_voice": req.is_voice,

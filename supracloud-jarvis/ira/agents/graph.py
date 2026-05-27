@@ -276,7 +276,7 @@ async def run_graph(
         "final_response": "",
         "stream_tokens": [],
         "latency_ms": 0,
-        "model_used": "llama-fast",
+        "model_used": "qwen3-fast",  # Fix L12: was "llama-fast" — matches config.vllm_fast_model
         "is_owner": is_owner,
         "clearance_level": "admin" if is_owner else "public",
         "is_voice": is_voice,
