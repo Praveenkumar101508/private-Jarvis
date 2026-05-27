@@ -70,10 +70,12 @@ ENV HF_HOME=/home/jarvis/.cache/huggingface
 RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('${HF_MODEL}')" \
     || echo "[IRA] BGE model pre-download skipped — will download on first run"
 
-# Install Playwright Chromium for the digital agent (browse_and_summarize_website)
-# Must run as root — switch back to jarvis afterward
+# Install Playwright Chromium browser + OS dependencies.
+# Fix #78: playwright package is already in requirements.txt (installed in
+# stage 1) — only the browser binary and system deps need to be fetched here.
+# Running pip install playwright again was doubling install time for no benefit.
 USER root
-RUN pip install --no-cache-dir playwright && playwright install chromium --with-deps \
+RUN playwright install chromium --with-deps \
     && chown -R jarvis:jarvis /root/.cache/ms-playwright 2>/dev/null || true
 USER jarvis
 

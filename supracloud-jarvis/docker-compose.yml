@@ -33,6 +33,17 @@ x-vllm-common: &vllm-common
   image: vllm/vllm-openai:latest
   restart: unless-stopped
   runtime: nvidia
+  # Fix #104: set ulimits for LLM workloads.
+  # memlock: -1 lets the process lock model weights into RAM/VRAM (prevents swapping).
+  # nofile: 65536 avoids "too many open files" under high concurrency.
+  # Without these, CUDA can fail to allocate memory or tokenizer workers hit fd limits.
+  ulimits:
+    memlock:
+      soft: -1
+      hard: -1
+    nofile:
+      soft: 65536
+      hard: 65536
   environment:
     NVIDIA_VISIBLE_DEVICES: "0"
     CUDA_VISIBLE_DEVICES: "0"
@@ -50,8 +61,12 @@ x-vllm-common: &vllm-common
     resources:
       reservations:
         devices:
+          # Fix #102: use device_ids instead of count so both vllm containers
+          # explicitly share GPU 0.  count: 1 can cause Docker to treat GPUs as
+          # exclusive allocations, preventing the second container from starting
+          # on a single-GPU machine.
           - driver: nvidia
-            count: 1
+            device_ids: ["0"]
             capabilities: [gpu]
   logging: *default-logging
   networks:
@@ -322,11 +337,11 @@ services:
       TWITTER_BEARER_TOKEN: ${TWITTER_BEARER_TOKEN:-}
       X_FALLBACK_API_URL: ${X_FALLBACK_API_URL:-https://api.twitterapi.io}
       X_FALLBACK_API_KEY: ${X_FALLBACK_API_KEY:-}
-      # 2026 model routing — set these to upgrade model tiers
-      # FAST_MODEL, DEEP_MODEL are consumed by vllm containers (not ira-api)
-      # ira-api uses the model names below for logging/display purposes
-      VLLM_FAST_MODEL: ${FAST_MODEL_NAME:-qwen3-fast}
-      VLLM_DEEP_MODEL: ${DEEP_MODEL_NAME:-qwen3-deep}
+      # Fix #103: use VLLM_FAST_MODEL / VLLM_DEEP_MODEL to match the env var
+      # names read by config.py (pydantic fields vllm_fast_model / vllm_deep_model).
+      # The old FAST_MODEL_NAME / DEEP_MODEL_NAME vars were undefined in .env.example.
+      VLLM_FAST_MODEL: ${VLLM_FAST_MODEL:-qwen3-fast}
+      VLLM_DEEP_MODEL: ${VLLM_DEEP_MODEL:-qwen3-deep}
       # Optional reasoning tier (Think Mode / DeepSearch — falls back to deep)
       VLLM_REASONING_URL: ${VLLM_REASONING_URL:-}
       VLLM_REASONING_MODEL: ${VLLM_REASONING_MODEL:-qwen3-reasoning}
@@ -352,7 +367,9 @@ services:
       interval: 30s
       timeout: 10s
       retries: 10
-      start_period: 60s
+      # Fix #105: 60s was too tight — BGE model warm-up + LangGraph checkpointer
+      # init can take 90s+ on first run or slow disks. 120s gives safe headroom.
+      start_period: 120s
     logging: *default-logging
     networks:
       - ira-internal
@@ -441,7 +458,7 @@ services:
     logging: *default-logging
     networks:
       - ira-internal
-      - ira-external  # Bug #20: worker needs internet for Telegram, Apify, GitHub
+      - ira-external  # Fix #43: worker needs internet for Telegram, Apify, GitHub push notifications
 
   # ── IRA Voice Agent (LiveKit + Faster-Whisper STT + Kokoro TTS) ──────────
   # Phase 3: Full voice pipeline — multilingual, warm Indian female voice
@@ -486,7 +503,7 @@ services:
     logging: *default-logging
     networks:
       - ira-internal
-      - ira-external  # Bug #19: voice needs internet to download Whisper/Kokoro models
+      - ira-external  # Fix #43: voice needs internet for Whisper/Kokoro model downloads and LiveKit STUN
 
   # ── IRA Frontend (Next.js) ────────────────────────────────────────────────
   # Chat UI, voice button, notification feed, system status bar.
