@@ -25,7 +25,9 @@ def _apify_token() -> str:
     return get_settings().apify_api_token or os.getenv("APIFY_API_TOKEN", "")
 
 BASE_RESUME_PATH = Path(__file__).parent.parent / "base_resume.md"
-TAILORED_RESUME_PATH = Path(__file__).parent.parent / "tailored_resume.md"
+# Fix #37: tailored resumes are now written to unique per-session files rather
+# than a single shared path, so concurrent calls never overwrite each other.
+_RESUME_DIR = Path(__file__).parent.parent / "tailored_resumes"
 
 
 # ── GitHub Analysis ───────────────────────────────────────────────────────────
@@ -99,6 +101,11 @@ async def scrape_job_posting(url: str) -> dict:
     """
     Scrape a LinkedIn or Indeed job posting via Apify and return structured
     job details: title, company, location, description, requirements.
+
+    Fix #38: logs a warning and returns a clear error when Apify returns no
+    results instead of silently returning an empty dict.
+    Fix #47: Apify actor IDs are read from config (env vars) so they can be
+    updated without touching code.
     """
     APIFY_API_TOKEN = _apify_token()
     if not APIFY_API_TOKEN:
@@ -109,22 +116,35 @@ async def scrape_job_posting(url: str) -> dict:
     except ImportError:
         return {"error": "apify-client not installed — run: pip install apify-client"}
 
+    from config import get_settings
+    cfg = get_settings()
+
     def _run() -> dict:
         client = ApifyClient(APIFY_API_TOKEN)
 
+        # Fix #47: read actor IDs from config so they survive Apify deprecations
         if "linkedin.com" in url:
-            actor_id = "BHzefUZlZRKWxkTck"
+            actor_id = cfg.apify_linkedin_actor
             run_input = {"startUrls": [{"url": url}], "maxItems": 1}
         elif "indeed.com" in url:
-            actor_id = "misceres/indeed-scraper"
+            actor_id = cfg.apify_indeed_actor
             run_input = {"startUrls": [{"url": url}], "maxResults": 1}
         else:
-            actor_id = "apify/web-scraper"
+            actor_id = cfg.apify_fallback_actor
             run_input = {"startUrls": [{"url": url}], "maxPagesPerCrawl": 1}
 
         run = client.actor(actor_id).call(run_input=run_input)
         items = list(client.dataset(run["defaultDatasetId"]).iterate_items())
-        return items[0] if items else {}
+
+        # Fix #38: surface empty results as an explicit error instead of
+        # silently returning {} and letting callers get "Unknown" everywhere.
+        if not items:
+            raise ValueError(
+                f"Apify actor '{actor_id}' returned no results for URL: {url}. "
+                "The page may require login, be geo-blocked, or the URL format may "
+                "have changed. Check APIFY_LINKEDIN_ACTOR / APIFY_INDEED_ACTOR in .env."
+            )
+        return items[0]
 
     try:
         raw = await asyncio.get_running_loop().run_in_executor(None, _run)
@@ -145,16 +165,33 @@ async def scrape_job_posting(url: str) -> dict:
 
 # ── Resume Tailoring ──────────────────────────────────────────────────────────
 
-async def generate_tailored_resume(job_description: str) -> dict:
+async def generate_tailored_resume(
+    job_description: str,
+    session_id: str | None = None,
+) -> dict:
     """
     Load base_resume.md, cross-reference with job_description via deep LLM,
-    rewrite bullet points to highlight matching skills, save to tailored_resume.md.
+    rewrite bullet points to highlight matching skills, and save the result.
+
+    Fix #37: output is written to a unique per-session file inside the
+    tailored_resumes/ directory (e.g. tailored_resume_<session_id>.md) so
+    concurrent resume generations never overwrite each other.
     """
     if not BASE_RESUME_PATH.exists():
         return {
             "error": f"base_resume.md not found. Create it at: {BASE_RESUME_PATH}",
             "hint": "Add your resume in Markdown format to that path, then retry.",
         }
+
+    # Fix #37: unique per-session output path
+    _RESUME_DIR.mkdir(parents=True, exist_ok=True)
+    if session_id:
+        # Sanitise session_id to prevent path traversal
+        safe_id = "".join(c for c in session_id if c.isalnum() or c in "-_")[:64]
+    else:
+        import uuid
+        safe_id = str(uuid.uuid4())
+    output_path = _RESUME_DIR / f"tailored_resume_{safe_id}.md"
 
     base = BASE_RESUME_PATH.read_text(encoding="utf-8")
 
@@ -176,11 +213,11 @@ async def generate_tailored_resume(job_description: str) -> dict:
             temperature=0.3,
             max_tokens=4096,
         )
-        TAILORED_RESUME_PATH.write_text(tailored, encoding="utf-8")
-        logger.info(f"Tailored resume saved to {TAILORED_RESUME_PATH}")
+        output_path.write_text(tailored, encoding="utf-8")
+        logger.info(f"Tailored resume saved to {output_path}")
         return {
             "status": "done",
-            "saved_to": str(TAILORED_RESUME_PATH),
+            "saved_to": str(output_path),
             "preview": tailored[:400] + "…" if len(tailored) > 400 else tailored,
         }
     except Exception as e:

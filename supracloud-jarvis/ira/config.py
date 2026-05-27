@@ -142,6 +142,11 @@ class Settings(BaseSettings):
     # ── Career Tools ──────────────────────────────────────────────────────────
     github_token: str = ""
     apify_api_token: str = ""
+    # Fix #47: Apify actor IDs as env vars so they can be updated without a
+    # code change if Apify deprecates or renames an actor.
+    apify_linkedin_actor: str = "BHzefUZlZRKWxkTck"
+    apify_indeed_actor: str = "misceres/indeed-scraper"
+    apify_fallback_actor: str = "apify/web-scraper"
 
     # ── Voice Service ─────────────────────────────────────────────────────────
     # JWT sub that the voice agent uses — only this identity may set is_voice_owner
