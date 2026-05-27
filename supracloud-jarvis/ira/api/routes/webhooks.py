@@ -57,7 +57,7 @@ def _validate_webhook_secret(x_webhook_secret: str | None) -> None:
 
 class LeadPayload(BaseModel):
     name: str = Field(..., min_length=1, max_length=200)
-    email: str = Field(..., max_length=500)
+    email: EmailStr     # validated RFC email
     company: str | None = Field(None, max_length=200)
     phone: str | None = Field(None, max_length=50)
     message: str | None = Field(None, max_length=5000)
@@ -149,7 +149,7 @@ async def receive_lead(
 class BookingPayload(BaseModel):
     booking_id: str = ""
     client_name: str = Field(..., min_length=1, max_length=200)
-    client_email: str = Field(..., max_length=500)
+    client_email: EmailStr   # validated RFC email
     service: str = ""
     scheduled_at: str = ""        # ISO 8601
     duration_minutes: int = 60
