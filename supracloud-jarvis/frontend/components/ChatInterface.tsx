@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback } from "react";
+import { useChatStore, useUIStore } from "@/lib/store";
 import { Send, Square, Copy, Check, Loader2, Zap, ChevronDown, ChevronUp, Paperclip, X, AlertCircle, DollarSign, Brain, Code2, FileText, Search, Lightbulb, FlaskConical } from "lucide-react";
 import clsx from "clsx";
 import ReactMarkdown from "react-markdown";
@@ -145,17 +146,31 @@ function CopyButton({ text }: { text: string }) {
 }
 
 export default function ChatInterface({ sessionId, token, mode = "assistant" }: Props) {
-  const [messages, setMessages] = useState<Message[]>([]);
+  const {
+    messages,
+    attachedFile,
+    addMessage,
+    updateMessage,
+    setAttachedFile,
+  } = useChatStore();
+
+  const {
+    expertMode,
+    engineerMode,
+    thinkMode,
+    deepSearch,
+    grokMode,
+    toggleExpertMode,
+    toggleEngineerMode,
+    toggleThinkMode,
+    toggleDeepSearch,
+    toggleGrokMode,
+  } = useUIStore();
+
   const [input, setInput] = useState("");
   const [isStreaming, setIsStreaming] = useState(false);
   const [streamingId, setStreamingId] = useState<string | null>(null);
-  const [expertMode, setExpertMode] = useState(false);
-  const [grokMode, setGrokMode] = useState(false);
-  const [engineerMode, setEngineerMode] = useState(false);
-  const [thinkMode, setThinkMode] = useState(false);
-  const [deepSearch, setDeepSearch] = useState(false);
   const [costGuard, setCostGuard] = useState(true);
-  const [attachedFile, setAttachedFile] = useState<AttachedFile | null>(null);
   const [showCostConfirm, setShowCostConfirm] = useState(false);
   const [pendingQuery, setPendingQuery] = useState("");
   const [estimatedTokens, setEstimatedTokens] = useState(0);
@@ -163,6 +178,14 @@ export default function ChatInterface({ sessionId, token, mode = "assistant" }: 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const abortRef = useRef<AbortController | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Compatibility shim — lets existing code keep using setMessages(prev => ...)
+  // while the actual state lives in Zustand.
+  const setMessages = useCallback((updater: Message[] | ((prev: Message[]) => Message[])) => {
+    const current = useChatStore.getState().messages;
+    const next = typeof updater === "function" ? updater(current) : updater;
+    useChatStore.setState({ messages: next });
+  }, []);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -1280,7 +1303,7 @@ export default function ChatInterface({ sessionId, token, mode = "assistant" }: 
             </p>
             <div className="flex items-center gap-1.5">
               <button
-                onClick={() => setExpertMode((v) => !v)}
+                onClick={toggleExpertMode}
                 title="Expert Mode: 5 agents collaborate in parallel"
                 className={clsx(
                   "flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] border transition-all",
@@ -1308,7 +1331,7 @@ export default function ChatInterface({ sessionId, token, mode = "assistant" }: 
                 </button>
               )}
               <button
-                onClick={() => setGrokMode((v) => !v)}
+                onClick={toggleGrokMode}
                 title="Think like Grok: enables Grok personality, real-time web search, and X search"
                 className={clsx(
                   "flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] border transition-all",
@@ -1321,7 +1344,7 @@ export default function ChatInterface({ sessionId, token, mode = "assistant" }: 
                 Grok Mode
               </button>
               <button
-                onClick={() => setEngineerMode((v) => !v)}
+                onClick={toggleEngineerMode}
                 title="Engineer Mode: Claude-style 4-step workflow — analysis → plan → diffs → verify"
                 className={clsx(
                   "flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] border transition-all",
@@ -1334,7 +1357,7 @@ export default function ChatInterface({ sessionId, token, mode = "assistant" }: 
                 Engineer Mode
               </button>
               <button
-                onClick={() => setThinkMode((v) => !v)}
+                onClick={toggleThinkMode}
                 title="Think Mode: shows step-by-step reasoning in a collapsible panel before the answer"
                 className={clsx(
                   "flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] border transition-all",
@@ -1347,7 +1370,7 @@ export default function ChatInterface({ sessionId, token, mode = "assistant" }: 
                 Think Mode
               </button>
               <button
-                onClick={() => setDeepSearch((v) => !v)}
+                onClick={toggleDeepSearch}
                 title="DeepSearch: 3-round iterative web search for richer, more accurate answers"
                 className={clsx(
                   "flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] border transition-all",

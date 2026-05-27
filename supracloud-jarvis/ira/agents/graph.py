@@ -288,5 +288,14 @@ async def run_graph(
     }
 
     config = {"configurable": {"thread_id": session_id}}
-    final_state = await graph.ainvoke(initial_state, config=config)
+
+    from utils.telemetry import trace_span
+    with trace_span("run_graph", {
+        "session_id": session_id,
+        "user_query_len": len(user_query),
+        "is_owner": is_owner,
+        "mode": mode,
+    }):
+        final_state = await graph.ainvoke(initial_state, config=config)
+
     return final_state

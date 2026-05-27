@@ -1,13 +1,16 @@
-# Environment
+# Environment — plaintext secrets NEVER committed
 .env
 .env.local
 .env.*.local
 !.env.example
 
+# Encrypted secrets — safe to commit (.env.enc should NOT appear here)
+
 # TLS / credentials
 nginx/certs/
 *.key
 *.pem
+*.p12
 *.sqlite
 .cloudflared/
 

@@ -55,22 +55,20 @@ except ImportError as _bio_err:
     logger.warning(f"Biometric pipeline: DISABLED — {_bio_err}")
 
 # ── Configuration ─────────────────────────────────────────────────────────────
-IRA_API_URL = os.getenv("IRA_API_URL", "http://ira-api:8000")
-IRA_API_TOKEN = os.getenv("IRA_API_TOKEN", "")
+# All config values are read lazily via _get_voice_config() so that env changes
+# take effect when the next voice session starts, without a container restart.
 
-# Whisper model size — trade-off between accuracy and latency
-# large-v3: best accuracy (production recommended)
-# small    : fastest (~0.3-0.5s) — use on Shadow PC / low-memory hosts
-WHISPER_MODEL = os.getenv("WHISPER_MODEL", "large-v3")
-
-# Fix #123: Kokoro voice loaded from IRA_VOICE env var (set in .env.example).
-# Allows switching voice without rebuilding the image — "af_bella" (warm) or
-# "af_heart" (softer). Falls back to af_bella if the env var is not set.
-IRA_VOICE = os.getenv("IRA_VOICE", "af_bella")
-
-# Maximum duration for a single voice session (#32).
-# Guards against abandoned sessions keeping the worker alive indefinitely.
-MAX_SESSION_SECONDS: float = 4 * 3600  # 4 hours
+def _get_voice_config() -> dict:
+    return {
+        "api_url": os.getenv("IRA_API_URL", "http://ira-api:8000"),
+        "api_token": os.getenv("IRA_API_TOKEN", ""),
+        # Whisper model size — large-v3: best accuracy; small: fastest (~0.3-0.5s)
+        "whisper_model": os.getenv("WHISPER_MODEL", "large-v3"),
+        # Fix #123: voice from IRA_VOICE env — "af_bella" (warm) or "af_heart" (softer)
+        "voice": os.getenv("IRA_VOICE", "af_bella"),
+        # Guard against zombie sessions — 4h cap per session
+        "max_session_seconds": float(os.getenv("MAX_SESSION_SECONDS", str(4 * 3600))),
+    }
 
 
 # ── IRA LLM Adapter ───────────────────────────────────────────────────────────
@@ -85,9 +83,10 @@ class IRALLMAdapter(llm.LLM):
     def __init__(self, session_id: str):
         super().__init__()
         self._session_id = session_id
+        _cfg = _get_voice_config()
         self._http = httpx.AsyncClient(
-            base_url=IRA_API_URL,
-            headers={"Authorization": f"Bearer {IRA_API_TOKEN}"},
+            base_url=_cfg["api_url"],
+            headers={"Authorization": f"Bearer {_cfg['api_token']}"},
             timeout=httpx.Timeout(connect=5, read=120, write=30, pool=5),
         )
         # Stores the raw PCM bytes of the latest user utterance for biometric verification
@@ -228,9 +227,12 @@ async def entrypoint(ctx: JobContext) -> None:
     # Unique session per voice room — links to IRA's memory system
     session_id = f"voice_{ctx.room.name}_{uuid.uuid4().hex[:8]}"
 
+    # Load config lazily so env changes take effect on the next session start
+    _cfg = _get_voice_config()
+
     # Initialise components
-    stt = IRAFasterWhisperSTT(model_size=WHISPER_MODEL, device="cpu", compute_type="int8")
-    tts_engine = IRAKokoroTTS(voice=IRA_VOICE, speed=1.05)  # Fix #123: voice from env
+    stt = IRAFasterWhisperSTT(model_size=_cfg["whisper_model"], device="cpu", compute_type="int8")
+    tts_engine = IRAKokoroTTS(voice=_cfg["voice"], speed=1.05)  # Fix #123: voice from env
     vad = silero.VAD.load(
         min_silence_duration=0.3,   # 300ms — slightly longer pause before cutting off
         min_speech_duration=0.1,    # 100ms — catches "wait", "stop", single words
@@ -291,15 +293,16 @@ async def entrypoint(ctx: JobContext) -> None:
     logger.info(f"IRA voice session active for {participant.identity}")
 
     # Keep the agent alive until the participant disconnects — but cap at
-    # MAX_SESSION_SECONDS to prevent zombie sessions if the disconnect event is
+    # max_session_seconds to prevent zombie sessions if the disconnect event is
     # never delivered (e.g., hard network drop, container restart). (#32)
+    max_session_seconds = _cfg["max_session_seconds"]
     try:
-        await asyncio.wait_for(ctx.wait_for_disconnect(), timeout=MAX_SESSION_SECONDS)
+        await asyncio.wait_for(ctx.wait_for_disconnect(), timeout=max_session_seconds)
         logger.info("Participant disconnected. IRA voice session ending.")
     except asyncio.TimeoutError:
         logger.warning(
             f"Voice session for {participant.identity} reached the "
-            f"{MAX_SESSION_SECONDS / 3600:.0f}h maximum duration. Ending automatically."
+            f"{max_session_seconds / 3600:.0f}h maximum duration. Ending automatically."
         )
     await ira_llm.aclose()
 

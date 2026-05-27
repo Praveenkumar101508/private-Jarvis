@@ -1,0 +1,42 @@
+# Integration test environment — no vLLM, no LiveKit, no GPU required
+# Usage: docker compose -f docker-compose.yml -f docker-compose.test.yml --profile test up -d
+# Then: docker compose exec ira-api pytest tests/ -v
+
+version: "3.9"
+
+services:
+  postgres:
+    profiles: ["test"]
+    environment:
+      POSTGRES_DB: jarvis_test
+    tmpfs:
+      - /var/lib/postgresql/data   # in-memory DB for fast tests, no persistence
+
+  redis:
+    profiles: ["test"]
+    command: redis-server --requirepass testpassword --save ""   # no persistence
+
+  ira-api:
+    profiles: ["test"]
+    environment:
+      DEV_MODE: "true"
+      POSTGRES_DB: jarvis_test
+      POSTGRES_PASSWORD: testpassword
+      REDIS_PASSWORD: testpassword
+      IRA_SECRET_KEY: test-secret-key-for-ci-only-not-production
+      IRA_ADMIN_PASSWORD: testpassword
+      VLLM_API_KEY: test
+      OWNER_NAME: "Test Owner"
+      OLLAMA_BASE_URL: "http://host.docker.internal:11434/v1"
+      DEV_MODEL: "qwen3:1.7b"
+    command: >
+      sh -c "
+        python -m pytest tests/ -v --tb=short --timeout=30
+        && echo '✅ All tests passed'
+        || echo '❌ Tests failed'
+      "
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy

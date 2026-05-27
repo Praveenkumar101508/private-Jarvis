@@ -23,41 +23,10 @@ from openai import AsyncOpenAI
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 from config import get_settings
+from utils.yaml_config import get_fast_keywords, get_deep_keywords, get_reasoning_keywords
 
 # ── Agents that always use the deep path ────────────────────────────────────
 _DEEP_AGENTS = {"security", "creator", "researcher"}
-
-# ── Keywords that force deep path ────────────────────────────────────────────
-# Intentionally narrow — only genuinely complex tasks.
-# Removed: 'write a', 'write the', 'build', 'analyse', 'analyze',
-#          'generate code', 'design', 'agent' — too generic, caused
-#          every basic query to hit the expensive 14B model (#29).
-_DEEP_KEYWORDS = frozenset({
-    "code", "implement",
-    "architecture", "refactor", "debug",
-    "vulnerability", "exploit", "patch", "security", "audit",
-    "langgraph", "docker", "deployment", "kubernetes",
-    "comprehensive", "detailed", "thorough", "step by step",
-    "compare", "contrast", "explain in depth", "full implementation",
-    "unit test", "integration test", "review this", "fix this bug",
-    "optimize", "performance", "algorithm", "data structure",
-    "proof", "derive", "mathematical", "theorem",
-})
-
-# ── Keywords that force fast path regardless of length ───────────────────────
-_FAST_KEYWORDS = frozenset({
-    "hi", "hello", "hey", "thanks", "thank you", "what time", "status",
-    "ping", "are you", "how are", "good morning", "good night", "bye",
-    "who are you", "what's your name",
-})
-
-# ── Keywords that hint at needing the reasoning path ─────────────────────────
-_REASONING_KEYWORDS = frozenset({
-    "reason step by step", "think through", "chain of thought", "solve this",
-    "prove", "disprove", "philosophical", "ethical dilemma", "game theory",
-    "multi-step", "plan a strategy", "research paper", "scientific analysis",
-    "what are the implications", "write a dissertation", "deep analysis",
-})
 
 
 def should_use_deep(query: str, agent: str | None = None) -> bool:
@@ -65,11 +34,11 @@ def should_use_deep(query: str, agent: str | None = None) -> bool:
     if agent in _DEEP_AGENTS:
         return True
     q = query.lower()
-    if any(kw in q for kw in _FAST_KEYWORDS):
+    if any(kw in q for kw in get_fast_keywords()):
         return False
     if len(query.split()) > 60:
         return True
-    return any(kw in q for kw in _DEEP_KEYWORDS)
+    return any(kw in q for kw in get_deep_keywords())
 
 
 def should_use_reasoning(
@@ -85,7 +54,7 @@ def should_use_reasoning(
     if think_mode or deep_search:
         return True
     q = query.lower()
-    return any(kw in q for kw in _REASONING_KEYWORDS)
+    return any(kw in q for kw in get_reasoning_keywords())
 
 
 # ── Client factories ──────────────────────────────────────────────────────────
@@ -211,7 +180,10 @@ async def chat_complete(
         )
         return response
 
-    return await _complete_no_stream(client, model, messages, max_tokens, temperature)
+    tier = "reasoning" if use_reasoning else ("deep" if use_deep else "fast")
+    from utils.telemetry import trace_span
+    with trace_span("llm.complete", {"tier": tier, "model": model, "max_tokens": max_tokens}):
+        return await _complete_no_stream(client, model, messages, max_tokens, temperature)
 
 
 async def stream_tokens(

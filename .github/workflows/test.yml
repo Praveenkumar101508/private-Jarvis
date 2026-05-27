@@ -1,0 +1,59 @@
+name: IRA Tests
+
+on:
+  push:
+    branches: [main, master, "claude/*"]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install test dependencies
+        working-directory: supracloud-jarvis/ira
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run unit tests (no Docker required)
+        working-directory: supracloud-jarvis/ira
+        env:
+          DEV_MODE: "true"
+          IRA_SECRET_KEY: "ci-test-secret-key"
+          IRA_ADMIN_PASSWORD: "ci-test-password"
+          POSTGRES_PASSWORD: "ci-test"
+          REDIS_PASSWORD: "ci-test"
+          VLLM_API_KEY: "ci-test"
+        run: |
+          python -m pytest tests/ -v --tb=short \
+            --ignore=tests/test_integration.py \
+            -k "not integration"
+
+      - name: Check no auto-push in auto_implement.py
+        run: |
+          if grep -q "git push" supracloud-jarvis/ira/utils/auto_implement.py; then
+            echo "❌ CRITICAL: auto_implement.py contains git push!"
+            exit 1
+          fi
+          echo "✅ No auto-push found"
+
+      - name: Check no hardcoded secrets
+        run: |
+          if grep -ri "CHANGE_ME\|changeme\|password123\|admin123" supracloud-jarvis/.env.example; then
+            echo "⚠️  Weak placeholder detected in .env.example"
+          fi
+          if [ -f "supracloud-jarvis/.env" ]; then
+            echo "❌ .env file is committed!"
+            exit 1
+          fi
+          echo "✅ No committed secrets found"

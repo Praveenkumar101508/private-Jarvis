@@ -43,6 +43,7 @@ SQLAlchemy==2.0.36              # APScheduler PostgreSQL job store backend
 pydantic==2.9.2
 pydantic-settings==2.6.1
 httpx==0.27.2
+pyyaml==6.0.2
 psutil==6.1.0
 python-dateutil==2.9.0
 tenacity==9.0.0                 # Retry logic for LLM calls
@@ -81,3 +82,12 @@ openpyxl==3.1.5                 # Fix #120: pinned (was >=3.1.0)
 # ── Feature #1 & #5: Video Generation + Understanding ─────────────────────────
 # Uses Replicate API (httpx) + ffmpeg system binary
 # ffmpeg install: apt-get install ffmpeg  (Docker) or brew install ffmpeg (macOS)
+
+# ── Observability ─────────────────────────────────────────────────────────────
+opentelemetry-api==1.27.0
+opentelemetry-sdk==1.27.0
+opentelemetry-exporter-otlp-proto-http==1.27.0
+opentelemetry-instrumentation-fastapi==0.48b0
+opentelemetry-instrumentation-asyncpg==0.48b0
+opentelemetry-instrumentation-redis==0.48b0
+opentelemetry-instrumentation-httpx==0.48b0

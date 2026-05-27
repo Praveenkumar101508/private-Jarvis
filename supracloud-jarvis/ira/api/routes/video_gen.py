@@ -39,15 +39,9 @@ from config import get_settings
 router = APIRouter(prefix="/video", tags=["video"])
 logger = logging.getLogger("ira.video")
 
-# ── Replicate model identifiers (2026 best open-source video models) ──────────
-_VIDEO_GEN_MODEL = os.getenv(
-    "REPLICATE_VIDEO_MODEL",
-    "wan-ai/wan2.1-t2v-480p",  # Best open-source text-to-video May 2026
-)
-_VIDEO_IMG_MODEL = os.getenv(
-    "REPLICATE_VIDEO_IMG_MODEL",
-    "wan-ai/wan2.1-i2v-480p",  # Image-to-video
-)
+# NOTE: REPLICATE_VIDEO_MODEL and REPLICATE_VIDEO_IMG_MODEL are intentionally
+# NOT read at module import time — they are read inside _generate_replicate_video()
+# so env-var changes take effect without a container restart.
 
 # Video trigger detection
 _VIDEO_GEN_RE = re.compile(
@@ -98,7 +92,11 @@ async def _generate_replicate_video(req: VideoGenRequest) -> str:
             ),
         )
 
-    model = _VIDEO_GEN_MODEL
+    # Read at request time so env changes take effect without restart
+    video_gen_model = os.getenv("REPLICATE_VIDEO_MODEL", "wan-ai/wan2.1-t2v-480p")
+    video_img_model = os.getenv("REPLICATE_VIDEO_IMG_MODEL", "wan-ai/wan2.1-i2v-480p")
+
+    model = video_gen_model
     input_payload: dict = {
         "prompt": req.prompt,
         "num_frames": req.duration * 8,  # Wan2.1: ~8 fps
@@ -110,7 +108,7 @@ async def _generate_replicate_video(req: VideoGenRequest) -> str:
 
     # Image-to-video if source image provided
     if req.image_b64:
-        model = _VIDEO_IMG_MODEL
+        model = video_img_model
         data_url = f"data:{req.mime_type};base64,{req.image_b64}"
         input_payload["image"] = data_url
         input_payload.pop("num_frames", None)

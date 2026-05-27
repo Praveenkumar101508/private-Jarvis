@@ -7,6 +7,32 @@ A fully self-hosted, private AI assistant platform. IRA runs entirely on your ow
 
 ---
 
+## Feature Status
+
+| Feature | Status | Notes |
+|---|---|---|
+| Chat with memory + RAG | ✅ Production | Streaming, Think Mode, Expert Mode |
+| Document creation (PDF/Word/Excel/PPT) | ✅ Production | From chat prompt |
+| Document upload + analysis | ✅ Production | PDF/DOCX/TXT |
+| Engineer Mode (code diffs) | ✅ Production | 4-step workflow |
+| Web search + DeepSearch | ✅ Production | DuckDuckGo + X/Twitter |
+| Image generation | ✅ Production | Requires Replicate API token or SD WebUI |
+| Vision / image analysis | ✅ Production | Requires vLLM vision endpoint |
+| Security monitoring | ✅ Production | nginx log analysis, SSH brute-force |
+| Daily backups | ✅ Production | pg_dump, 7-day retention |
+| Morning/evening briefings | ✅ Production | Telegram or email |
+| Task + reminder management | ✅ Production | APScheduler delivery |
+| Architect Evolution mode | ✅ Production | Proposal only — apply is manual |
+| Career tools (resume, job scrape) | ✅ Production | Requires Apify API token |
+| Voice interface | ⚠️ Beta | Works in English; see Voice section below |
+| Biometric voice auth | ⚠️ Beta | Requires enrolment; see Voice section |
+| Video generation | 🔧 Requires Replicate | External API |
+| Audio/music generation | 🔧 Requires Replicate | External API |
+| Multilingual voice | 🔧 Experimental | Indic languages use English TTS (known limitation) |
+| Computer use (Playwright) | 🔧 Experimental | SSRF protections required for production |
+
+---
+
 ## What IRA Can Do
 
 | Capability | Description |
@@ -246,6 +272,24 @@ docker compose -f docker-compose.yml -f docker-compose.cloud.yml up -d
 
 ---
 
+## Privacy & Cloud Dependencies
+
+IRA is designed to be self-hosted, but several features optionally call external APIs:
+
+| Feature | External Service | Data Sent |
+|---|---|---|
+| Image generation | Replicate (api.replicate.com) | Your image prompt |
+| Image editing | Replicate | Your image + edit instruction |
+| Video generation | Replicate | Your video prompt |
+| Music generation | Replicate | Your music prompt |
+| Job scraping | Apify (apify.com) | LinkedIn/Indeed search query |
+| Voice notifications | Telegram Bot API | Notification title + body |
+| X/Twitter search | Twitter API v2 or twitterapi.io | Your search query |
+
+To run with zero external dependencies: set `IMAGE_GEN_URL` to a local Stable Diffusion WebUI, leave Replicate unconfigured, and use local Whisper for STT (already included).
+
+---
+
 ## Cloud-Dependent Features
 
 IRA runs fully without any of these. External API keys unlock additional capabilities:
@@ -280,6 +324,11 @@ IRA runs fully without any of these. External API keys unlock additional capabil
 - Docker + Docker Compose v2
 - NVIDIA GPU + drivers + `nvidia-container-toolkit`
 - 32GB+ RAM recommended (16GB minimum for fast+deep models)
+- 20GB+ available disk space (model weights)
+- For local LLM: GPU with 20GB+ VRAM (RTX A4500 or better)
+- For dev mode without GPU: Ollama installed with `qwen3:8b` pulled
+- `openssl` (for secret generation)
+- `git` (for architect apply pipeline)
 
 ### Step 1 — Clone
 ```bash
@@ -400,6 +449,42 @@ Visit `https://your-server-ip`. Default login: `admin` / (password set during se
 
 > **Setup:** Add `APIFY_API_TOKEN` (free at apify.com) and `GITHUB_TOKEN` to `.env`.  
 > Create `ira/base_resume.md` with your resume in Markdown format.
+
+---
+
+## Voice Interface
+
+IRA uses LiveKit WebRTC + Faster-Whisper (STT) + Kokoro TTS.
+
+**What works:**
+- English voice conversations with full LLM context
+- Voice biometric authentication (requires enrolment — see below)
+- Multilingual speech recognition (Whisper detects 99 languages)
+
+**Known limitations:**
+- Text-to-speech is English only (Kokoro af_bella voice)
+- Hindi, Tamil, Telugu and other Indic language responses are synthesised as English phonetics — this sounds broken. Full Indic TTS is planned for a future release.
+- First voice session after restart may take 30–60 seconds while Whisper loads
+
+**Biometric enrolment (required before voice auth works):**
+```bash
+# 1. Get a challenge phrase
+curl -H "Authorization: Bearer $TOKEN" https://your-domain/api/v1/voice/challenge
+
+# 2. Record yourself saying the phrase (3–10 WAV files, 16kHz mono)
+
+# 3. Submit for enrolment
+curl -X POST https://your-domain/api/v1/voice/enroll \
+  -H "Authorization: Bearer $TOKEN" \
+  -F "challenge_id=<from step 1>" \
+  -F "audio_files=@recording1.wav" \
+  -F "audio_files=@recording2.wav" \
+  -F "audio_files=@recording3.wav"
+```
+
+Until enrolled, all voice sessions run as public-access (restricted commands blocked).
+
+> Convert to correct format: `ffmpeg -i input.m4a -ar 16000 -ac 1 -sample_fmt s16 recording1.wav`
 
 ---
 
@@ -727,6 +812,32 @@ BACKUP_KEEP=7
 
 # Timezone
 BRIEFING_TIMEZONE=Asia/Kolkata
+```
+
+---
+
+## Secrets Management
+
+IRA uses [sops](https://github.com/getsops/sops) + [age](https://github.com/FiloSottile/age) for encrypted secrets.
+
+### First-time setup
+```bash
+bash scripts/init-secrets.sh   # generates your age key
+cp .env.example .env            # fill in your values
+make secrets-encrypt            # creates .env.enc (safe to commit)
+```
+
+### On a new machine
+```bash
+# Copy your age key from backup:
+mkdir -p ~/.config/sops/age && cp your-backup/keys.txt ~/.config/sops/age/
+export SOPS_AGE_KEY_FILE=~/.config/sops/age/keys.txt
+make secrets-decrypt            # creates .env from .env.enc
+```
+
+### Editing secrets
+```bash
+make secrets-edit   # opens .env.enc in your editor, re-encrypts on save
 ```
 
 ---

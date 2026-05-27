@@ -19,90 +19,14 @@ import re
 
 from agents.state import IRAState
 from utils.llm import should_use_deep
+from utils.yaml_config import get_restricted_keywords, get_agent_rules
 
 _URL_RE = re.compile(r"https?://\S+")
-
-# ── Keyword maps for agent selection ─────────────────────────────────────────
-_AGENT_RULES: list[tuple[frozenset[str], str]] = [
-    (frozenset({
-        "hack", "attack", "vulnerability", "exploit", "breach", "malware",
-        "threat", "intrusion", "anomaly", "firewall", "scan port", "port scan",
-        "security log", "security alert", "unauthorized", "suspicious", "ddos",
-    }), "security"),
-    (frozenset({
-        "create agent", "build agent", "new agent", "make agent", "generate agent",
-        "langgraph agent", "agent code", "agent creator", "design agent",
-    }), "creator"),
-    (frozenset({
-        "website", "supracloud site", "booking", "lead", "customer inquiry",
-        "site traffic", "seo", "update content", "business report", "revenue",
-        "analytics", "conversion",
-    }), "website"),
-    # Career & automation — checked before researcher to avoid misrouting
-    (frozenset({
-        "resume", "cv", "job posting", "linkedin job", "indeed job",
-        "tailor my resume", "job application", "apply for", "job description",
-        "career", "interview prep", "my github", "my codebase", "my repositories",
-        "my portfolio", "job scrape", "scrape linkedin", "scrape indeed",
-    }), "career"),
-    # Tutor mode (Phase 5)
-    (frozenset({
-        "tutor mode", "teach me", "i am learning", "i'm learning", "explain step by step",
-        "supracloud trainer", "student", "homework", "tutor", "socratic",
-        "help me understand", "i don't understand", "guide me through",
-    }), "tutor"),
-    # Digital brain — OS/browser control (Phase 6)
-    (frozenset({
-        "open vscode", "open vs code", "open terminal", "open chrome", "open firefox",
-        "open application", "launch app", "start application",
-        "browse website", "browse this url", "summarize website", "scan this website",
-        "what does this website say", "go to url", "check this link",
-    }), "digital"),
-    (frozenset({
-        "research", "find out", "investigate", "search for", "what is",
-        "tell me about", "explain", "compare", "analyse", "analyze",
-        "summarise", "summarize", "report on",
-    }), "researcher"),
-    (frozenset({
-        "run", "execute", "deploy", "install package", "run command",
-        "bash", "shell", "script",
-    }), "executor"),
-]
 
 _VALID_AGENTS = {
     "conversational", "researcher", "security", "website", "creator", "executor",
     "career", "tutor", "digital",
 }
-
-# ── Restricted domain classification ─────────────────────────────────────────
-_RESTRICTED_KEYWORDS: frozenset[str] = frozenset({
-    # Security & system internals
-    "security log", "system log", "audit log", "error log", "health log",
-    "nginx log", "access log", "event log",
-    "admin password", "database password", "db password",
-    "secret key", "api key", "env file", ".env",
-    "credentials", "private key", "ssl cert",
-    "system health", "server metrics", "cpu usage", "memory usage",
-    "show logs", "show errors", "show config",
-    # Personal / owner data
-    "my calendar", "my appointment", "my meeting",
-    "personal", "private",
-    # Fix #76: owner's first name removed from the static set — it is added
-    # dynamically in is_restricted_domain() via cfg.owner_name so it works
-    # for any owner without a code change.
-    "my email", "my phone", "my address",
-    # System control commands (specific phrases only — 'owner' removed: too generic)
-    "lockdown system", "shutdown ira", "delete backups", "disable security",
-    # Financial
-    "financial", "revenue", "invoice", "payment", "bank",
-    "company finances", "profit", "loss",
-    # Core architecture / source code
-    "internal code", "show me the code",
-    "database schema", "db schema", "table structure",
-    # Admin actions
-    "create user", "delete user", "reset password", "change password",
-    "grant access", "revoke access",
-})
 
 
 def is_restricted_domain(query: str) -> bool:
@@ -112,10 +36,11 @@ def is_restricted_domain(query: str) -> bool:
     Fix #76: the owner's first name is checked dynamically (read from
     cfg.owner_name at call time) rather than being hardcoded in the static
     keyword set — works for any deployment without a code change.
+    Keywords are loaded from config/routing.yaml at first call (cached).
     """
     from config import get_settings
     q = query.lower()
-    if any(kw in q for kw in _RESTRICTED_KEYWORDS):
+    if any(kw in q for kw in get_restricted_keywords()):
         return True
     # Owner's first name (e.g. "Praveen") should gate personal data queries
     owner_first = get_settings().owner_name.split()[0].lower()
@@ -166,8 +91,9 @@ async def classify(state: IRAState) -> IRAState:
             agent = "digital"
 
     # 3. Keyword fast-path (only if not already overridden)
+    # Rules loaded from config/routing.yaml (cached after first call)
     if agent == "conversational":
-        for keywords, agent_name in _AGENT_RULES:
+        for keywords, agent_name in get_agent_rules():
             if any(kw in query for kw in keywords):
                 agent = agent_name
                 break

@@ -5,22 +5,19 @@ import ChatInterface from "@/components/ChatInterface";
 import VoiceOrb from "@/components/VoiceOrb";
 import Sidebar, { type AppMode } from "@/components/Sidebar";
 import StatusBar from "@/components/StatusBar";
+import { useAuthStore, useUIStore, useChatStore } from "@/lib/store";
 
 export default function Home() {
-  const [token, setToken] = useState<string>("");
-  const [livekitToken, setLivekitToken] = useState<string>("");
-  const [livekitUrl, setLivekitUrl] = useState<string>("");
+  const { token, isAuthenticated, livekitToken, livekitUrl, setToken, setLivekitToken, logout } = useAuthStore();
+  const { mode, setMode } = useUIStore();
+  const { newSession, sessionId } = useChatStore();
+
   // Fix #101: detect ?mode=voice from the PWA manifest shortcut
   const [autoVoice, setAutoVoice] = useState(false);
-  const [sessionId, setSessionId] = useState<string>(() =>
-    typeof crypto !== "undefined" ? crypto.randomUUID() : Math.random().toString(36).slice(2)
-  );
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [loginError, setLoginError] = useState("");
   const [username, setUsername] = useState("admin");
   const [password, setPassword] = useState("");
   const [loggingIn, setLoggingIn] = useState(false);
-  const [mode, setMode] = useState<AppMode>("assistant");
   // chatKey forces ChatInterface to remount (clears messages) on New Chat
   const [chatKey, setChatKey] = useState(0);
 
@@ -34,17 +31,10 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
-    // Fix #67: use sessionStorage instead of localStorage.
-    // localStorage persists indefinitely and is readable by any XSS script on
-    // the same origin across browser restarts. sessionStorage scopes the token
-    // to the current tab/window and is cleared when the tab closes, reducing
-    // the attack window. (The real fix is httpOnly cookies — future Phase 5.)
-    const stored = sessionStorage.getItem("ira_token");
-    if (stored) {
-      setToken(stored);
-      setIsAuthenticated(true);
-      fetchLivekitToken(stored);
-    }
+    // Zustand persist middleware already restores token from sessionStorage.
+    // Fetch LiveKit token if we already have an auth token on mount.
+    if (token) fetchLivekitToken(token);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const fetchLivekitToken = async (authToken: string) => {
@@ -54,11 +44,10 @@ export default function Home() {
       });
       if (res.ok) {
         const data = await res.json();
-        setLivekitToken(data.token ?? "");
         // Fix #97: use the URL returned by the server instead of a hardcoded
         // env var so the frontend works correctly whether pointing at localhost,
         // a LAN IP, or a production domain without a Next.js rebuild.
-        if (data.livekit_url) setLivekitUrl(data.livekit_url);
+        setLivekitToken(data.token ?? "", data.livekit_url ?? "");
       }
     } catch {
       console.warn("[IRA] LiveKit token fetch failed — voice disabled");
@@ -81,9 +70,7 @@ export default function Home() {
       }
       const data = await res.json();
       const authToken = data.access_token;
-      sessionStorage.setItem("ira_token", authToken);
-      setToken(authToken);
-      setIsAuthenticated(true);
+      setToken(authToken);  // Zustand persist handles sessionStorage
       await fetchLivekitToken(authToken);
     } catch {
       setLoginError("Connection failed — is IRA running?");
@@ -92,21 +79,13 @@ export default function Home() {
     }
   };
 
-  const logout = () => {
-    sessionStorage.removeItem("ira_token");
-    setToken("");
-    setLivekitToken("");
-    setLivekitUrl("");
-    setIsAuthenticated(false);
+  const handleLogout = () => {
+    logout();  // clears Zustand state; persist middleware removes from sessionStorage
     setPassword("");
   };
 
   const handleNewChat = () => {
-    const newId =
-      typeof crypto !== "undefined"
-        ? crypto.randomUUID()
-        : Math.random().toString(36).slice(2);
-    setSessionId(newId);
+    newSession();
     setChatKey((k) => k + 1);
   };
 
@@ -239,7 +218,7 @@ export default function Home() {
               autoConnect={autoVoice}
             />
             <button
-              onClick={logout}
+              onClick={handleLogout}
               className="text-xs text-neutral-500 hover:text-neutral-300 transition-colors px-2 py-1 rounded-lg hover:bg-neutral-800"
             >
               Sign out

@@ -62,9 +62,37 @@ logger = logging.getLogger("jarvis")
 limiter = Limiter(key_func=get_remote_address)
 
 
+async def _validate_config(cfg) -> None:
+    """Warn about common misconfiguration issues at startup."""
+    warnings = []
+
+    if cfg.owner_name in ("Swetha Devisetty", "", "Change Me"):
+        warnings.append("OWNER_NAME is not set to your real name")
+
+    if cfg.ira_admin_password in ("CHANGE_ME_strong_password_here", "admin", "password"):
+        warnings.append("IRA_ADMIN_PASSWORD is using the default placeholder — change it!")
+
+    if cfg.ira_secret_key in ("CHANGE_ME_ira_secret_key_here", ""):
+        warnings.append("IRA_SECRET_KEY is not set — JWT security is broken!")
+
+    if not getattr(cfg, "telegram_bot_token", None) and not getattr(cfg, "smtp_host", None):
+        warnings.append("No notification channel configured (Telegram or SMTP) — alerts will not be delivered")
+
+    for w in warnings:
+        logger.warning(f"⚠️  CONFIG WARNING: {w}")
+
+    if any("broken" in w.lower() or "not set" in w.lower() for w in warnings):
+        logger.warning("Fix the above config warnings before going to production.")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     cfg = get_settings()
+
+    # Initialise OpenTelemetry (no-op if OTLP_ENDPOINT not set)
+    from utils.telemetry import setup_telemetry
+    setup_telemetry(service_name="ira-api")
+
     if cfg.dev_mode:
         logger.warning("=" * 70)
         logger.warning("⚠️  DEV_MODE IS ENABLED — ALL SECURITY IS DISABLED  ⚠️")
@@ -90,6 +118,8 @@ async def lifespan(app: FastAPI):
     # Initialise LangGraph checkpointer (AsyncPostgresSaver → persistent state)
     await init_checkpointer(cfg.database_dsn)
     logger.info("LangGraph agent graph compiled")
+
+    await _validate_config(cfg)
 
     logger.info("IRA is online. Good morning.")
     yield
@@ -191,3 +221,11 @@ def create_app() -> FastAPI:
 
 
 app = create_app()
+
+# Auto-instrument FastAPI routes (adds trace spans for every HTTP request)
+try:
+    from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+    FastAPIInstrumentor.instrument_app(app)
+    logger.info("OpenTelemetry FastAPI instrumentation active")
+except Exception:
+    pass  # telemetry is always optional
