@@ -87,12 +87,11 @@ async def _fetch_recent_events(limit: int = 20) -> list[dict]:
 
 async def security_guardian(state: IRAState) -> IRAState:
     if not state.get("is_owner"):
-        return {**state, "response": "I can only perform security operations for the verified owner."}
+        return {**state, "final_response": "I can only perform security operations for the verified owner."}
 
     t0 = time.monotonic()
     query = state["user_query"]
     tool_output: str = ""
-    _SYSTEM = _build_system(get_settings().owner_name)
 
     # ── Active tool dispatch (runs before LLM so result enriches the prompt) ──
     try:
