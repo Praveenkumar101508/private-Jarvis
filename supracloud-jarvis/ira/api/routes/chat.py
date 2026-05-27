@@ -752,12 +752,13 @@ async def chat_vision(
             from memory.store import save_message
             import logging as _log
             final_text = "".join(full_response)
-            _tu = asyncio.create_task(save_message(conv_id, "user", req.message))
+            _tu = asyncio.create_task(save_message(conv_id, "user", req.message, user_id=_user))
             _tu.add_done_callback(lambda t: t.exception() and _log.getLogger("ira.chat").warning(f"save_message failed: {t.exception()}"))
             _ta = asyncio.create_task(save_message(
                 conv_id, "assistant", final_text,
                 model_used="vision" if vision_url else "qwen3-fast",
                 latency_ms=latency,
+                user_id=_user,
             ))
             _ta.add_done_callback(lambda t: t.exception() and _log.getLogger("ira.chat").warning(f"save_message failed: {t.exception()}"))
         except Exception as e:
@@ -879,12 +880,13 @@ async def chat_document_upload(
 
             from memory.store import save_message
             import logging as _log
-            _tu = asyncio.create_task(save_message(conv_id, "user", f"[Document: {file.filename}] {message}"))
+            _tu = asyncio.create_task(save_message(conv_id, "user", f"[Document: {file.filename}] {message}", user_id=_user))
             _tu.add_done_callback(lambda t: t.exception() and _log.getLogger("ira.chat").warning(f"save_message failed: {t.exception()}"))
             _ta = asyncio.create_task(save_message(
                 conv_id, "assistant", "".join(full_response),
                 model_used="qwen3-deep",
                 latency_ms=latency,
+                user_id=_user,
             ))
             _ta.add_done_callback(lambda t: t.exception() and _log.getLogger("ira.chat").warning(f"save_message failed: {t.exception()}"))
         except Exception as e:
