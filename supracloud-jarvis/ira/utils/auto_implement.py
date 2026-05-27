@@ -197,7 +197,7 @@ async def apply_implementation(
 
     try:
         # ── Step 2: Dry-run validation ────────────────────────────────────────
-        code, out, err = _run(
+        code, out, err = await _run(
             ["git", "apply", "--check", "--whitespace=fix", patch_path],
             cwd=repo,
         )
@@ -222,7 +222,7 @@ async def apply_implementation(
             )
 
         # ── Step 3: Apply patch ───────────────────────────────────────────────
-        code, out, err = _run(
+        code, out, err = await _run(
             ["git", "apply", "--whitespace=fix", patch_path],
             cwd=repo,
         )
@@ -246,7 +246,7 @@ async def apply_implementation(
             f"Files: {', '.join(files_changed)}\n\n"
             f"Co-Authored-By: {author_name} <{author_email}>"
         )
-        code, out, err = _run(
+        code, out, err = await _run(
             [
                 "git",
                 "-c", f"user.name={author_name}",
@@ -266,14 +266,14 @@ async def apply_implementation(
             )
 
         # Extract commit hash
-        _, hash_out, _ = _run(["git", "rev-parse", "--short", "HEAD"], cwd=repo)
+        _, hash_out, _ = await _run(["git", "rev-parse", "--short", "HEAD"], cwd=repo)
         commit_hash = hash_out.strip()
 
         # ── Step 6: Restart affected services ────────────────────────────────
         # NOTE: git push intentionally removed — IRA never pushes automatically.
         restarted: list[str] = []
         for svc in services:
-            rc, _, _ = _run(
+            rc, _, _ = await _run(
                 ["docker", "compose", "restart", svc],
                 cwd=repo / "supracloud-jarvis",
                 timeout=120,
