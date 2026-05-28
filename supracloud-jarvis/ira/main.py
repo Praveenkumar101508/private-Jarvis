@@ -246,6 +246,9 @@ def create_app() -> FastAPI:
     from api.routes.totp import router as totp_router
     app.include_router(totp_router)                              # Feat P26: /auth/totp/enroll + /auth/totp/verify
 
+    from api.routes.calendar import router as calendar_router
+    app.include_router(calendar_router, prefix="/api/v1")        # Feat P27: /calendar/event create + cancel
+
     # ── Global error handler ──────────────────────────────────────────────────
     @app.exception_handler(Exception)
     async def global_exception_handler(request: Request, exc: Exception):

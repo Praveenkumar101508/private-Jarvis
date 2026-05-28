@@ -123,6 +123,106 @@ async def create_calcom_booking(
         return None
 
 
+async def create_calcom_event(
+    event_type_id: int,
+    start: str,
+    name: str,
+    email: str,
+    notes: str = "",
+    idempotency_key: str | None = None,
+) -> dict | None:
+    """
+    Create a Cal.com booking and persist it to calendar_events.  # Feat P27
+
+    idempotency_key: caller-supplied UUID; prevents duplicate bookings on retry.
+    Returns None (not an error) when CALCOM_API_KEY is unset.
+    """
+    cfg = get_settings()
+    if not cfg.calcom_api_key:
+        logger.debug("Cal.com not configured — create_calcom_event is a no-op")
+        return None
+
+    ikey = idempotency_key or str(uuid.uuid4())
+    try:
+        async with httpx.AsyncClient(
+            base_url=cfg.calcom_api_url,
+            headers={
+                "Authorization": f"Bearer {cfg.calcom_api_key}",
+                "Idempotency-Key": ikey,   # Feat P27: safe retries
+            },
+            timeout=15,
+        ) as client:
+            resp = await client.post("/v2/bookings", json={
+                "eventTypeId": event_type_id,
+                "start": start,
+                "responses": {"name": name, "email": email, "notes": notes},
+                "timeZone": "UTC",
+                "language": "en",
+            })
+            resp.raise_for_status()
+            booking = resp.json()
+    except Exception as e:
+        logger.error(f"Cal.com create_calcom_event failed: {e}")
+        return None
+
+    # Persist to local DB so get_upcoming_events works without a live API call
+    external_id = str(booking.get("uid") or booking.get("id") or ikey)
+    try:
+        async with acquire() as conn:
+            await conn.execute(
+                """INSERT INTO calendar_events
+                   (external_id, source, title, attendees, start_at, end_at, location, status)
+                   VALUES ($1, 'calcom', $2, $3, $4::timestamptz, $5::timestamptz, '', 'confirmed')
+                   ON CONFLICT (external_id) DO NOTHING""",
+                external_id,
+                booking.get("title", "Meeting"),
+                json.dumps([{"name": name, "email": email}]),
+                start,
+                booking.get("endTime", start),
+            )
+    except Exception as e:
+        logger.warning(f"Failed to persist calcom event {external_id}: {e}")
+
+    return booking
+
+
+async def cancel_calcom_event(external_id: str) -> bool:
+    """
+    Cancel a Cal.com booking by its external_id and mark it cancelled locally.  # Feat P27
+
+    Returns True on success, False if the API call failed.
+    Returns True (no-op) when CALCOM_API_KEY is unset so callers don't need to check.
+    """
+    cfg = get_settings()
+    if not cfg.calcom_api_key:
+        logger.debug("Cal.com not configured — cancel_calcom_event is a no-op")
+        return True
+
+    try:
+        async with httpx.AsyncClient(
+            base_url=cfg.calcom_api_url,
+            headers={"Authorization": f"Bearer {cfg.calcom_api_key}"},
+            timeout=15,
+        ) as client:
+            resp = await client.delete(f"/v2/bookings/{external_id}")
+            resp.raise_for_status()
+    except Exception as e:
+        logger.error(f"Cal.com cancel_calcom_event({external_id}) failed: {e}")
+        return False
+
+    # Mark cancelled in local DB regardless of whether the row exists
+    try:
+        async with acquire() as conn:
+            await conn.execute(
+                "UPDATE calendar_events SET status='cancelled' WHERE external_id=$1",
+                external_id,
+            )
+    except Exception as e:
+        logger.warning(f"Failed to mark event {external_id} cancelled locally: {e}")
+
+    return True
+
+
 async def get_upcoming_events(hours: int = 24) -> list[dict]:
     """Return calendar events starting within the next N hours."""
     async with acquire() as conn:
