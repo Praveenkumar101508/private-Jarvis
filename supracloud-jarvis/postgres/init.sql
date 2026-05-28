@@ -54,6 +54,18 @@ CREATE TABLE IF NOT EXISTS memory_embeddings (
     metadata    JSONB DEFAULT '{}'
 );
 
+-- Fix P14: fresh installs already have user_id column + HNSW index so migration 004
+-- is a no-op (all its DDL uses IF NOT EXISTS / DROP IF EXISTS). Older installs
+-- still need 004 — do not remove it.
+
+-- Per-user isolation index (migration 004 also creates this idempotently)
+CREATE INDEX IF NOT EXISTS idx_memory_embeddings_user_id
+    ON memory_embeddings (user_id);
+
+-- Date-range purge index (migration 004 also creates this idempotently)
+CREATE INDEX IF NOT EXISTS idx_memory_embeddings_created_at
+    ON memory_embeddings (created_at);
+
 -- HNSW index for fast approximate nearest-neighbour search.
 --
 -- Parameters chosen for a personal-scale deployment (~100k–1M rows):
