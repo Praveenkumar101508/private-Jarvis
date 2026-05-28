@@ -86,8 +86,15 @@ async def _fetch_recent_events(limit: int = 20) -> list[dict]:
 
 
 async def security_guardian(state: IRAState) -> IRAState:
+    # Fix P4: was "response" — the codebase reads "final_response" everywhere;
+    # include metadata fields so the response renders correctly downstream.
     if not state.get("is_owner"):
-        return {**state, "final_response": "I can only perform security operations for the verified owner."}
+        return {
+            **state,
+            "final_response": "I can only perform security operations for the verified owner.",
+            "model_used": "security_gate",
+            "latency_ms": 0,
+        }
 
     t0 = time.monotonic()
     query = state["user_query"]
