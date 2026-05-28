@@ -47,7 +47,8 @@ from voice.language import get_greeting, normalise_lang, LANGUAGE_NAMES
 
 logger = logging.getLogger("ira.voice")
 
-# ── Biometric pipeline startup check ─────────────────────────────────────────
+# Fix P17: probe the real function name; verify_owner never existed — using it
+# caused "Biometric pipeline: DISABLED" even when verification worked downstream.
 try:
     from voice.biometrics import is_owner_authenticated  # noqa: F401
     logger.info("Biometric pipeline: ACTIVE — ECAPA-TDNN speaker verification ready")
