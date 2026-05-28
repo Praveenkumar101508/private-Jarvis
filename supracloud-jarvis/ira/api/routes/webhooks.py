@@ -55,6 +55,8 @@ def _validate_webhook_secret(x_webhook_secret: str | None) -> None:
 
 # ── Lead intake ───────────────────────────────────────────────────────────────
 
+# Fix P12: email fields use EmailStr (not plain str) so invalid addresses are rejected
+# by Pydantic before reaching the DB. Mutable default {} replaced by default_factory.
 class LeadPayload(BaseModel):
     name: str = Field(..., min_length=1, max_length=200)
     email: EmailStr     # validated RFC email
