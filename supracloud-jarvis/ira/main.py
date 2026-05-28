@@ -116,6 +116,12 @@ async def lifespan(app: FastAPI):
     await init_pool()
     logger.info("PostgreSQL pool ready")
 
+    # Fix P22: run durable schema migrations on every boot so upgrades work on
+    # existing volumes (docker-entrypoint-initdb.d only fires on brand-new volumes).
+    from utils.migrations import run_migrations
+    from utils.db import get_pool
+    await run_migrations(get_pool())
+
     await init_redis()
     logger.info("Redis connection ready")
 
