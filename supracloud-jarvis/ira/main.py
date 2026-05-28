@@ -205,11 +205,11 @@ def create_app() -> FastAPI:
                 status_code=401,
                 content={"detail": "Invalid credentials"},
             )
-        # Feat P26: if TOTP is enrolled, require a valid code on every login
+        # Fix P29: only enforce TOTP once it has been verified/enabled
         from utils.db import acquire as _acquire
         async with _acquire() as conn:
             _totp_row = await conn.fetchrow(
-                "SELECT secret FROM totp_secrets WHERE username=$1", form.username
+                "SELECT secret FROM totp_secrets WHERE username=$1 AND enabled=TRUE", form.username
             )
         if _totp_row:
             import pyotp as _pyotp

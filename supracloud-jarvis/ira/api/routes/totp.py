@@ -55,4 +55,9 @@ async def totp_verify(body: VerifyRequest, _user: str = Depends(require_auth)):
         raise HTTPException(status_code=400, detail="TOTP not enrolled — call /auth/totp/enroll first")
     if not pyotp.TOTP(row["secret"]).verify(body.code, valid_window=1):
         raise HTTPException(status_code=401, detail="Invalid or expired TOTP code")
-    return {"verified": True}
+    # Fix P29: a valid code activates the second factor — login won't enforce until this runs
+    async with acquire() as conn:
+        await conn.execute(
+            "UPDATE totp_secrets SET enabled=TRUE WHERE username=$1", _user
+        )
+    return {"verified": True, "enabled": True}
