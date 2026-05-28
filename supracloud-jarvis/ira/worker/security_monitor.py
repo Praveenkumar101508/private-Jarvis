@@ -38,6 +38,11 @@ logger = logging.getLogger("ira.security")
 # we emit it once per process lifetime, not on every 60-second scan cycle.
 _ssh_inactive_warned: bool = False
 
+# Fix P13: cap log reads to prevent OOM when offset resets to 0 on a busy server.
+# 50_000 lines ≈ 50MB of typical nginx log. Offset advances to the read stop point
+# so the next cycle continues from there — no lines are dropped or double-counted.
+_MAX_LINES_PER_SCAN: int = 50_000
+
 # ── Attack pattern regexes ────────────────────────────────────────────────────
 _SQLI_PATTERN = re.compile(
     r"(?:union\s+select|drop\s+table|insert\s+into|or\s+1=1|'--|\bxp_|\bexec\b|"
@@ -185,17 +190,16 @@ async def _read_new_log_lines() -> list[str]:
 
     try:
         with open(nginx_log, "r", errors="replace") as f:
-            MAX_LINES_PER_SCAN = 50_000   # ~50MB of typical nginx log lines
             f.seek(offset)
             lines = []
-            for _ in range(MAX_LINES_PER_SCAN):
+            for _ in range(_MAX_LINES_PER_SCAN):  # Fix P13: use module constant
                 line = f.readline()
                 if not line:
                     break
                 lines.append(line)
-            if len(lines) == MAX_LINES_PER_SCAN:
+            if len(lines) == _MAX_LINES_PER_SCAN:
                 logger.warning(
-                    f"Security monitor: log read capped at {MAX_LINES_PER_SCAN} lines. "
+                    f"Security monitor: log read capped at {_MAX_LINES_PER_SCAN} lines. "
                     "Some events may be skipped this cycle — will catch up next scan."
                 )
             new_offset = f.tell()
