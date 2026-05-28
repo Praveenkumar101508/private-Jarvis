@@ -94,12 +94,21 @@ async def lifespan(app: FastAPI):
     setup_telemetry(service_name="ira-api")
 
     if cfg.dev_mode:
+        # Fix P9: refuse to start DEV_MODE against a public domain to prevent
+        # accidentally exposing a fully open admin endpoint on the internet.
+        if not cfg.is_local_domain:
+            raise RuntimeError(
+                f"DEV_MODE=true is set but IRA_DOMAIN={cfg.ira_domain!r} is not a "
+                "localhost/private address. Refusing to start — this would expose an "
+                "unauthenticated admin endpoint on a public domain. "
+                "Set DEV_MODE=false or use a local domain."
+            )
         logger.warning("=" * 70)
-        logger.warning("⚠️  DEV_MODE IS ENABLED — ALL SECURITY IS DISABLED  ⚠️")
+        logger.warning("⚠️  DEV_MODE ENABLED — AUTH AND BIOMETRICS ARE DISABLED  ⚠️")
         logger.warning("   - Authentication bypassed (any token accepted)")
         logger.warning("   - Biometric gate disabled (all requests treated as owner)")
         logger.warning("   - All LLM calls routed to local Ollama")
-        logger.warning("   NEVER run with DEV_MODE=true in production!")
+        logger.warning("   NEVER USE IN PRODUCTION!")
         logger.warning("=" * 70)
     logger.info(f"Jarvis {cfg.ira_version} starting up...")
 

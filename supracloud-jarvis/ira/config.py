@@ -219,6 +219,23 @@ class Settings(BaseSettings):
     # bypasses biometric gate, and auto-authenticates as admin.
     # NEVER enable in production.
     dev_mode: bool = False
+
+    @property
+    def is_local_domain(self) -> bool:
+        """Fix P9: True when ira_domain resolves to a localhost/private address.
+
+        Checked at startup: DEV_MODE with a public domain is refused.
+        Local values: localhost, 127.x, *.local, RFC1918 (10/172.16-31/192.168).
+        """
+        import re as _re
+        d = self.ira_domain.lower().split(":")[0]  # strip port if present
+        if d in ("localhost", "127.0.0.1") or d.endswith(".local"):
+            return True
+        # RFC1918 prefixes
+        _rfc1918 = _re.compile(
+            r"^(10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+|192\.168\.\d+\.\d+)$"
+        )
+        return bool(_rfc1918.match(d))
     # Ollama base URL — host.docker.internal reaches Windows host from WSL2/Docker
     ollama_base_url: str = "http://host.docker.internal:11434/v1"
     # Ollama model to use for all requests in dev mode
