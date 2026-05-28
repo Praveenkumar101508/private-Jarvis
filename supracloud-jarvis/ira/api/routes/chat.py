@@ -246,7 +246,7 @@ async def chat_stream(
         return EventSourceResponse(tool_result_streamer())
 
     from utils.search_tools import (
-        get_search_context, deep_search_context, is_image_gen_request, is_image_edit_request
+        get_search_context, deep_search_context,
     )
     from agents.grok_personality import build_grok_system_prompt
     from agents.engineer_agent import build_engineer_prompt
@@ -254,12 +254,9 @@ async def chat_stream(
         is_architect_trigger, is_implement_trigger, is_apply_trigger,
         extract_feature_name, stream_architect_proposal, stream_auto_implement,
     )
-    # Feature routing — detect specialised request types
-    from api.routes.video_gen import is_video_gen_request, is_video_understand_request, VideoGenRequest
-    from api.routes.document_create import is_doc_create_request, DocCreateRequest
-    from api.routes.design_tools import is_design_request, DesignRequest
-    from api.routes.audio_gen import is_audio_gen_request, AudioGenRequest as AudioRequest
-    from api.routes.deep_research import is_deep_research_request, is_article_request, DeepResearchRequest, ArticleRequest
+    # Fix P24: feature routing moved to ordered handler registry in _dispatch.py
+    from api.routes._dispatch import dispatch as _feature_dispatch
+    from api.routes.video_gen import is_video_understand_request
 
     # ── Architect Agent: intercept before all other routing ───────────────────
     if is_architect_trigger(req.message):
@@ -380,131 +377,11 @@ async def chat_stream(
 
     memory_ctx = "\n".join(m["content"] for m in memories_raw) if memories_raw else ""
 
-    # ── Image generation path ─────────────────────────────────────────────────
-    if is_image_gen_request(req.message) and not req.is_voice:
-        async def image_gen_stream():
-            yield {"data": json.dumps({"token": "Generating your image… "})}
-            # Fix #79: removed imports of _IMAGE_GEN_URL / _REPLICATE_TOKEN which no
-            # longer exist as module-level vars; use get_settings() at request time
-            # and call the helpers with their current signatures.
-            try:
-                from api.routes.image_gen import GenerateRequest, _generate_sd_webui, _generate_replicate
-                _cfg = get_settings()
-                _image_gen_url = _cfg.image_gen_url.rstrip("/")
-                _replicate_token = _cfg.replicate_api_token
-                if _image_gen_url or _replicate_token:
-                    gen_req = GenerateRequest(
-                        prompt=req.message,
-                        width=1024, height=1024, steps=20,
-                    )
-                    image_b64 = (
-                        await _generate_sd_webui(gen_req, _image_gen_url) if _image_gen_url
-                        else await _generate_replicate(gen_req, _replicate_token, _cfg.flux_model)
-                    )
-                    yield {"data": json.dumps({
-                        "image_generated": True,
-                        "image_b64": image_b64,
-                        "mime_type": "image/png",
-                        "prompt": req.message,
-                    })}
-                    final_text = f"Here is your generated image based on: *{req.message}*"
-                else:
-                    final_text = (
-                        "Image generation is not configured yet.\n\n"
-                        "To enable it, add one of these to your `.env`:\n"
-                        "- `IMAGE_GEN_URL=http://your-sd-webui:7860` (Stable Diffusion)\n"
-                        "- `REPLICATE_API_TOKEN=r8_...` (Flux via Replicate)\n\n"
-                        "Once configured, just ask me to *generate* or *draw* something and I will."
-                    )
-            except Exception as e:
-                final_text = f"Image generation failed: {e}"
-
-            for word in final_text.split(" "):
-                yield {"data": json.dumps({"token": word + " "})}
-                await asyncio.sleep(0.01)
-
-            yield {"data": json.dumps({
-                "done": True, "agent": "image_gen",
-                "latency_ms": 0, "session_id": req.session_id,
-            })}
-
-        return EventSourceResponse(image_gen_stream())
-
-    # ── Image edit path (image attached + edit request) ───────────────────────
-    if req.image_b64 and is_image_edit_request(req.message):
-        async def image_edit_stream():
-            yield {"data": json.dumps({"token": "Editing your image… "})}
-            # Fix #79: same as image gen — use get_settings() and correct signatures
-            try:
-                from api.routes.image_gen import EditRequest, _edit_sd_webui, _edit_replicate
-                _cfg = get_settings()
-                _image_gen_url = _cfg.image_gen_url.rstrip("/")
-                _replicate_token = _cfg.replicate_api_token
-                if _image_gen_url or _replicate_token:
-                    edit_req = EditRequest(image_b64=req.image_b64, instruction=req.message)
-                    image_b64 = (
-                        await _edit_sd_webui(edit_req, _image_gen_url) if _image_gen_url
-                        else await _edit_replicate(edit_req, _replicate_token)
-                    )
-                    yield {"data": json.dumps({
-                        "image_generated": True,
-                        "image_b64": image_b64,
-                        "mime_type": "image/png",
-                        "prompt": req.message,
-                    })}
-                    final_text = "Here is the edited image."
-                else:
-                    final_text = (
-                        "Image editing requires IMAGE_GEN_URL or REPLICATE_API_TOKEN in .env."
-                    )
-            except Exception as e:
-                final_text = f"Image editing failed: {e}"
-
-            for word in final_text.split(" "):
-                yield {"data": json.dumps({"token": word + " "})}
-                await asyncio.sleep(0.01)
-
-            yield {"data": json.dumps({
-                "done": True, "agent": "image_edit",
-                "latency_ms": 0, "session_id": req.session_id,
-            })}
-
-        return EventSourceResponse(image_edit_stream())
-
-    # ── Video Generation path ─────────────────────────────────────────────────
-    if is_video_gen_request(req.message) and not req.is_voice:
-        from api.routes.video_gen import video_generate
-        video_req = VideoGenRequest(prompt=req.message, session_id=req.session_id)
-        return await video_generate(video_req, _user)
-
-    # ── Document Creation path ────────────────────────────────────────────────
-    if is_doc_create_request(req.message) and not req.is_voice:
-        from api.routes.document_create import document_create
-        doc_req = DocCreateRequest(prompt=req.message, session_id=req.session_id)
-        return await document_create(doc_req, _user)
-
-    # ── Design Tools path ─────────────────────────────────────────────────────
-    if is_design_request(req.message) and not req.is_voice:
-        from api.routes.design_tools import design_generate
-        design_req = DesignRequest(prompt=req.message, session_id=req.session_id)
-        return await design_generate(design_req, _user)
-
-    # ── Audio Generation path ─────────────────────────────────────────────────
-    if is_audio_gen_request(req.message) and not req.is_voice:
-        from api.routes.audio_gen import audio_generate
-        audio_req = AudioRequest(prompt=req.message, session_id=req.session_id)
-        return await audio_generate(audio_req, _user)
-
-    # ── Deep Research path ────────────────────────────────────────────────────
-    if is_deep_research_request(req.message) and not req.is_voice:
-        from api.routes.deep_research import deep_research
-        research_req = DeepResearchRequest(topic=req.message, session_id=req.session_id)
-        return await deep_research(research_req, _user)
-
-    if is_article_request(req.message) and not req.is_voice:
-        from api.routes.deep_research import generate_article
-        article_req = ArticleRequest(topic=req.message, session_id=req.session_id)
-        return await generate_article(article_req, _user)
+    # Fix P24: feature handler registry replaces the 8-block if-ladder.
+    # Handlers are in _dispatch.py; first match wins; None means fall through.
+    _dispatched = await _feature_dispatch(req, _user)
+    if _dispatched is not None:
+        return _dispatched
 
     messages = [{"role": "system", "content": system_prompt}]
     if memory_ctx:
