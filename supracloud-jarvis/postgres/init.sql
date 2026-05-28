@@ -184,10 +184,12 @@ BEGIN
 END;
 $$;
 
+DROP TRIGGER IF EXISTS trg_conversations_updated_at ON conversations;  -- Fix P28
 CREATE TRIGGER trg_conversations_updated_at
     BEFORE UPDATE ON conversations
     FOR EACH ROW EXECUTE FUNCTION update_updated_at();
 
+DROP TRIGGER IF EXISTS trg_agents_updated_at ON agents;  -- Fix P28
 CREATE TRIGGER trg_agents_updated_at
     BEFORE UPDATE ON agents
     FOR EACH ROW EXECUTE FUNCTION update_updated_at();

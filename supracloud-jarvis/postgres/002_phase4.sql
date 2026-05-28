@@ -139,6 +139,7 @@ ON CONFLICT (key) DO NOTHING;
 -- Triggers: auto-update updated_at
 -- =============================================================================
 
+DROP TRIGGER IF EXISTS trg_tasks_updated_at ON tasks;  -- Fix P28
 CREATE TRIGGER trg_tasks_updated_at
     BEFORE UPDATE ON tasks
     FOR EACH ROW EXECUTE FUNCTION update_updated_at();

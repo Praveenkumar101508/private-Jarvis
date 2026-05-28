@@ -18,6 +18,7 @@ CREATE TABLE IF NOT EXISTS voice_profiles (
     updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+DROP TRIGGER IF EXISTS trg_voice_profiles_updated_at ON voice_profiles;  -- Fix P28
 CREATE TRIGGER trg_voice_profiles_updated_at
     BEFORE UPDATE ON voice_profiles
     FOR EACH ROW EXECUTE FUNCTION update_updated_at();
