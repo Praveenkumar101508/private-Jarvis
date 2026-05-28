@@ -188,7 +188,7 @@ def create_app() -> FastAPI:
     from fastapi import Depends
 
     @app.post("/auth/token", tags=["auth"], summary="Get a JWT token")
-    @limiter.limit("5/minute")
+    @limiter.limit("5/minute")   # Fix P10: app-layer brute-force protection (nginx may be bypassed)
     async def login(request: Request, form: OAuth2PasswordRequestForm = Depends()):
         if not authenticate_user(form.username, form.password):
             return JSONResponse(
