@@ -100,7 +100,7 @@ async def _check_expert_rate_limit(username: str) -> tuple[bool, int]:
     Fix #46: INCR and EXPIRE are sent in a single pipeline so the TTL is
     always set, even if two concurrent first-calls race or the process
     crashes between the two commands. Without the pipeline the key could
-    become immortal, permanently locking a user after 3 sessions.
+    become immortal, permanently locking a user after _EXPERT_RATE_LIMIT sessions.
     """
     key = f"expert_rate:{username}"
     try:
@@ -632,11 +632,11 @@ async def chat_expert(
     Grok-style Expert Mode: 5 specialist agents run in true parallel, debate,
     and stream their individual thoughts + supervisor synthesis via SSE.
 
-    Rate limit: max 3 sessions per user per hour (tracked in Redis).
+    Rate limit: max _EXPERT_RATE_LIMIT sessions per user per hour (tracked in Redis).  # Fix P18
     Events: {"agent":"researcher","label":"Researcher","emoji":"🔬","chunk":"...","done":false}
             {"agent":"supervisor","done":true,"latency_ms":N}
     """
-    # Server-side rate limit: 3 Expert Mode sessions per hour per user
+    # Fix P18: rate limit is _EXPERT_RATE_LIMIT (currently 20/hour), not the old 3/hour
     allowed, remaining = await _check_expert_rate_limit(_user)
     if not allowed:
         raise HTTPException(
