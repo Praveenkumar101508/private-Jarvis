@@ -34,6 +34,10 @@ from worker.notifier import notify
 
 logger = logging.getLogger("ira.security")
 
+# Fix P7: track whether the "SSH monitoring inactive" warning has been logged so
+# we emit it once per process lifetime, not on every 60-second scan cycle.
+_ssh_inactive_warned: bool = False
+
 # ── Attack pattern regexes ────────────────────────────────────────────────────
 _SQLI_PATTERN = re.compile(
     r"(?:union\s+select|drop\s+table|insert\s+into|or\s+1=1|'--|\bxp_|\bexec\b|"
@@ -279,12 +283,30 @@ async def _check_system_health() -> list[dict]:
 async def _check_ssh_failures() -> list[dict]:
     """Parse auth.log for failed SSH logins since last scan offset.
 
-    Falls back to reading recent journald output when auth.log is absent
-    (common on systems where the bind-mount file does not exist on the host).
+    Fix P7: when both auth.log is unreadable AND journald is unavailable, log
+    a single WARNING at first occurrence so operators know SSH monitoring is
+    inactive, without spamming every 60-second scan cycle.
+
+    Working path: set SSH_LOG_PATH env to a readable copy of auth.log
+    (e.g. via a log-shipper sidecar or by adding the 'ira' user to the 'adm'
+    group on Ubuntu — `usermod -aG adm ira` + matching GID in Dockerfile.worker).
     """
-    if not os.path.exists(get_settings().ssh_log_path):  # Fix L16: lazy read from config
-        return await _check_ssh_failures_journald()
-    return await _check_ssh_failures_file()
+    global _ssh_inactive_warned  # noqa: PLW0603
+
+    ssh_log = get_settings().ssh_log_path
+    if not os.path.exists(ssh_log):
+        result = await _check_ssh_failures_journald()
+        if not result and not _ssh_inactive_warned:
+            _ssh_inactive_warned = True
+            logger.warning(
+                "SSH monitoring inactive: auth.log not found at %s and journalctl "
+                "missing — see docs for fix (set SSH_LOG_PATH or add ira user to adm group).",
+                ssh_log,
+            )
+        return result
+
+    result = await _check_ssh_failures_file()
+    return result
 
 
 def _parse_ssh_lines(lines: list[str]) -> list[dict]:
@@ -362,7 +384,15 @@ async def _check_ssh_failures_file() -> list[dict]:
                 lines.append(line)
             new_offset = f.tell()
     except PermissionError:
-        logger.debug("No permission to read SSH log — mount with correct volume")
+        # Fix P7: emit warning once when file is unreadable (640 root:adm vs non-adm user)
+        global _ssh_inactive_warned  # noqa: PLW0603
+        if not _ssh_inactive_warned:
+            _ssh_inactive_warned = True
+            logger.warning(
+                "SSH monitoring inactive: auth.log unreadable and journalctl missing — "
+                "add the 'ira' user to the 'adm' group (usermod -aG adm ira) or set "
+                "SSH_LOG_PATH to a readable copy. See deployment docs.",
+            )
         return []
 
     if new_offset > offset:
