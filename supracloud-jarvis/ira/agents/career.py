@@ -33,7 +33,8 @@ def _build_system(owner_name: str) -> str:
         f"Be precise and encouraging. This is {owner_name}'s career pipeline."
     )
 
-# Module-level constant required by chat.py streaming router
+# Fix P15: module-level constant is the single source of truth; chat.py imports it
+# as CAREER_SYSTEM. The in-function rebuild below was removed — it was identical.
 _SYSTEM = _build_system(get_settings().owner_name)
 
 _GITHUB_RE = re.compile(
@@ -82,7 +83,7 @@ async def career_agent(state: IRAState) -> IRAState:
     except Exception as e:
         tool_results.append({"tool": "error", "message": str(e)})
 
-    messages = [{"role": "system", "content": _build_system(get_settings().owner_name)}]
+    messages = [{"role": "system", "content": _SYSTEM}]  # Fix P15: use module constant, not redundant rebuild
 
     if tool_results:
         messages.append({

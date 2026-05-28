@@ -58,7 +58,8 @@ _DISPATCH_RE = re.compile(
 )
 
 
-# Module-level constant required by chat.py streaming router
+# Fix P15: module-level constant is the single source of truth; chat.py imports it
+# as SECURITY_SYSTEM. The function uses _SYSTEM directly — no in-function rebuild.
 _SYSTEM = _build_system(get_settings().owner_name)
 
 
