@@ -101,15 +101,15 @@ else
     # Auto-generate secrets — each one is unique
     VLLM_KEY=$(openssl rand -hex 32)
     IRA_SECRET=$(openssl rand -hex 32)
-    # Mint a 1-year JWT for the voice service.
-    # Rotate annually: re-run setup.sh or generate manually (see .env.example comment).
+    # Fix P2: voice service token must be a JWT signed with IRA_SECRET_KEY (sub=ira-voice),
+    # not a random hex string, or the API rejects it with 401. Expires in 10 years.
     VOICE_TOKEN=$(python3 -c "
 import sys
 try:
     from jose import jwt
     import datetime
     secret = '${IRA_SECRET}'
-    expire = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=365)
+    expire = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=3650)
     token = jwt.encode({'sub': 'ira-voice', 'exp': expire}, secret, algorithm='HS256')
     print(token)
 except ImportError:
