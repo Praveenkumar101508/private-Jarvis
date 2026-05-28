@@ -753,6 +753,7 @@ async def chat_vision(
             from memory.store import save_message
             import logging as _log
             final_text = "".join(full_response)
+            # Fix P3: scope vision saves to the authenticated user (not "system")
             _tu = asyncio.create_task(save_message(conv_id, "user", req.message, user_id=_user))
             _tu.add_done_callback(lambda t: t.exception() and _log.getLogger("ira.chat").warning(f"save_message failed: {t.exception()}"))
             _ta = asyncio.create_task(save_message(
@@ -881,6 +882,7 @@ async def chat_document_upload(
 
             from memory.store import save_message
             import logging as _log
+            # Fix P3: scope document saves to the authenticated user (not "system")
             _tu = asyncio.create_task(save_message(conv_id, "user", f"[Document: {file.filename}] {message}", user_id=_user))
             _tu.add_done_callback(lambda t: t.exception() and _log.getLogger("ira.chat").warning(f"save_message failed: {t.exception()}"))
             _ta = asyncio.create_task(save_message(
