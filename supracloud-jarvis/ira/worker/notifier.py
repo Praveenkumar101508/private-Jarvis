@@ -103,6 +103,8 @@ async def _publish_redis(payload: dict) -> None:
 
 _PRIORITY_EMOJI = {"info": "ℹ️", "warning": "⚠️", "critical": "🚨"}
 
+# Fix P8: use HTML mode + html.escape() so user-controlled content (lead names,
+# scan output) cannot inject Markdown formatting or break the message (Telegram 400).
 async def _send_telegram(title: str, body: str, priority: Priority, cfg) -> None:
     emoji = _PRIORITY_EMOJI.get(priority, "ℹ️")
     safe_title = html.escape(str(title))
