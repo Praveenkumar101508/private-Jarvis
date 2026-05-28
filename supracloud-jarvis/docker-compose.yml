@@ -105,7 +105,7 @@ services:
       - ./postgres/init.sql:/docker-entrypoint-initdb.d/01_init.sql:ro
       - ./postgres/002_phase4.sql:/docker-entrypoint-initdb.d/02_phase4.sql:ro
       - ./postgres/003_biometrics.sql:/docker-entrypoint-initdb.d/03_biometrics.sql:ro
-      - ./postgres/004_memory_isolation_hnsw.sql:/docker-entrypoint-initdb.d/04_memory_hnsw.sql:ro
+      - ./postgres/004_memory_isolation_hnsw.sql:/docker-entrypoint-initdb.d/04_memory_hnsw.sql:ro  # Fix P1: wire migration 004 (user_id + HNSW) into postgres init
     ports:
       # Bind to localhost only — never expose DB directly to the internet
       - "127.0.0.1:5432:5432"
