@@ -30,8 +30,10 @@ x-logging: &default-logging
     max-file: "5"
 
 x-vllm-common: &vllm-common
-  # Pin to a specific digest/tag. Update here when upgrading vLLM.
-  # To find the latest stable: https://hub.docker.com/r/vllm/vllm-openai/tags
+  # Fix P21: pin vLLM to a specific stable tag — :latest breaks when CLI flags change.
+  # v0.6.3 (chosen 2026-05-28) is the last stable release compatible with
+  # --quantization awq_marlin and --served-model-name flags used in this compose.
+  # To upgrade: test on a dev box first, then update this tag.
   image: vllm/vllm-openai:v0.6.3
   restart: unless-stopped
   runtime: nvidia

@@ -1,3 +1,4 @@
+# Fix P21: all packages pinned with == or >=,< ranges — no bare unpinned lines.
 # ── Web framework ──────────────────────────────────────────────────────────────
 fastapi==0.115.5
 uvicorn[standard]==0.32.1
