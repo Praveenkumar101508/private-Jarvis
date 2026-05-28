@@ -190,7 +190,7 @@ async def chat_stream(
         "is_owner": owner,
         "clearance_level": "admin" if owner else "public",
         "is_voice": req.is_voice,
-        "user_id": _user,
+        "user_id": _user,  # Fix P5: required IRAState field — prevents latent KeyError in classify()
         "error": None,
     }
     classified = await classify(temp_state)
