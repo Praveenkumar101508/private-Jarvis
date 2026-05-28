@@ -191,16 +191,33 @@ def create_app() -> FastAPI:
 
     # ── Auth endpoint (not a router — keeps it simple) ────────────────────────
     from fastapi.security import OAuth2PasswordRequestForm
-    from fastapi import Depends
+    from fastapi import Depends, Form
 
     @app.post("/auth/token", tags=["auth"], summary="Get a JWT token")
     @limiter.limit("5/minute")   # Fix P10: app-layer brute-force protection (nginx may be bypassed)
-    async def login(request: Request, form: OAuth2PasswordRequestForm = Depends()):
+    async def login(
+        request: Request,
+        form: OAuth2PasswordRequestForm = Depends(),
+        totp_code: str | None = Form(None),  # Feat P26: optional TOTP field
+    ):
         if not authenticate_user(form.username, form.password):
             return JSONResponse(
                 status_code=401,
                 content={"detail": "Invalid credentials"},
             )
+        # Feat P26: if TOTP is enrolled, require a valid code on every login
+        from utils.db import acquire as _acquire
+        async with _acquire() as conn:
+            _totp_row = await conn.fetchrow(
+                "SELECT secret FROM totp_secrets WHERE username=$1", form.username
+            )
+        if _totp_row:
+            import pyotp as _pyotp
+            if not totp_code or not _pyotp.TOTP(_totp_row["secret"]).verify(totp_code, valid_window=1):
+                return JSONResponse(
+                    status_code=401,
+                    content={"detail": "TOTP code required or invalid"},
+                )
         return create_token(form.username)
 
     # ── Routers ───────────────────────────────────────────────────────────────
@@ -225,6 +242,9 @@ def create_app() -> FastAPI:
 
     from api.routes.files import router as files_router
     app.include_router(files_router, prefix="/api/v1")           # Feat P25: /files upload/list/download/delete
+
+    from api.routes.totp import router as totp_router
+    app.include_router(totp_router)                              # Feat P26: /auth/totp/enroll + /auth/totp/verify
 
     # ── Global error handler ──────────────────────────────────────────────────
     @app.exception_handler(Exception)
