@@ -103,6 +103,7 @@ class Settings(BaseSettings):
     embedding_dim: int = 1024
     embedding_device: str = "cpu"     # Run embeddings on CPU to save VRAM
     rag_top_k: int = 5                # Top-K memories to retrieve per query
+    rag_min_similarity: float = 0.6   # Fix P20: configurable threshold; tune from DEBUG logs
 
     # ── Agent behaviour ───────────────────────────────────────────────────────
     max_tool_calls: int = 10

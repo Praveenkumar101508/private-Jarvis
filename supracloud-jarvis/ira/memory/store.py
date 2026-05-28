@@ -119,6 +119,9 @@ async def retrieve(
     query_vec = await embed_one(query)
     vector_str = "[" + ",".join(map(str, query_vec)) + "]"
 
+    # Fix P20: read threshold from config so it's tunable without a code change
+    threshold = cfg.rag_min_similarity
+
     async with acquire() as conn:
         rows = await conn.fetch(
             """SELECT content, source_type,
@@ -129,11 +132,23 @@ async def retrieve(
                LIMIT $2""",
             vector_str, k, user_id,
         )
-    return [
+
+    results = [
         {"content": r["content"], "source_type": r["source_type"], "similarity": float(r["similarity"])}
         for r in rows
-        if float(r["similarity"]) > 0.6   # Filter out weak matches
+        if float(r["similarity"]) >= threshold
     ]
+
+    # Fix P20: log best similarity when all results are below threshold so operators
+    # can tune RAG_MIN_SIMILARITY from logs without guessing.
+    if not results and rows:
+        best = max(float(r["similarity"]) for r in rows)
+        logger.debug(
+            "memory retrieve: best similarity %.3f below threshold %.2f — returning empty",
+            best, threshold,
+        )
+
+    return results
 
 
 # ── Memory retention (Fix #75) ────────────────────────────────────────────────
