@@ -15,12 +15,18 @@ CLOUD UPGRADE PATH (8×H100 80GB):
 """
 
 from functools import lru_cache
+from pathlib import Path
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# Fix P19: only load .env when the file is present; in Docker, config comes
+# from environment: blocks and no .env is copied into the image — setting
+# env_file=".env" unconditionally causes a harmless but noisy cold-start warning.
+_ENV_FILE = ".env" if Path(".env").exists() else None
 
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=_ENV_FILE,
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",
