@@ -32,8 +32,11 @@ _MAX_BYTES = 50 * 1024 * 1024  # 50 MB
 
 
 def _user_dir(user_id: str) -> Path:
-    d = (_FILES_ROOT / user_id).resolve()
-    if not str(d).startswith(str(_FILES_ROOT.resolve())):
+    root = _FILES_ROOT.resolve()
+    d = (root / user_id).resolve()
+    # Fix P30: is_relative_to avoids the str.startswith prefix bypass
+    # (e.g. /data/files-evil starts with /data/files but is not relative to it)
+    if not d.is_relative_to(root):
         raise ValueError("Path traversal attempt")
     return d
 
