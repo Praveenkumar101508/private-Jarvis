@@ -63,6 +63,8 @@ async def get_lockdown_state() -> bool:
         redis = get_redis()
         val = await redis.get(_REDIS_LOCKDOWN_KEY)
         if val is not None:
+            # Fix P16: Redis client has decode_responses=True so val is always str;
+            # the dead b"1" bytes branch has been removed.
             return val == "1"
     except Exception as e:
         logger.debug(f"Redis lockdown read failed (falling back to DB): {e}")
