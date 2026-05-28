@@ -172,27 +172,19 @@ async def chat_stream(
 
     from agents.state import IRAState
     from agents.supervisor import classify, is_restricted_domain
-    from langchain_core.messages import HumanMessage
+    from agents.graph import make_initial_state  # Fix P23: shared factory prevents drift
 
-    temp_state: IRAState = {
-        "messages": [HumanMessage(content=req.message)],
-        "session_id": req.session_id,
-        "conversation_id": conv_id,
-        "user_query": req.message,
-        "active_agent": "conversational",
-        "use_deep_model": False,
-        "mode": req.mode,
-        "memory_context": "",
-        "final_response": "",
-        "stream_tokens": [],
-        "latency_ms": 0,
-        "model_used": "qwen3-fast",  # Fix L12: was "llama-fast" initial state default
-        "is_owner": owner,
-        "clearance_level": "admin" if owner else "public",
-        "is_voice": req.is_voice,
-        "user_id": _user,  # Fix P5: required IRAState field — prevents latent KeyError in classify()
-        "error": None,
-    }
+    # Fix P23: use shared factory so temp_state and run_graph() initial_state
+    # can never have different required fields or wrong defaults.
+    temp_state = make_initial_state(
+        session_id=req.session_id,
+        conversation_id=conv_id,
+        user_query=req.message,
+        user_id=_user,
+        is_owner=owner,
+        mode=req.mode,
+        is_voice=req.is_voice,
+    )
     classified = await classify(temp_state)
     active_agent = classified["active_agent"]
     use_deep = classified["use_deep_model"]

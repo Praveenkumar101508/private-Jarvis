@@ -245,6 +245,39 @@ def get_graph():
     return _compiled_graph
 
 
+def make_initial_state(
+    *,
+    session_id: str,
+    conversation_id: str,
+    user_query: str,
+    user_id: str,
+    is_owner: bool = False,
+    mode: str = "assistant",
+    is_voice: bool = False,
+    message_history: list | None = None,
+) -> IRAState:
+    # Fix P23: single factory so run_graph() and chat_stream() cannot drift out of sync
+    return {
+        "messages": [HumanMessage(content=user_query)] if not message_history else message_history,
+        "session_id": session_id,
+        "conversation_id": conversation_id,
+        "user_query": user_query,
+        "active_agent": "conversational",
+        "use_deep_model": False,
+        "mode": mode,
+        "memory_context": "",
+        "final_response": "",
+        "stream_tokens": [],
+        "latency_ms": 0,
+        "model_used": "qwen3-fast",
+        "is_owner": is_owner,
+        "clearance_level": "admin" if is_owner else "public",
+        "is_voice": is_voice,
+        "user_id": user_id,
+        "error": None,
+    }
+
+
 async def run_graph(
     session_id: str,
     conversation_id: str,
@@ -267,25 +300,16 @@ async def run_graph(
     """
     graph = get_graph()
 
-    initial_state: IRAState = {
-        "messages": [HumanMessage(content=user_query)] if not message_history else message_history,
-        "session_id": session_id,
-        "conversation_id": conversation_id,
-        "user_query": user_query,
-        "active_agent": "conversational",
-        "use_deep_model": False,
-        "mode": mode,
-        "memory_context": "",
-        "final_response": "",
-        "stream_tokens": [],
-        "latency_ms": 0,
-        "model_used": "qwen3-fast",  # Fix L12: was "llama-fast" — matches config.vllm_fast_model
-        "is_owner": is_owner,
-        "clearance_level": "admin" if is_owner else "public",
-        "is_voice": is_voice,
-        "user_id": user_id,
-        "error": None,
-    }
+    initial_state = make_initial_state(  # Fix P23: use shared factory
+        session_id=session_id,
+        conversation_id=conversation_id,
+        user_query=user_query,
+        user_id=user_id,
+        is_owner=is_owner,
+        mode=mode,
+        is_voice=is_voice,
+        message_history=message_history,
+    )
 
     config = {"configurable": {"thread_id": session_id}}
 
