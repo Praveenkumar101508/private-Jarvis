@@ -26,6 +26,7 @@ logger = logging.getLogger("ira.executor")
 from agents.state import IRAState
 from utils.llm import chat_complete
 from utils.db import acquire
+from utils.cmd_safety import check_command_args as _check_cmd_args  # Fix P6: shared path validator
 
 # Only these command prefixes are ever permitted (read-only, no network, no code execution)
 _ALLOWLIST = frozenset({
@@ -180,16 +181,15 @@ async def executor(state: IRAState) -> IRAState:
 
     allowed = extracted_cmd.strip().upper() != "NONE" and _is_allowed(extracted_cmd)
 
-    # Path restriction check: parse into parts and reject any restricted arg
+    # Path restriction check (Fix P6): use shared cmd_safety validator for robust path check
     path_safe = True
     if allowed and extracted_cmd.strip().upper() != "NONE":
         try:
             parts = shlex.split(extracted_cmd)
-            for arg in parts[1:]:  # skip the command name itself
-                if not is_safe_path(arg):
-                    path_safe = False
-                    logger.warning(f"Executor blocked restricted path in command: {extracted_cmd!r}")
-                    break
+            ok, reason = _check_cmd_args(parts)
+            if not ok:
+                path_safe = False
+                logger.warning(f"Executor blocked by path check: {reason!r} cmd={extracted_cmd!r}")
         except ValueError:
             path_safe = False
 

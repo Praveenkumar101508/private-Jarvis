@@ -79,12 +79,25 @@ async def run_terminal_command(command: str) -> dict:
     cmd_stripped = command.strip()
     cmd_lower = cmd_stripped.lower()
 
+    # Gate 1: prefix allowlist
     if not any(cmd_lower.startswith(p.lower()) for p in _ALLOWED_PREFIXES):
         return {
             "error": "Command not in allowlist. Only read-only commands are permitted.",
             "allowed_examples": ["git status", "docker ps", "ls", "ping 8.8.8.8"],
             "blocked": command,
         }
+
+    # Gate 2 (Fix P6): reject path traversal, glob chars, and paths outside allow-roots
+    try:
+        import shlex as _shlex
+        from utils.cmd_safety import check_command_args as _check
+        _ok, _reason = _check(_shlex.split(cmd_stripped))
+        if not _ok:
+            logger.warning(f"run_terminal_command blocked by path check: {_reason!r} for cmd={cmd_stripped!r}")
+            return {"error": f"Command rejected: {_reason}", "blocked": command}
+    except Exception as _ce:
+        logger.error(f"cmd_safety check error: {_ce}")
+        return {"error": "Command safety check failed.", "blocked": command}
 
     try:
         import shlex
