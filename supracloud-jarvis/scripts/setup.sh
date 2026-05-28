@@ -189,6 +189,21 @@ PYEOF
     chmod 600 .env
     ok ".env created and secrets auto-generated."
 
+    # Fix P31: warn loudly if the voice JWT could not be minted on this host
+    # (python-jose may not be installed on the setup host — the placeholder is
+    # syntactically valid but the voice service will reject it with 401)
+    if grep -q "IRA_VOICE_API_TOKEN=REPLACE_WITH_JWT_AFTER_INSTALL" .env; then
+        warn "Voice token NOT generated: python-jose missing on this host."
+        warn "Run:  pip install 'python-jose[cryptography]'  then re-run setup.sh,"
+        warn "OR mint it inside the API container after 'docker compose up -d':"
+        warn '  docker compose run --rm ira-api python3 -c \'
+        warn '    "from jose import jwt; import datetime as d; secret=open(\".env\").read()'
+        warn '     then paste the output into IRA_VOICE_API_TOKEN in .env manually."'
+        warn "Simpler one-liner (replace SECRET with your IRA_SECRET_KEY value):"
+        warn '  python3 -c "from jose import jwt; import datetime as d; print(jwt.encode({\"sub\":\"ira-voice\",\"exp\":d.datetime.now(d.timezone.utc)+d.timedelta(days=3650)},\"SECRET\",\"HS256\"))"'
+        warn "Then paste the result into IRA_VOICE_API_TOKEN in .env."
+    fi
+
     # Offer to encrypt .env with sops if age key is available
     if command -v sops &>/dev/null && [[ -f "${HOME}/.config/sops/age/keys.txt" ]]; then
         info "Encrypting .env with sops (add .env.enc to git instead of .env)..."
