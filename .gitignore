@@ -14,8 +14,10 @@ nginx/certs/
 *.sqlite
 .cloudflared/
 
-# Generated files
+# Fix P6/P11: generated & personal resume artifacts
 ira/tailored_resume.md
+ira/tailored_resumes/
+ira/base_resume.md
 
 # Dependencies
 node_modules/
