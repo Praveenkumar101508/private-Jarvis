@@ -223,6 +223,9 @@ def create_app() -> FastAPI:
     app.include_router(deep_research_router, prefix="/api/v1")   # /research/deep + /research/article + /research/report
     app.include_router(multimodal_router, prefix="/api/v1")      # /multimodal/analyse
 
+    from api.routes.files import router as files_router
+    app.include_router(files_router, prefix="/api/v1")           # Feat P25: /files upload/list/download/delete
+
     # ── Global error handler ──────────────────────────────────────────────────
     @app.exception_handler(Exception)
     async def global_exception_handler(request: Request, exc: Exception):

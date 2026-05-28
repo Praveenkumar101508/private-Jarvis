@@ -391,6 +391,8 @@ services:
       - hf_cache:/home/jarvis/.cache/huggingface
       # Backup volume — API serves backup downloads from here
       - backup_data:/backups:ro
+      # Feat P25: persistent user-uploaded files (read-write)
+      - files_data:/data/files
     ports:
       - "127.0.0.1:8000:8000"
     depends_on:
@@ -626,6 +628,8 @@ volumes:
   nginx_logs:
     driver: local
   backup_data:          # Database backups (pg_dump → .sql.gz, kept 7 days)
+    driver: local
+  files_data:           # Feat P25: persistent user-uploaded files across sessions
     driver: local
 
 # ── Networks ──────────────────────────────────────────────────────────────────
