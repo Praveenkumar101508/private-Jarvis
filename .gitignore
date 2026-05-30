@@ -15,9 +15,11 @@ nginx/certs/
 .cloudflared/
 
 # Fix P6/P11: generated & personal resume artifacts
-ira/tailored_resume.md
-ira/tailored_resumes/
-ira/base_resume.md
+# Use **/ so these match under the nested supracloud-jarvis/ project root too
+# (a bare "ira/..." pattern is anchored to this .gitignore's dir and would miss it).
+**/tailored_resume.md
+**/tailored_resumes/
+**/base_resume.md
 
 # Dependencies
 node_modules/
