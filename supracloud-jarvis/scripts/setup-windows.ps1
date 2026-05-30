@@ -26,8 +26,10 @@ param(
     # app role/db. If omitted, you'll be prompted (or set $env:PGPASSWORD first).
     [string]$PgSuperPassword = $env:PGPASSWORD,
     [string]$PgSuperUser     = "postgres",
-    [string]$OllamaModel     = "qwen3:14b",   # L2: the local 14B chat model
-    [switch]$SkipDeps                          # skip pip/npm install if set
+    [string]$OllamaModel     = "qwen3:14b",                  # L2: the local 14B chat model
+    [string]$EmbeddingModel  = "BAAI/bge-large-en-v1.5",     # A7: sentence-transformers embedder (1024-dim)
+    [string]$RerankerModel   = "BAAI/bge-reranker-v2-m3",    # A7: cross-encoder reranker
+    [switch]$SkipDeps                                         # skip pip/npm install if set
 )
 
 $ErrorActionPreference = "Stop"
@@ -158,6 +160,11 @@ REDIS_HOST=localhost
 REDIS_PORT=6379
 DEV_MODE=false
 IRA_DOMAIN=localhost
+# A7: accuracy levers OFF for the FIRST boot test (clean L1-L9 baseline, no new
+# variables). The models are still pre-downloaded below, so flipping these to
+# true after the boot test passes is instant. See ACCURACY_LAYER.md.
+RERANKER_ENABLED=false
+WEB_SEARCH_ENABLED=false
 # Voice is OFF by default locally. If you enable voice, mint a real JWT and set:
 # IRA_VOICE_API_TOKEN=<signed-jwt>   (see LOCAL_SETUP.md)
 "@
@@ -176,9 +183,24 @@ if (-not $SkipDeps) {
         & $pip install --upgrade pip
         & $pip install -r (Join-Path $ProjectRoot "ira\requirements.txt")
         Write-Ok "Python deps installed into .venv"
+
+        # A7: pre-download the CPU models so the first chat doesn't stall on a
+        # surprise download. Embedder is always used; reranker is pre-cached even
+        # though it's OFF for the first boot, so enabling it later is instant.
+        Write-Step "5b. Pre-downloading embedding + reranker models (CPU, one-time)"
+        $py = Join-Path $venv "Scripts\python.exe"
+        $dl = "from sentence_transformers import SentenceTransformer, CrossEncoder; " +
+              "print('embedder...'); SentenceTransformer('$EmbeddingModel'); " +
+              "print('reranker...'); CrossEncoder('$RerankerModel'); print('models cached')"
+        try {
+            & $py -c $dl
+            Write-Ok "Embedder ($EmbeddingModel) and reranker ($RerankerModel) cached"
+        } catch {
+            Write-Warn "Model pre-download failed (will download on first use instead): $_"
+        }
     } else { Write-Warn "Skipping pip -- Python not installed." }
 
-    Write-Step "5b. Installing frontend dependencies"
+    Write-Step "5c. Installing frontend dependencies"
     if ((Test-Cmd npm) -and (Test-Path $FrontendDir)) {
         Push-Location $FrontendDir
         npm install
