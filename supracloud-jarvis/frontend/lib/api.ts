@@ -5,6 +5,10 @@
  * routing (bypasses nginx, lower latency).
  */
 
+// L7: SSR uses IRA_API_INTERNAL_URL (set to http://localhost:8000 in .env.local
+// for native/no-Docker dev; "ira-api:8000" remains the Docker default). The
+// browser uses same-origin ("") -> next.config.js rewrites /api,/auth,/health
+// to the local API, so no nginx is needed in local mode.
 const INTERNAL =
   typeof window === "undefined"
     ? process.env.IRA_API_INTERNAL_URL || "http://ira-api:8000"
