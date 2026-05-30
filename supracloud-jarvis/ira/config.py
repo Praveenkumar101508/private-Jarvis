@@ -47,7 +47,9 @@ class Settings(BaseSettings):
     postgres_user: str = "jarvis"
     postgres_password: str
     postgres_db: str = "jarvis_db"
-    postgres_host: str = "postgres"
+    # L4: default localhost for native Windows (no Docker). The future Docker
+    # stack overrides with POSTGRES_HOST=postgres (the compose service name).
+    postgres_host: str = "localhost"
     postgres_port: int = 5432
 
     @property
@@ -67,7 +69,9 @@ class Settings(BaseSettings):
 
     # ── Redis ─────────────────────────────────────────────────────────────────
     redis_password: str
-    redis_host: str = "redis"
+    # L4: default localhost for native Windows (no Docker). The future Docker
+    # stack overrides with REDIS_HOST=redis (the compose service name).
+    redis_host: str = "localhost"
     redis_port: int = 6379
 
     @property
