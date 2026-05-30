@@ -155,6 +155,17 @@ async def _warm_embeddings():
     except Exception as e:
         logger.warning(f"Embedding model warm-up failed: {e}")
 
+    # A2: warm the reranker cross-encoder too (only if enabled) so the first
+    # memory query isn't slowed by the one-time model load.
+    cfg = get_settings()
+    if cfg.reranker_enabled:
+        try:
+            from memory.reranker import preload_model as preload_reranker
+            preload_reranker()
+            logger.info("BGE reranker model warmed and ready")
+        except Exception as e:
+            logger.warning(f"Reranker model warm-up failed: {e}")
+
 
 # ── App factory ────────────────────────────────────────────────────────────────
 

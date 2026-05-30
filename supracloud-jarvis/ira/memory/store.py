@@ -122,6 +122,11 @@ async def retrieve(
     # Fix P20: read threshold from config so it's tunable without a code change
     threshold = cfg.rag_min_similarity
 
+    # A2: when reranking, over-fetch a wider candidate pool by vector distance and
+    # let the cross-encoder pick the best. Otherwise fetch exactly k (today's
+    # behavior). The vector query and stored embeddings are unchanged either way.
+    fetch_n = cfg.rag_candidate_k if cfg.reranker_enabled else k
+
     async with acquire() as conn:
         rows = await conn.fetch(
             """SELECT content, source_type,
@@ -130,14 +135,28 @@ async def retrieve(
                WHERE user_id = $3
                ORDER BY embedding <=> $1::vector
                LIMIT $2""",
-            vector_str, k, user_id,
+            vector_str, fetch_n, user_id,
         )
 
-    results = [
-        {"content": r["content"], "source_type": r["source_type"], "similarity": float(r["similarity"])}
-        for r in rows
-        if float(r["similarity"]) >= threshold
-    ]
+    if cfg.reranker_enabled and rows:
+        # A2: reorder candidates by query<->doc relevance (separate CPU model),
+        # then apply the same cosine floor + top_k cut so "nothing relevant"
+        # still returns []. Adds a "rerank_score" field; keeps "similarity".
+        from memory.reranker import rerank
+        scores = await rerank(query, [r["content"] for r in rows])
+        ranked = sorted(zip(rows, scores), key=lambda rs: rs[1], reverse=True)
+        results = [
+            {"content": r["content"], "source_type": r["source_type"],
+             "similarity": float(r["similarity"]), "rerank_score": float(s)}
+            for r, s in ranked
+            if float(r["similarity"]) >= threshold
+        ][:k]
+    else:
+        results = [
+            {"content": r["content"], "source_type": r["source_type"], "similarity": float(r["similarity"])}
+            for r in rows
+            if float(r["similarity"]) >= threshold
+        ]
 
     # Fix P20: log best similarity when all results are below threshold so operators
     # can tune RAG_MIN_SIMILARITY from logs without guessing.
