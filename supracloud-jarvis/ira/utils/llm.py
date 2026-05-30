@@ -68,19 +68,30 @@ def _make_vllm_client(base_url: str) -> AsyncOpenAI:
 
 
 def _make_ollama_client() -> AsyncOpenAI:
-    """Dev-mode client — points at local Ollama (OpenAI-compatible API)."""
+    """Local Ollama client — points at the OpenAI-compatible API on localhost."""
     cfg = get_settings()
     return AsyncOpenAI(api_key="ollama", base_url=cfg.ollama_base_url, timeout=_LLM_TIMEOUT)
 
 
+def _use_ollama() -> bool:
+    """L2: True when the local Ollama backend is active.
+
+    Driven by the LLM_BACKEND switch (independent of auth/biometrics) OR the
+    legacy dev_mode flag. Keeping dev_mode here preserves backwards compatibility
+    without relying on it — set llm_backend="ollama" to run locally with auth ON.
+    """
+    cfg = get_settings()
+    return cfg.llm_backend == "ollama" or cfg.dev_mode
+
+
 def get_fast_client() -> AsyncOpenAI:
     cfg = get_settings()
-    return _make_ollama_client() if cfg.dev_mode else _make_vllm_client(cfg.vllm_fast_url)
+    return _make_ollama_client() if _use_ollama() else _make_vllm_client(cfg.vllm_fast_url)
 
 
 def get_deep_client() -> AsyncOpenAI:
     cfg = get_settings()
-    return _make_ollama_client() if cfg.dev_mode else _make_vllm_client(cfg.vllm_deep_url)
+    return _make_ollama_client() if _use_ollama() else _make_vllm_client(cfg.vllm_deep_url)
 
 
 def get_reasoning_client() -> AsyncOpenAI:
@@ -89,7 +100,7 @@ def get_reasoning_client() -> AsyncOpenAI:
     Falls back to the deep client if no dedicated reasoning endpoint is configured.
     """
     cfg = get_settings()
-    if cfg.dev_mode:
+    if _use_ollama():  # L2
         return _make_ollama_client()
     if cfg.vllm_reasoning_url:
         return _make_vllm_client(cfg.vllm_reasoning_url)
@@ -146,26 +157,26 @@ async def chat_complete(
     Streaming calls are NOT retried — mid-stream retry would duplicate tokens.
     """
     cfg = get_settings()
+    ollama = _use_ollama()  # L2: local Ollama backend active?
 
-    if cfg.dev_mode:
-        client = _make_ollama_client()
-        model = cfg.dev_model
-        max_tokens = max_tokens or cfg.deep_max_tokens
-        temperature = temperature if temperature is not None else 0.6
-    elif use_reasoning:
+    if use_reasoning:
         client = get_reasoning_client()
-        # Use reasoning model name only if we have a dedicated endpoint
-        model = cfg.vllm_reasoning_model if cfg.vllm_reasoning_url else cfg.vllm_deep_model
+        # L2: with Ollama every tier maps to the configured 14B; on vLLM use the
+        # dedicated reasoning model only when a reasoning endpoint is configured.
+        if ollama:
+            model = cfg.ollama_model_reasoning
+        else:
+            model = cfg.vllm_reasoning_model if cfg.vllm_reasoning_url else cfg.vllm_deep_model
         max_tokens = max_tokens or cfg.reasoning_max_tokens
         temperature = temperature if temperature is not None else cfg.reasoning_temperature
     elif use_deep:
         client = get_deep_client()
-        model = cfg.vllm_deep_model
+        model = cfg.ollama_model_deep if ollama else cfg.vllm_deep_model  # L2
         max_tokens = max_tokens or cfg.deep_max_tokens
         temperature = temperature if temperature is not None else cfg.deep_temperature
     else:
         client = get_fast_client()
-        model = cfg.vllm_fast_model
+        model = cfg.ollama_model_fast if ollama else cfg.vllm_fast_model  # L2
         max_tokens = max_tokens or cfg.fast_max_tokens
         temperature = temperature if temperature is not None else cfg.fast_temperature
 

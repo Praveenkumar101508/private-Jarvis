@@ -98,6 +98,21 @@ class Settings(BaseSettings):
     deep_temperature: float = 0.3    # Lower temp for deterministic reasoning
     reasoning_temperature: float = 0.1  # Near-deterministic for step-by-step thinking
 
+    # ── L2: Engine selection (LLM_BACKEND switch) ─────────────────────────────
+    # "ollama" → local native Ollama (Shadow PC, Windows, no Docker, 20GB A4500).
+    # "vllm"   → the existing GPU/Docker path (kept dormant for the future scale-up).
+    # This is INDEPENDENT of dev_mode: with llm_backend="ollama" the engine is local
+    # but auth + biometric gates stay ON (we are not relying on dev_mode here).
+    llm_backend: str = "ollama"
+    # All tiers map to one 14B model on a 20GB GPU. Pull with: ollama pull qwen3:14b
+    # Per-tier override via OLLAMA_MODEL_FAST / OLLAMA_MODEL_DEEP / OLLAMA_MODEL_REASONING.
+    # NOTE: the migration playbook used "qwen2.5:14b" as a placeholder; "qwen3:14b"
+    # matches this repo's Qwen3 stack. Swap to the best current 14B tag in Ollama's
+    # library (tags change often) — it's a one-line / one-env change.
+    ollama_model_fast: str = "qwen3:14b"
+    ollama_model_deep: str = "qwen3:14b"
+    ollama_model_reasoning: str = "qwen3:14b"
+
     # ── Embeddings ────────────────────────────────────────────────────────────
     embedding_model: str = "BAAI/bge-large-en-v1.5"
     embedding_dim: int = 1024
@@ -243,10 +258,13 @@ class Settings(BaseSettings):
             r"^(10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+|192\.168\.\d+\.\d+)$"
         )
         return bool(_rfc1918.match(d))
-    # Ollama base URL — host.docker.internal reaches Windows host from WSL2/Docker
-    ollama_base_url: str = "http://host.docker.internal:11434/v1"
-    # Ollama model to use for all requests in dev mode
-    # Recommended: ollama pull qwen3:8b (best 2026 small model)
+    # L2: Ollama base URL — default localhost for native Windows (no Docker).
+    # Override with OLLAMA_BASE_URL=http://host.docker.internal:11434/v1 when the
+    # API itself runs inside Docker and needs to reach Ollama on the Windows host.
+    ollama_base_url: str = "http://localhost:11434/v1"
+    # L2: DORMANT — superseded by the tiered ollama_model_* settings above.
+    # Kept (not deleted) for backwards compatibility; no longer read by llm.py.
+    # Legacy single-model name used by the old dev_mode-only Ollama path.
     dev_model: str = "qwen3:8b"
 
 
