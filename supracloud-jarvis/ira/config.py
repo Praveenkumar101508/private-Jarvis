@@ -240,6 +240,37 @@ class Settings(BaseSettings):
     # Lower to 2 if the vLLM server saturates under full fan-out.
     expert_concurrency: int = 4
 
+    # ── A1: Accuracy layer (local, flag-gated, reversible) ────────────────────
+    # Each lever is independent of LLM_BACKEND. With every flag at its *disabled*
+    # value the system behaves exactly as before (clean A/B + one-line rollback).
+
+    # Reranker — improves which memories reach the model. It is a SEPARATE CPU
+    # cross-encoder; it does NOT touch the stored 1024-dim embeddings or the DB.
+    # reranker_enabled=False => memory.retrieve() behaves exactly as today.
+    reranker_enabled: bool = True
+    reranker_model: str = "BAAI/bge-reranker-v2-m3"   # CPU cross-encoder
+    reranker_device: str = "cpu"                       # keep VRAM free for the 14B
+    rag_candidate_k: int = 20      # over-fetch this many, rerank, keep rag_top_k
+
+    # Web search grounding. PRIVACY: this is the ONLY lever that leaves the box.
+    # "searxng" (self-hosted) keeps it fully private; "duckduckgo" needs no key
+    # but queries hit DDG; "tavily"/"serper" need an API key. Only the query
+    # string is ever sent — never memory/PII. Disabled => no external calls.
+    web_search_enabled: bool = True
+    web_search_provider: str = "duckduckgo"   # searxng | duckduckgo | tavily | serper
+    searxng_url: str = "http://localhost:8888"
+    tavily_api_key: str = ""
+    serper_api_key: str = ""
+    web_search_max_results: int = 5
+    web_search_timeout_s: float = 6.0
+
+    # The council — multi-agent deliberation built on agents/expert_mode.py.
+    # GPU-expensive on a 20 GB A4500 (Ollama serializes), so it is opt-in and
+    # routed (A6). council_enabled=False => expert mode behaves exactly as today.
+    council_enabled: bool = False
+    council_self_consistency: int = 1       # >1 = sample N times & reconcile (factual Qs)
+    council_judge_enabled: bool = True      # final verifier/synthesis pass
+
     # ── Dev Mode (Shadow PC / local development) ──────────────────────────────
     # DEV_MODE=true routes LLM calls to a local Ollama instance,
     # bypasses biometric gate, and auto-authenticates as admin.
