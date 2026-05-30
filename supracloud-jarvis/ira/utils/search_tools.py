@@ -82,15 +82,82 @@ def is_image_edit_request(query: str) -> bool:
 
 async def web_search(query: str, max_results: int = 5) -> list[dict]:
     """
-    Search the web via DuckDuckGo. Returns list of {title, url, snippet}.
-    Runs in a thread executor to avoid blocking the event loop.
+    Search the web. Returns list of {title, url, snippet}.
+
+    A3: gated by web_search_enabled and dispatched on web_search_provider
+    (duckduckgo [default, no key] | searxng [self-hosted, fully private] |
+    tavily | serper). PRIVACY: only the query string is ever sent. Never
+    raises — returns [] on disabled/error so callers degrade gracefully.
     """
-    try:
-        loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(None, _ddg_search, query, max_results)
-    except Exception as e:
-        logger.warning(f"Web search failed: {e}")
+    from config import get_settings
+    cfg = get_settings()
+    if not cfg.web_search_enabled or not query.strip():
         return []
+    n = max_results or cfg.web_search_max_results
+    provider = (cfg.web_search_provider or "duckduckgo").lower()
+    try:
+        if provider == "searxng":
+            return await _searxng_search(cfg, query, n)
+        if provider == "tavily":
+            return await _tavily_search(cfg, query, n)
+        if provider == "serper":
+            return await _serper_search(cfg, query, n)
+        if provider != "duckduckgo":
+            logger.warning("web_search: unknown provider %r — using DuckDuckGo", provider)
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, _ddg_search, query, n)
+    except Exception as e:
+        logger.warning(f"Web search failed ({provider}): {e}")
+        return []
+
+
+# A3: alternate providers (httpx-based). Each returns the same {title,url,snippet}
+# shape and is reached only when web_search_provider selects it.
+async def _searxng_search(cfg, query: str, max_results: int) -> list[dict]:
+    """Fully-private option: query a self-hosted SearXNG JSON endpoint."""
+    import httpx
+    async with httpx.AsyncClient(timeout=cfg.web_search_timeout_s) as client:
+        r = await client.get(f"{cfg.searxng_url}/search",
+                             params={"q": query, "format": "json"})
+        r.raise_for_status()
+        data = r.json()
+    return [
+        {"title": i.get("title", ""), "url": i.get("url", ""), "snippet": i.get("content", "")}
+        for i in (data.get("results") or [])[:max_results]
+    ]
+
+
+async def _tavily_search(cfg, query: str, max_results: int) -> list[dict]:
+    if not cfg.tavily_api_key:
+        logger.warning("web_search: tavily selected but TAVILY_API_KEY is empty")
+        return []
+    import httpx
+    async with httpx.AsyncClient(timeout=cfg.web_search_timeout_s) as client:
+        r = await client.post("https://api.tavily.com/search", json={
+            "api_key": cfg.tavily_api_key, "query": query, "max_results": max_results})
+        r.raise_for_status()
+        data = r.json()
+    return [
+        {"title": i.get("title", ""), "url": i.get("url", ""), "snippet": i.get("content", "")}
+        for i in (data.get("results") or [])[:max_results]
+    ]
+
+
+async def _serper_search(cfg, query: str, max_results: int) -> list[dict]:
+    if not cfg.serper_api_key:
+        logger.warning("web_search: serper selected but SERPER_API_KEY is empty")
+        return []
+    import httpx
+    async with httpx.AsyncClient(timeout=cfg.web_search_timeout_s) as client:
+        r = await client.post("https://google.serper.dev/search",
+                             headers={"X-API-KEY": cfg.serper_api_key},
+                             json={"q": query, "num": max_results})
+        r.raise_for_status()
+        data = r.json()
+    return [
+        {"title": i.get("title", ""), "url": i.get("link", ""), "snippet": i.get("snippet", "")}
+        for i in (data.get("organic") or [])[:max_results]
+    ]
 
 
 def _ddg_search(query: str, max_results: int) -> list[dict]:
