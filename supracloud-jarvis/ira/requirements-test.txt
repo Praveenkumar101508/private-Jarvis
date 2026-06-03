@@ -17,7 +17,7 @@ pydantic-settings==2.6.1
 
 # LLM/Agent framework — supervisor.py imports IRAState which requires langgraph
 # openai is imported at module level in utils/llm.py which supervisor imports
-openai==1.54.4
+openai==1.58.1                  # MUST match requirements.txt (langchain-openai 0.2.14 needs >=1.58.1); keeps `-r requirements.txt -r requirements-test.txt` conflict-free
 langgraph==0.2.73
 langchain-core==0.3.28
 

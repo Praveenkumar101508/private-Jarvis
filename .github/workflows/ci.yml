@@ -15,11 +15,13 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - name: Install deps (resolve the pinned set — the upgrade gate)
-        run: pip install -r requirements.txt
+      - name: Install deps — full prod set (the upgrade gate) + test runner
+        # requirements-test.txt adds pytest + pytest-asyncio (NOT in the prod set);
+        # openai is aligned to 1.58.1 in both so the two files resolve together.
+        run: pip install -r requirements.txt -r requirements-test.txt
       - name: Run Hermes-overlay tests (gateway-dependent tests skip without a live gateway)
         run: >
-          pytest -q
+          python -m pytest -q
           tests/test_smoke.py
           tests/test_router.py
           tests/test_business_data.py
