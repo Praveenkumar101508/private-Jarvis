@@ -25,6 +25,7 @@ sentence-transformers==3.3.0    # BGE-large-en-v1.5 (CPU)
 scikit-learn==1.5.2             # Transitive dep of sentence-transformers — pinned to prevent silent upgrades
 numpy==1.26.4
 torch==2.4.1+cpu                # CPU-only torch for embeddings (keeps image small)
+torchaudio==2.4.1+cpu           # MUST match torch exactly. speechbrain pulls torchaudio transitively; left unpinned it floats to 2.11.0+cpu -> requires torch==2.11.0+cpu -> CI ResolutionImpossible (modern pip enforces the pair; local pip 24.0 didn't).
 --extra-index-url https://download.pytorch.org/whl/cpu
 
 # ── Auth & Security ────────────────────────────────────────────────────────────
