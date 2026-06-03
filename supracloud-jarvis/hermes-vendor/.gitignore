@@ -1,0 +1,3 @@
+# The frozen wheel is a ~10.8 MB binary kept on-machine for DR; verified via CHECKSUMS.txt.
+# Repopulate with scripts/freeze-hermes-vendor.ps1. Keep it out of git history.
+*.whl

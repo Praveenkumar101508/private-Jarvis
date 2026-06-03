@@ -1,0 +1,6 @@
+# Frozen Hermes vendor copy — certified bank build / disaster recovery.
+# The wheel is a ~10.8 MB binary kept on-machine (gitignored); this file records the exact
+# pinned artifact so it is verifiable + reproducible from the committed checksum.
+# Repopulate + verify with: scripts/freeze-hermes-vendor.ps1
+hermes-agent==0.15.2
+hermes_agent-0.15.2-py3-none-any.whl  sha256:1a062a3813de8998021a290abaf18489a5c009717b1569855b617ff2caef4b76
