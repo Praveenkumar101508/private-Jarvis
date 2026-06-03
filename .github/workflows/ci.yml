@@ -31,3 +31,4 @@ jobs:
           tests/test_engineer_skill.py
           tests/test_deliberation.py
           tests/test_architect.py
+          tests/test_security_invariants.py
