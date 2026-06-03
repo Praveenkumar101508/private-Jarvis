@@ -15,7 +15,19 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - name: Install deps (incl. pinned hermes-agent)
+      - name: Install deps (resolve the pinned set — the upgrade gate)
         run: pip install -r requirements.txt
-      - name: Run tests (the upgrade gate)
-        run: pytest -q
+      - name: Run Hermes-overlay tests (gateway-dependent tests skip without a live gateway)
+        run: >
+          pytest -q
+          tests/test_smoke.py
+          tests/test_router.py
+          tests/test_business_data.py
+          tests/test_hermes_bridge.py
+          tests/test_security_skill.py
+          tests/test_tutor_skill.py
+          tests/test_skill_ports.py
+          tests/test_conversational_skill.py
+          tests/test_engineer_skill.py
+          tests/test_deliberation.py
+          tests/test_architect.py
