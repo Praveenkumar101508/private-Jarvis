@@ -5,7 +5,7 @@ uvicorn[standard]==0.32.1
 python-multipart==0.0.12
 
 # ── LLM / Agent framework ──────────────────────────────────────────────────────
-openai==1.54.4                  # OpenAI-compatible client for vLLM
+openai==1.58.1                  # >=1.58.1 required by langchain-openai 0.2.14 (1.54.4 -> CI ResolutionImpossible). Still 1.x; bridge unaffected.
 # Fix #122: upgrade langchain stack — aligned patch releases, verified compatible
 langgraph==0.2.73               # Hierarchical multi-agent graph
 langgraph-checkpoint-postgres==2.0.14  # Fix #120: pinned (was >=2.0.0)
