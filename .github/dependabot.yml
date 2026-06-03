@@ -1,0 +1,14 @@
+# Place at the TRUE git root: ./.github/dependabot.yml  (beside supracloud-jarvis/)
+# Watches the hermes-agent pin and opens a PR when a new release lands; CI then runs
+# the tests against the bump — you review only if it goes red.
+version: 2
+updates:
+  - package-ecosystem: "pip"
+    directory: "/supracloud-jarvis/ira"   # where requirements.txt ACTUALLY lives
+    schedule:
+      interval: "weekly"
+    allow:
+      - dependency-name: "hermes-agent"   # watch ONLY the engine
+    commit-message:
+      prefix: "deps(hermes)"
+    open-pull-requests-limit: 1

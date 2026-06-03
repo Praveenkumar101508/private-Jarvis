@@ -1,0 +1,21 @@
+# Place at the TRUE git root: ./.github/workflows/ci.yml
+# (top level, beside supracloud-jarvis/ — GitHub reads .github only at the repo root)
+# Code + requirements live in supracloud-jarvis/ira/, so every step runs there.
+name: CI
+on: [push, pull_request]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: supracloud-jarvis/ira   # requirements.txt + tests live HERE
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install deps (incl. pinned hermes-agent)
+        run: pip install -r requirements.txt
+      - name: Run tests (the upgrade gate)
+        run: pytest -q
