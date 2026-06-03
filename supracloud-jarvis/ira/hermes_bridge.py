@@ -64,9 +64,15 @@ class HermesBridge:
         )
         return (resp.choices[0].message.content or "").strip()
 
-    def deliberate(self, question: str) -> str:
-        """5-agent 'Grok-style' deliberation via Hermes subagents — wired in Phase 4."""
-        raise NotImplementedError("Phase 4: deliberation via Hermes subagent spawning.")
+    def deliberate(self, question: str, *, owner_name: str = "the owner",
+                   memory_context: Optional[str] = None) -> str:
+        """5-agent 'Grok-style' deliberation (Expert Mode) — 4 specialists + supervisor.
+
+        Orchestration lives in ira/subagents/ (lazy import avoids a circular dependency);
+        each role reasons through this same bridge.
+        """
+        from subagents import deliberate as _deliberate
+        return _deliberate(question, bridge=self, owner_name=owner_name, memory_context=memory_context)
 
 
 __all__ = ["HermesBridge", "HermesConfig"]
