@@ -14,7 +14,7 @@ from skills._common import load_persona
 PORTED = [
     ("researcher", "Researcher"),
     ("career", "Career"),
-    ("creator", "Meta Agent Creator"),
+    ("creator", "Meta Skill Creator"),
     ("website", "Business Manager"),
     ("digital", "Digital"),
     ("executor", "Executor"),

@@ -42,13 +42,18 @@ def analyze_security(
     blocks = []
     if events:
         blocks.append(
-            f"Current unresolved security events ({len(events)} total):\n"
+            "You have NO access to any system, files, logs, or shell. The following is the "
+            f"COMPLETE, already-collected set of {len(events)} unresolved security event(s) — "
+            "analyze exactly these and produce your report; do not try to gather more data:\n"
             + json.dumps(list(events), indent=2)
         )
     else:
-        blocks.append("No unresolved security events in the database at this time.")
+        blocks.append(
+            "You have NO access to any system, files, or logs. There are currently no "
+            "unresolved security events to analyze."
+        )
     if tool_output:
-        blocks.append(f"Active tool execution result (IRA just ran):\n{tool_output}")
+        blocks.append(f"Result of an action IRA already executed:\n{tool_output}")
     if memory_context:
         blocks.append(f"Related past security context:\n{memory_context}")
     return run_skill(

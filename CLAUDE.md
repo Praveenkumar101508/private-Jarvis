@@ -17,13 +17,18 @@ is **never installed into IRA's venv** — its hard pins conflict with IRA's (se
 5. **Postgres = business data only.** Memory/recall belongs to Hermes.
 
 ## Model backend: Ollama (NOT vLLM) — verified on this machine 2026-06-03
-This is the Shadow PC (`SHADOW-CR4M2J8D`, RTX A4500 20 GB). Docker daemon is **not running**, WSL is **v1** (no CUDA), and **vLLM can't run natively on Windows** — so vLLM is out. **Ollama is installed (0.24.0) and running on `:11434`** (OpenAI-compatible). Use it.
-- Hermes model config: `provider: custom`, `base_url: http://localhost:11434/v1`, `default: qwen3:14b` (or `qwen3:8b` for speed); set `context_length` explicitly (Ollama defaults low).
-- One endpoint, model chosen by name — no two-port split. (Models not pulled yet — only `gemma2` is present.)
+Shadow PC (`SHADOW-CR4M2J8D`, RTX A4500 20 GB). Docker daemon not running, WSL v1 (no CUDA), vLLM can't run native on Windows → **Ollama** (0.24.0, `:11434`, OpenAI-compatible). Pulled: `qwen3:8b`, `qwen3:14b`.
+- `~/.hermes/config.yaml`: `provider: custom`, `base_url: http://localhost:11434/v1`, `default: qwen3:8b` (fast), `context_length: 65536`, `ollama_num_ctx: 65536` (Hermes needs ≥64K; Ollama defaults low).
+- **Deep model `qwen3:14b` @ 64K FITS (~12 GB VRAM)** with KV-cache quant — user env `OLLAMA_FLASH_ATTENTION=1` + `OLLAMA_KV_CACHE_TYPE=q8_0` (set). Switch `default` to `qwen3:14b` for deep; per-request fast/deep selection is a later enhancement (the gateway serves one model at a time).
 
-## Hermes install (native Windows, no Docker)
-`iex (irm https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.ps1)`
-Installs under `%LOCALAPPDATA%\hermes` (bundles uv + Python 3.11 + ripgrep + ffmpeg; isolated; no admin). `hermes gateway` runs **natively**. (Only the dashboard's terminal pane needs WSL2 — not the gateway.)
+## Hermes install (native Windows, no Docker) — pinned 0.15.2
+`iex (irm https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.ps1)` then
+`& "%LOCALAPPDATA%\hermes\hermes-agent\venv\Scripts\python.exe" -m pip install --upgrade hermes-agent==0.15.2`
+(install.ps1's git-main is 0.15.1; pin to the PyPI release 0.15.2.) Installs under `%LOCALAPPDATA%\hermes`; `hermes gateway` runs natively on `127.0.0.1:8642`.
+- **Persistence (no admin):** Startup launcher `%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\ira-hermes-gateway.vbs` auto-starts the gateway hidden at logon (scheduled tasks need admin here). Start now: run that .vbs or `hermes gateway`.
+
+## Reasoning skills vs the agentic gateway (Phase-6 note)
+The gateway runs the FULL Hermes agent (files/shell/web tools). IRA's Option-A skills are reasoning-only (IRA runs the tools), so `skills/_common.run_skill` injects a no-tools directive. The model still sometimes over-reaches into a tool call (notably the security persona → tries to read `/var/log/auth.log`). Constraining/stripping the gateway toolset for reasoning skills is a **Phase-6** task.
 
 ## Bridge shape (Phase 2 reference — HTTP client, not an import)
 ```python

@@ -1,11 +1,9 @@
-"""ira/skills/creator/ — Meta Agent Creator, ported as a Hermes skill (Option A).
+"""ira/skills/creator/ — Meta Skill Creator, a Hermes skill (Option A).
 
-IRA keeps the DB persistence of generated agents (_save_agent -> agents table).
-
-NOTE (flagged for review): the original persona targets LangGraph agents. Since the
-merge retires LangGraph, this skill should likely be modernized to generate Hermes
-SKILL.md skills instead — a deliberate future change, NOT part of this faithful port.
-The persona here is generalized ("agent engineer") but otherwise preserved.
+Modernized for the Hermes architecture: the persona now generates **Hermes skills**
+(SKILL.md + optional scripts, agentskills.io format) instead of LangGraph agents (the
+original target) — matching how IRA's own agents were ported. IRA keeps the DB
+persistence of generated skills (_save_agent -> agents table).
 """
 from __future__ import annotations
 
@@ -15,7 +13,7 @@ from hermes_bridge import HermesBridge
 from skills._common import run_skill
 
 
-def create_agent(
+def create_skill(
     query: str,
     *,
     memory_context: Optional[str] = None,
@@ -23,10 +21,10 @@ def create_agent(
     session_key: Optional[str] = None,
 ) -> str:
     blocks = (
-        [f"Previously created agents (for reference):\n{memory_context}"]
+        [f"Previously created skills (for reference):\n{memory_context}"]
         if memory_context else None
     )
     return run_skill("creator", query, context_blocks=blocks, bridge=bridge, session_key=session_key)
 
 
-__all__ = ["create_agent"]
+__all__ = ["create_skill"]
