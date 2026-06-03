@@ -43,18 +43,23 @@ class HermesBridge:
             timeout=self.cfg.timeout,
         )
 
-    def ask(self, prompt: str, *, session_key: Optional[str] = None) -> str:
-        """Send one user message to the Hermes gateway; return the final text reply.
+    def ask(self, prompt: str, *, system: Optional[str] = None, session_key: Optional[str] = None) -> str:
+        """Send a message to the Hermes gateway; return the final text reply.
 
-        session_key -> X-Hermes-Session-Key header, the per-tenant memory-isolation
-        hook used in Phase 5 (omit for the owner's default session).
+        NOTE (verified Phase 2): the gateway is an AGENT endpoint with its own system
+        prompt — a client `system` role is NOT reliably honored. So when `system`
+        context (e.g. a skill persona + data) is provided we fold it into the user
+        message, which the agent does read.
+
+        session_key -> X-Hermes-Session-Key header (per-tenant memory isolation, Phase 5).
         """
+        content = f"{system}\n\n---\n\n{prompt}" if system else prompt
         kwargs = {}
         if session_key:
             kwargs["extra_headers"] = {"X-Hermes-Session-Key": session_key}
         resp = self._client.chat.completions.create(
             model=self.cfg.model,
-            messages=[{"role": "user", "content": prompt}],
+            messages=[{"role": "user", "content": content}],
             **kwargs,
         )
         return (resp.choices[0].message.content or "").strip()
