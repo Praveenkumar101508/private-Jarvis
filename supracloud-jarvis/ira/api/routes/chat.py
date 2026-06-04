@@ -32,6 +32,20 @@ from config import get_settings
 router = APIRouter(prefix="/chat", tags=["chat"])
 
 
+# ── Engine selection (cutover — Phase 7.2) ─────────────────────────────────────
+# IRA_USE_HERMES routes chat — and voice, which calls /chat/stream over HTTP — through
+# the Hermes bridge skills instead of the legacy LangGraph agents. DEFAULT OFF: when off,
+# behaviour is byte-identical to before. Read once at startup. The legacy path
+# (agents/graph.py, supervisor.py, state.py) stays in place as the instant rollback.
+_USE_HERMES = os.getenv("IRA_USE_HERMES", "false").strip().lower() in ("1", "true", "yes", "on")
+
+# Classifier outputs that have a matching ira/skills/<name>/ persona (others → conversational).
+_VALID_SKILLS = frozenset({
+    "conversational", "researcher", "security", "executor",
+    "creator", "website", "tutor", "career", "digital",
+})
+
+
 # ── Request / Response models ──────────────────────────────────────────────────
 
 class ChatRequest(BaseModel):
@@ -114,6 +128,55 @@ async def _check_expert_rate_limit(username: str) -> tuple[bool, int]:
         return True, _EXPERT_RATE_LIMIT  # fail open if Redis is down
 
 
+# ── Hermes engine path (Phase 7.2) ─────────────────────────────────────────────
+
+async def _hermes_route(
+    message: str,
+    *,
+    conv_id: str,
+    owner: bool,
+    user: str,
+    mode: str = "assistant",
+    is_voice: bool = False,
+) -> tuple[str, str]:
+    """New engine path: router owner-gate → classify → skill via the Hermes bridge.
+
+    Returns (response_text, agent_name). All real tools/DB stay in IRA; only the
+    reasoning runs on the gateway. enforce_owner_gate stays fail-closed. The bridge
+    call is synchronous, so it runs in a worker thread to keep the event loop free.
+    """
+    from router import enforce_owner_gate
+
+    refusal = enforce_owner_gate(message, owner)
+    if refusal:
+        return refusal, "security_gate"
+
+    # Reuse the existing classifier (read-only) to pick the skill; ira/skills/<name>/
+    # mirrors the classifier's agent names. Fall back to conversational if unmatched.
+    from agents.graph import make_initial_state
+    from agents.supervisor import classify
+    from skills._common import run_skill
+
+    temp_state = make_initial_state(
+        session_id="hermes-route", conversation_id=conv_id, user_query=message,
+        user_id=user, is_owner=owner, mode=mode, is_voice=is_voice,
+    )
+    classified = await classify(temp_state)
+    skill = classified.get("active_agent", "conversational")
+    if skill not in _VALID_SKILLS:
+        skill = "conversational"
+
+    memories_raw = await retrieve(message, user_id=user)
+    memory_ctx = "\n".join(m["content"] for m in memories_raw) if memories_raw else ""
+    blocks = [f"Relevant context from memory:\n{memory_ctx}"] if memory_ctx else None
+
+    # session_key scopes per-tenant memory inside Hermes (Phase 5 isolation).
+    text = await asyncio.to_thread(
+        run_skill, skill, message, context_blocks=blocks, session_key=conv_id,
+    )
+    return text, skill
+
+
 # ── Standard (non-streaming) chat ─────────────────────────────────────────────
 
 @router.post("", response_model=ChatResponse)
@@ -129,6 +192,21 @@ async def chat(
     conv_id = await ensure_conversation(req.session_id)
     # Only trust is_voice_owner when the request genuinely originates from the voice service
     owner = _is_owner(_user) or (_is_voice_service(_user) and req.is_voice_owner)
+
+    if _USE_HERMES:                                  # NEW engine path (default OFF)
+        t0 = time.monotonic()
+        text, agent = await _hermes_route(
+            req.message, conv_id=conv_id, owner=owner, user=_user,
+            mode=req.mode, is_voice=req.is_voice,
+        )
+        return ChatResponse(
+            response=text,
+            session_id=req.session_id,
+            conversation_id=conv_id,
+            agent_used=agent,
+            model_used="hermes",
+            latency_ms=int((time.monotonic() - t0) * 1000),
+        )
 
     state = await run_graph(
         session_id=req.session_id,
@@ -169,6 +247,26 @@ async def chat_stream(
     conv_id = await ensure_conversation(req.session_id)
     # Only trust is_voice_owner when the request genuinely originates from the voice service
     owner = _is_owner(_user) or (_is_voice_service(_user) and req.is_voice_owner)
+
+    if _USE_HERMES:                                  # NEW engine path (default OFF) — also serves voice (HTTP → here)
+        text, agent = await _hermes_route(
+            req.message, conv_id=conv_id, owner=owner, user=_user,
+            mode=req.mode, is_voice=req.is_voice,
+        )
+
+        async def _hermes_stream_gen():
+            t0 = time.monotonic()
+            for word in text.split(" "):
+                yield {"data": json.dumps({"token": word + " "})}
+                await asyncio.sleep(0.01)
+            yield {"data": json.dumps({
+                "done": True,
+                "agent": agent,
+                "latency_ms": int((time.monotonic() - t0) * 1000),
+                "session_id": req.session_id,
+            })}
+
+        return EventSourceResponse(_hermes_stream_gen())
 
     from agents.state import IRAState
     from agents.supervisor import classify, is_restricted_domain
@@ -521,6 +619,37 @@ async def chat_expert(
     from memory.store import retrieve
 
     owner = _is_owner(_user) or (_is_voice_service(_user) and req.is_voice_owner)
+
+    if _USE_HERMES:                                  # NEW engine path (default OFF): deliberation via subagents
+        from router import enforce_owner_gate
+        from subagents import deliberate
+
+        refusal = enforce_owner_gate(req.message, owner)
+        owner_name = get_settings().owner_name
+        memories_raw = await retrieve(req.message, user_id=_user)
+        memory_ctx = "\n".join(m["content"] for m in memories_raw) if memories_raw else ""
+
+        async def _hermes_expert_gen():
+            t0 = time.monotonic()
+            if refusal:
+                text = refusal
+            else:
+                text = await asyncio.to_thread(
+                    deliberate, req.message,
+                    owner_name=owner_name, memory_context=memory_ctx,
+                )
+            for word in text.split(" "):
+                yield {"data": json.dumps({"agent": "supervisor", "chunk": word + " ", "done": False})}
+                await asyncio.sleep(0.005)
+            yield {"data": json.dumps({
+                "agent": "supervisor", "done": True,
+                "latency_ms": int((time.monotonic() - t0) * 1000),
+            })}
+
+        return EventSourceResponse(
+            _hermes_expert_gen(),
+            headers={"X-Expert-Remaining": str(remaining)},
+        )
 
     # Gather memory + live search in parallel for Expert Mode
     from utils.search_tools import get_search_context as _get_search_ctx
