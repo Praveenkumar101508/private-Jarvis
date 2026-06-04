@@ -7,21 +7,21 @@ behind an OpenAI-compatible gateway on `127.0.0.1:8642`. IRA reaches it ONLY thr
 ## Security posture (verified 2026-06-03)
 - **Gateway: `127.0.0.1:8642`, key-gated** (`API_SERVER_ENABLED=true`, `API_SERVER_HOST=127.0.0.1`,
   `API_SERVER_KEY` in `~/.hermes/.env`, never in the repo). ✓ Localhost-only entry point.
-- **⚠️ REQUIRED bank-build hardening — Ollama is exposed.** It listens on `::` / `0.0.0.0`
-  because the user env `OLLAMA_HOST=0.0.0.0`. That makes the raw model reachable from the
-  network, **bypassing the gateway, biometric gate, and router**. For the bank build, set
-  `OLLAMA_HOST=127.0.0.1` (`setx OLLAMA_HOST 127.0.0.1`) and restart Ollama. (Left as-is here
-  because it is a pre-existing user setting — change deliberately.)
+- **✓ RESOLVED (Phase 7.1) — Ollama locked to localhost.** `OLLAMA_HOST=127.0.0.1` (was `0.0.0.0`);
+  Ollama now binds `127.0.0.1:11434` only. Verified: external LAN IP `10.0.2.10:11434` REFUSED,
+  localhost `200`. The raw model is no longer network-reachable. Reproduce: `scripts/harden-gateway.ps1`.
 - **No remote push; local apply gated** — `utils/auto_implement.py` never pushes; the
   `git apply → commit → docker restart` pipeline runs ONLY behind an explicit `architect apply`
   (`is_apply_trigger`). Guarded by `tests/test_security_invariants.py`.
 - **Red-team/jailbreak skills stripped** for the bank build — `scripts/strip-bank-skills.ps1`
   removes `red-teaming` (godmode) + `mlops/inference/obliteratus` (model safety-removal) to
   `~/.hermes/skills_disabled/`. Re-run after any `hermes` install/update.
-- **Reasoning over-reach (known):** the gateway runs the full agent toolset; an 8B/14B model
-  sometimes calls a tool instead of reasoning (e.g. the security persona → read `/var/log/auth.log`).
-  Mitigated by the no-tools directive in `skills/_common.run_skill` + stripping godmode. A fuller
-  fix is a reasoning-only gateway profile (no filesystem/shell tools) — future enhancement.
+- **✓ RESOLVED (Phase 7.1) — reasoning-only gateway profile.** The `api_server` agent now has its
+  `file, terminal, code_execution, web, browser, delegation, computer_use` toolsets DISABLED at the
+  config level (`hermes tools disable --platform api_server …`). Verified by probe: asked to read a
+  host file it has no tool and refuses. IRA runs every real tool itself, so this closes the over-reach
+  at the source — not just via the `skills/_common.run_skill` prompt directive (which stays as
+  defense-in-depth). Reproduce: `scripts/harden-gateway.ps1`; re-run after any `hermes` update.
 
 ## Vendor freeze (disaster recovery / certified copy)
 - `hermes-vendor/CHECKSUMS.txt` pins `hermes-agent==0.15.2` + the wheel sha256.
