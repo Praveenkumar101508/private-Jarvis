@@ -117,3 +117,22 @@ def test_flag_on_gate_blocks_non_owner_restricted(monkeypatch):
 
     assert not run_skill.called, "restricted request from a non-owner must not reach the skill"
     assert resp.agent_used == "security_gate"
+
+
+def test_flag_on_unmapped_classify_falls_back_to_conversational(monkeypatch):
+    """If the classifier returns a domain with no matching ira/skills/<name>/ persona
+    (e.g. 'expert_mode', 'access_denied'), the ON path must fall back to 'conversational'
+    — never raise / 500 on an input the legacy path handled fine."""
+    _stub_io(monkeypatch)
+    monkeypatch.setattr(chatmod, "_USE_HERMES", True)
+    monkeypatch.setattr("agents.supervisor.classify",
+                        AsyncMock(return_value={"active_agent": "expert_mode", "use_deep_model": False}))
+    run_skill = MagicMock(return_value="ok")
+    monkeypatch.setattr("skills._common.run_skill", run_skill)
+
+    resp = asyncio.run(chat(ChatRequest(message="an ambiguous request", session_id="s9"), _user="randomguy"))
+
+    assert run_skill.called, "ON path must still reach a skill"
+    called_skill = run_skill.call_args.args[0]          # run_skill(skill, message, ...)
+    assert called_skill == "conversational", f"unmapped domain must fall back to conversational, got {called_skill!r}"
+    assert resp.agent_used == "conversational"
