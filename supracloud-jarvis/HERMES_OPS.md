@@ -17,11 +17,14 @@ behind an OpenAI-compatible gateway on `127.0.0.1:8642`. IRA reaches it ONLY thr
   removes `red-teaming` (godmode) + `mlops/inference/obliteratus` (model safety-removal) to
   `~/.hermes/skills_disabled/`. Re-run after any `hermes` install/update.
 - **✓ RESOLVED (Phase 7.1) — reasoning-only gateway profile.** The `api_server` agent now has its
-  `file, terminal, code_execution, web, browser, delegation, computer_use` toolsets DISABLED at the
-  config level (`hermes tools disable --platform api_server …`). Verified by probe: asked to read a
-  host file it has no tool and refuses. IRA runs every real tool itself, so this closes the over-reach
-  at the source — not just via the `skills/_common.run_skill` prompt directive (which stays as
-  defense-in-depth). Reproduce: `scripts/harden-gateway.ps1`; re-run after any `hermes` update.
+  **entire toolset DISABLED** (zero tools) at the config level (`hermes tools disable --platform
+  api_server …`). 7.1 removed the host/exec/network/escape set (file, terminal, code_execution, web,
+  browser, delegation, computer_use); **7.3 live verification found the remaining `todo`/`skills`/`memory`
+  bled into reasoning** (architect agents referenced a Hermes task list / SKILL.md instead of answering),
+  so those were disabled too. Verified by probe (host-file read refused — no tool) and live (architect
+  then produced a clean proposal). IRA runs every real tool itself; the `skills/_common.run_skill` prompt
+  directive stays as defense-in-depth. Reproduce: `scripts/harden-gateway.ps1`; re-run after any `hermes`
+  update (a fresh install resets tool config).
 
 ## Vendor freeze (disaster recovery / certified copy)
 - `hermes-vendor/CHECKSUMS.txt` pins `hermes-agent==0.15.2` + the wheel sha256.

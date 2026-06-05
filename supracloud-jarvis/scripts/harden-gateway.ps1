@@ -26,8 +26,15 @@ while (-not (Get-NetTCPConnection -LocalPort 11434 -State Listen -ErrorAction Si
 $bind = (Get-NetTCPConnection -LocalPort 11434 -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1).LocalAddress
 Write-Host "OK: Ollama bound to $bind:11434 (expect 127.0.0.1; was :: / 0.0.0.0)."
 
-# --- 2. Reasoning-only gateway: strip host/exec/network/escape toolsets from the api_server agent ---
-& $hermes tools disable --platform api_server file terminal code_execution web browser delegation computer_use
-Write-Host "OK: api_server agent is reasoning-only (no file/shell/web/exec/delegation tools)."
-Write-Host "Verify: hermes tools list --platform api_server"
-Write-Host "Undo:   hermes tools enable --platform api_server file terminal code_execution web browser delegation"
+# --- 2. Reasoning-only gateway: the api_server agent needs ZERO tools (IRA runs every real
+#        tool itself). Disabling only host/exec/network left todo/skills/memory enabled, which
+#        BLED into reasoning (7.3 live verification: architect agents referenced a Hermes "task
+#        list" / SKILL.md instead of answering). Disable the FULL toolset so it purely reasons. ---
+$toolsets = @(
+    "file", "terminal", "code_execution", "web", "browser", "delegation", "computer_use",
+    "vision", "image_gen", "tts", "skills", "todo", "memory", "session_search", "clarify", "cronjob", "messaging"
+)
+& $hermes tools disable --platform api_server @toolsets
+Write-Host "OK: api_server agent is reasoning-only (ZERO toolsets enabled)."
+Write-Host "Verify: hermes tools list --platform api_server   (expect no 'enabled' lines)"
+Write-Host "Undo:   hermes tools enable --platform api_server <toolset> ..."
