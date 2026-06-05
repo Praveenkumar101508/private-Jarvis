@@ -337,7 +337,7 @@ After completing, output: ✅ Phase 6 done — paste the checklist results and t
 
 ### Prompt 7 — Cutover (reversible 3-stop)
 
-> Status: **7.1 ✅ done** (on `feat/cutover`) · 7.2 pending · 7.3 pending · **7.4 deferred** until after a production soak.
+> Status: **7.1–7.3 ✅ done + merged to trunk (PR #15, `393d94e`)** · **7.4 written below — HELD until a clean production soak of `IRA_USE_HERMES=true`** (precondition; do not run before then).
 > The riskiest change earns the most checkpoints. Run **7.1 → 7.2 → 7.3 one at a time**, same protocol, on a NEW branch `feat/cutover` off trunk. 7.4 (flip the production default + retire the legacy router) is a SEPARATE later prompt — it rests on real soak results, not a guess. The old LangGraph router stays one toggle away until you're confident.
 
 #### Prompt 7.1 — pre-cutover security fixes
@@ -433,7 +433,55 @@ Bring up the full local stack: Ollama 127.0.0.1:11434 (qwen3:8b/14b); Hermes gat
 After completing: ✅ 7.3 done — paste the five live-check results, open PR `feat/cutover -> trunk` (do NOT merge yet), then STOP. This is the go/no-go gate for enabling Hermes in production.
 ```
 
-After 7.3: merge the PR → run with `IRA_USE_HERMES=true` in production for a soak period while watching → then a separate **Prompt 7.4** flips the default and retires the legacy router (`agents/graph.py`, `supervisor.py`, `state.py`), written around whatever the soak shows.
+After 7.3 the sequence shifted (the cutover code merged to trunk DORMANT with the flag OFF, PR #15),
+so "going live" is no longer a merge — it's flipping the env flag. **Soak:** (1) `IRA_USE_HERMES=true`
+in staging/local — exercise chat + voice + a restricted-domain block, watch for errors and especially
+TIMEOUTS (deliberation/architect ran 60–151s headless; ensure the gateway, any reverse proxy, and the
+frontend all allow those durations on the ON path); (2) then `true` in production under real traffic;
+(3) anything wrong → set `false` (instant rollback — legacy runs on Ollama, verified, so it's real);
+(4) only after a clean prod soak → run **Prompt 7.4**.
+
+> **Dependency-map correction (changes 7.4):** the original "delete `supervisor.py`/`graph.py`/`state.py`"
+> is WRONG — they are shared/load-bearing, not legacy-only. The Hermes path imports
+> `classify`/`is_restricted_domain`/`make_initial_state`/`IRAState`; `main.py` inits the LangGraph
+> checkpointer; the architect route + scheduler use `agents/architect_agent`; `chat.py` imports the
+> `agents/*._SYSTEM` persona constants. So **7.4 only flips the default — it deletes nothing.** The one
+> genuinely-removable piece is `run_graph` + the OFF branch, and that IS the env-flag rollback — keep it.
+
+#### Prompt 7.4 — make Hermes the default (flip the flag; keep everything as rollback)
+
+```
+## Context (carry forward — do not deviate)
+IRA runs on Hermes via an out-of-process OpenAI-compatible gateway. Trunk (claude/setup-private-session-1gF9a, 393d94e) has the cutover machinery; IRA_USE_HERMES defaults OFF. 7.1–7.3 are merged (PR #15). This is 7.4 — making Hermes the default.
+PRECONDITION (the human attests): IRA_USE_HERMES=true has already SOAKED in PRODUCTION with no issues — chat, voice, restricted-domain block, deliberation/architect all healthy, and the long deliberation/architect calls did NOT hit any proxy/client/gateway timeout. If that soak hasn't happened, STOP and say so — do not run this.
+GOLDEN RULES unchanged: Hermes pinned/never-edited; all IRA->Hermes via hermes_bridge.py; gates fail-closed; no remote push.
+Branch feat/cutover-default off trunk. Per-step protocol: full report -> commit + push -> STOP.
+
+CRITICAL — do NOT delete the legacy modules. A dependency map shows agents/supervisor.py, agents/graph.py, agents/state.py are NOT legacy-only: the Hermes path imports classify + is_restricted_domain + make_initial_state + IRAState from them; main.py initializes the LangGraph checkpointer (get_graph/init_checkpointer) at startup; agents/architect_agent is used by the architect route AND the scheduler; chat.py imports the agents/*._SYSTEM persona constants. Deleting any of these breaks the app. This step does NOT remove them.
+
+<task>
+1. In chat.py, change the flag default from "false" to "true" so Hermes is the default when IRA_USE_HERMES is unset. KEEP the flag and the OFF branch (run_graph calls) fully intact — IRA_USE_HERMES=false must still force the legacy path. The flag stays as the instant rollback.
+2. Update ira/config/hermes.env.example: document that the default is now true and that =false is the rollback to legacy.
+3. Update ira/tests/test_cutover_flag.py: the unset/default case now expects the Hermes (run_skill) path; KEEP an explicit assertion that IRA_USE_HERMES=false still routes to run_graph; keep the existing on/gate/fallback tests.
+</task>
+
+<constraints>
+- Do NOT delete or modify agents/supervisor.py, agents/graph.py, agents/state.py, agents/*_agent.py, the agents/*._SYSTEM constants, or main.py's checkpointer init — shared/startup infrastructure.
+- KEEP the flag and the OFF/legacy branch — this preserves the env-flag rollback.
+- All IRA->Hermes calls still go through hermes_bridge.py; gates stay fail-closed. Only what is requested.
+</constraints>
+
+<acceptance_criteria>
+- IRA_USE_HERMES unset -> Hermes path (new default); IRA_USE_HERMES=false -> still run_graph (rollback intact). Both proven by the test.
+- Full app-importing suite passes LOCALLY (not just CI). git diff scoped to chat.py + hermes.env.example + the test.
+</acceptance_criteria>
+
+After completing: ✅ 7.4 done — show the default flip + the "=false still hits run_graph" test, commit + push to feat/cutover-default, open the PR (do NOT merge until prod is confirmed healthy on the new default), then STOP.
+```
+
+> The original wholesale legacy-code deletion is dropped: the modules are shared, and the only removable
+> bit is the rollback. A later code-hygiene pass (strip `run_graph` + the OFF branch + the flag, once
+> rollback is truly never needed) can be its own dependency-checked prompt — no rush, little upside.
 
 ---
 
