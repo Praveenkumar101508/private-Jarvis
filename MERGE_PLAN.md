@@ -335,6 +335,108 @@ After completing, output: ✅ Phase 6 done — paste the checklist results and t
 
 ---
 
+### Prompt 7 — Cutover (reversible 3-stop)
+
+> Status: **7.1 ✅ done** (on `feat/cutover`) · 7.2 pending · 7.3 pending · **7.4 deferred** until after a production soak.
+> The riskiest change earns the most checkpoints. Run **7.1 → 7.2 → 7.3 one at a time**, same protocol, on a NEW branch `feat/cutover` off trunk. 7.4 (flip the production default + retire the legacy router) is a SEPARATE later prompt — it rests on real soak results, not a guess. The old LangGraph router stays one toggle away until you're confident.
+
+#### Prompt 7.1 — pre-cutover security fixes
+
+```
+## Context (carry forward — do not deviate)
+IRA (FastAPI + LangGraph, openai 1.x) runs on top of Hermes via an out-of-process OpenAI-compatible gateway. Trunk (claude/setup-private-session-1gF9a) is at merge 3a69c10 (PR #14): the Hermes path EXISTS and passes CI, but PRODUCTION STILL ROUTES THROUGH THE LEGACY LangGraph agents. We are now doing the CUTOVER — the riskiest step — so everything is reversible and verified.
+GOLDEN RULES: Hermes is a pinned dep, never edited; all IRA->Hermes calls go through ira/hermes_bridge.py only; biometric + router gates fail CLOSED; no remote git push, ever.
+Work on a NEW branch `feat/cutover` off trunk. Per-step protocol: full report -> commit + push to feat/cutover -> STOP.
+Step 7.1: two security fixes that MUST land before the flag is flipped.
+
+<task>
+1. Lock Ollama to localhost: set OLLAMA_HOST=127.0.0.1 in the env/launcher that starts Ollama, and document it in ira/config/hermes.env.example. (It currently listens on 0.0.0.0, exposing the raw model on the network — unacceptable for the bank build.)
+2. Make the Hermes gateway reasoning-only: the gateway is fully agentic (file/shell/web tools), but IRA's skills only need REASONING (all tools/DB/owner-gate stay in IRA). Configure the gateway so the agent serving IRA has NO file/shell/web tools — via Hermes's tool/skill enablement config or a dedicated minimal profile (config level, not just the prompt directive in skills/_common.py). This closes the earlier security-skill over-reach (it tried to read /var/log/auth.log) at the source.
+</task>
+
+<constraints>
+- Do NOT edit Hermes core / hermes-vendor/. Config/profile only.
+- The reasoning-only profile MUST actually remove tool capability, not merely instruct against it — verify by probing.
+- Do NOT touch live chat/voice routing in this step (that's 7.2). Only what is requested.
+</constraints>
+
+<acceptance_criteria>
+- Ollama no longer answers on the machine's external IP; the gateway (via 127.0.0.1) still works.
+- With the reasoning-only profile, a probe asking a skill to read a host file (e.g. /var/log/auth.log) is refused / has no tool to do it — show before/after.
+- All existing overlay tests still pass.
+</acceptance_criteria>
+
+After completing: ✅ 7.1 done — show the Ollama bind proof + the gateway before/after probe, commit + push to feat/cutover, then STOP.
+```
+
+Implementation note (7.1 as built): Ollama bind via `setx OLLAMA_HOST 127.0.0.1` + restart (now 127.0.0.1 only; external REFUSED). Reasoning-only via `hermes tools disable --platform api_server file terminal code_execution web browser delegation computer_use` (the API server is platform `api_server`). Both reproduced by `supracloud-jarvis/scripts/harden-gateway.ps1`.
+
+#### Prompt 7.2 — feature flag (default OFF, legacy untouched)
+
+```
+## Context (carry forward)
+Same system, GOLDEN RULES, branch feat/cutover, per-step protocol. 7.1 is done and verified.
+Live entry points (verified): Chat = ira/api/routes/chat.py (`from agents.graph import run_graph`; `await run_graph(...)` at ~line 133 and ~line 222 streaming; plus agents.supervisor.classify / is_restricted_domain; the multi-agent SSE route ~line 502). Voice = ira/voice/agent.py.
+New path = ira/router.py enforce_owner_gate() + ira/skills/* via ira/hermes_bridge.py (+ ira/subagents for deliberation/architect).
+Step 7.2: add a reversible feature flag. DEFAULT OFF — legacy behavior unchanged when off.
+
+<task>
+1. Add env flag `IRA_USE_HERMES` (default `false`), read once at startup, following the existing env pattern; document in ira/config/hermes.env.example.
+2. Branch on the flag at the existing call sites in chat.py (both the run_graph calls and the multi-agent SSE route) and voice/agent.py:
+   - OFF -> current legacy path (run_graph / supervisor) EXACTLY as today.
+   - ON  -> ira/router.py enforce_owner_gate() then ira/skills/* via the bridge (ira/subagents for deliberation/architect/expert paths).
+3. Add a test asserting routing honors the flag (off -> legacy invoked; on -> bridge/skills path invoked), with the bridge mocked so no live gateway is needed.
+</task>
+
+<constraints>
+- DEFAULT the flag OFF. When OFF, do NOT change one byte of legacy behavior.
+- Do NOT delete or modify agents/graph.py, agents/supervisor.py, agents/state.py — they are the rollback path.
+- All IRA->Hermes calls still go through hermes_bridge.py only; owner gate stays fail-closed on both paths. Only what is requested.
+</constraints>
+
+<acceptance_criteria>
+- IRA_USE_HERMES unset/false: full existing suite still passes; a manual chat still flows through run_graph (show it).
+- IRA_USE_HERMES=true (bridge mocked): chat + voice reach enforce_owner_gate() -> skills path; new routing test passes.
+- git diff touches only chat.py, voice/agent.py, the config/env example, and the new test.
+</acceptance_criteria>
+
+After completing: ✅ 7.2 done — show flag-off suite passing + flag-on routing test, commit + push, then STOP.
+```
+
+#### Prompt 7.3 — live verification, flag ON (staging/local; production stays OFF)
+
+```
+## Context (carry forward)
+Same system, GOLDEN RULES, branch feat/cutover, per-step protocol. 7.1 + 7.2 done; flag defaults OFF; production still on legacy.
+Step 7.3: prove the new path works END TO END with the full stack up, BEFORE enabling it in production. This step does NOT change the production default and does NOT retire anything.
+
+<task>
+Bring up the full local stack: Ollama 127.0.0.1:11434 (qwen3:8b/14b); Hermes gateway 127.0.0.1:8642 (reasoning-only profile, API_SERVER_ENABLED=true, API_SERVER_KEY set); IRA with IRA_USE_HERMES=true. Run these LIVE checks and capture each result:
+1. Owner gate: a NON-owner targeting a restricted domain (security/business/executor/system/architect-apply) is BLOCKED; owner is allowed.
+2. Two ordinary skills (e.g. tutor, researcher) return sensible answers via the bridge.
+3. Voice round-trip: audio -> STT -> biometric gate -> (owner) -> bridge -> TTS.
+4. Deliberation: subagents.deliberate returns a consensus.
+5. Architect: produces a DIFF only — does NOT apply or push (apply only on explicit `architect apply`).
+</task>
+
+<constraints>
+- Do NOT flip the production default to ON. Staging/local verification only; leave IRA_USE_HERMES=false in committed config.
+- Do NOT retire agents/graph.py / supervisor.py / state.py — separate later step after a production soak.
+- If ANY check fails or is ambiguous, STOP and report it — do not paper over it. Only what is requested.
+</constraints>
+
+<acceptance_criteria>
+- All five live checks pass, each with evidence (request + response/refusal).
+- Committed config still has IRA_USE_HERMES=false (production unchanged).
+</acceptance_criteria>
+
+After completing: ✅ 7.3 done — paste the five live-check results, open PR `feat/cutover -> trunk` (do NOT merge yet), then STOP. This is the go/no-go gate for enabling Hermes in production.
+```
+
+After 7.3: merge the PR → run with `IRA_USE_HERMES=true` in production for a soak period while watching → then a separate **Prompt 7.4** flips the default and retires the legacy router (`agents/graph.py`, `supervisor.py`, `state.py`), written around whatever the soak shows.
+
+---
+
 ## 7. Guardrails — never break these
 
 1. **NEVER edit anything under `supracloud-jarvis/hermes-vendor/` or any Hermes core file.** Hermes runs out-of-process in its own native install; extend only via skills, subagents, MCP, config.
