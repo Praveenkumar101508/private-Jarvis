@@ -720,49 +720,23 @@ async def chat_vision(
     fast text model with a graceful degradation note.
     """
     conv_id = await ensure_conversation(req.session_id)
-    vision_url = get_settings().vllm_vision_url
-    data_url = f"data:{req.mime_type};base64,{req.image_b64}"
-
-    if vision_url:
-        user_content: list | str = [
-            {"type": "text", "text": req.message},
-            {"type": "image_url", "image_url": {"url": data_url}},
-        ]
-    else:
-        user_content = (
-            f"{req.message}\n\n[Note: an image was attached but no vision model is configured. "
-            "Set VLLM_VISION_URL in .env to enable image analysis.]"
-        )
-
-    messages = [
-        {"role": "system", "content": _get_agent_system_prompt("conversational")},
-        {"role": "user", "content": user_content},
-    ]
 
     async def vision_generator():
+        # Prompt 3.3: route the image + prompt to the local VL model helper (3.1),
+        # which streams tokens and fails soft (yields a clear message) if no vision
+        # model is available.
+        from utils.llm import stream_vision_tokens
         t0 = time.monotonic()
         full_response: list[str] = []
         try:
-            if vision_url:
-                cfg = get_settings()
-                from openai import AsyncOpenAI
-                vision_client = AsyncOpenAI(api_key=cfg.vllm_api_key, base_url=vision_url)
-                stream = await vision_client.chat.completions.create(
-                    model="vision",
-                    messages=messages,  # type: ignore[arg-type]
-                    stream=True,
-                    max_tokens=2048,
-                    temperature=0.3,
-                )
-                async for chunk in stream:
-                    token = chunk.choices[0].delta.content or ""
-                    if token:
-                        full_response.append(token)
-                        yield {"data": json.dumps({"token": token})}
-            else:
-                async for token in stream_tokens(messages, use_deep=False):
-                    full_response.append(token)
-                    yield {"data": json.dumps({"token": token})}
+            async for token in stream_vision_tokens(
+                prompt=req.message,
+                image_b64=req.image_b64,
+                mime_type=req.mime_type,
+                system=_get_agent_system_prompt("conversational"),
+            ):
+                full_response.append(token)
+                yield {"data": json.dumps({"token": token})}
 
             latency = int((time.monotonic() - t0) * 1000)
             yield {"data": json.dumps({"done": True, "agent": "vision", "latency_ms": latency})}
@@ -775,7 +749,7 @@ async def chat_vision(
             _tu.add_done_callback(lambda t: t.exception() and _log.getLogger("ira.chat").warning(f"save_message failed: {t.exception()}"))
             _ta = asyncio.create_task(save_message(
                 conv_id, "assistant", final_text,
-                model_used="vision" if vision_url else "qwen3-fast",
+                model_used="vision",
                 latency_ms=latency,
                 user_id=_user,
             ))
