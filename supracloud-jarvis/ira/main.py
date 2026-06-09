@@ -278,6 +278,9 @@ def create_app() -> FastAPI:
     from api.routes.actions import router as actions_router
     app.include_router(actions_router, prefix="/api/v1")         # v1 2.3: /actions (email-with-approval, status)
 
+    from api.routes.research import router as research_router
+    app.include_router(research_router, prefix="/api/v1")        # v1 3B.2: /research (web search/read) + doctor
+
     # ── Global error handler ──────────────────────────────────────────────────
     @app.exception_handler(Exception)
     async def global_exception_handler(request: Request, exc: Exception):
