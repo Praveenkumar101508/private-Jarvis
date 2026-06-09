@@ -272,6 +272,9 @@ def create_app() -> FastAPI:
     from api.routes.calendar import router as calendar_router
     app.include_router(calendar_router, prefix="/api/v1")        # Feat P27: /calendar/event create + cancel
 
+    from api.routes.profile import router as profile_router
+    app.include_router(profile_router, prefix="/api/v1")         # v1 1.4: /profile owner profile (GET/PUT)
+
     # ── Global error handler ──────────────────────────────────────────────────
     @app.exception_handler(Exception)
     async def global_exception_handler(request: Request, exc: Exception):

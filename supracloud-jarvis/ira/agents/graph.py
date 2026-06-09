@@ -43,18 +43,22 @@ from config import get_settings
 # ── Memory retrieval node ──────────────────────────────────────────────────────
 
 async def retrieve_memory(state: IRAState) -> IRAState:
-    """Fetch top-K relevant memories and format them for prompt injection."""
-    memories = await retrieve(state["user_query"], user_id=state.get("user_id", "system"))
-    if not memories:
-        return {**state, "memory_context": ""}
+    """Fetch top-K relevant memories + the owner profile, formatted for the prompt.
 
+    The owner profile (who-I-am / goals / projects / prefs) is injected every turn so
+    the brain stays grounded; it is prepended to the retrieved-memory context.
+    """
+    from owner_profile import get_profile_summary
+    profile_summary = await get_profile_summary()
+
+    memories = await retrieve(state["user_query"], user_id=state.get("user_id", "system"))
     lines = []
-    for m in memories:
+    for m in memories or []:
         score = f"{m['similarity']:.2f}"
         lines.append(f"[{m['source_type']} | similarity={score}] {m['content']}")
-    context = "\n".join(lines)
 
-    return {**state, "memory_context": context}
+    sections = [s for s in (profile_summary, "\n".join(lines)) if s]
+    return {**state, "memory_context": "\n\n".join(sections)}
 
 
 # ── Biometric / Context-Aware Security Gate ────────────────────────────────────

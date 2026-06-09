@@ -25,6 +25,7 @@ from sse_starlette.sse import EventSourceResponse
 from api.middleware.auth import require_auth
 from agents.graph import run_graph
 from memory.store import ensure_conversation, get_recent_messages, retrieve
+from owner_profile import get_profile_summary
 from utils.llm import stream_tokens, should_use_deep, should_use_reasoning
 from utils.redis_client import cache_get, cache_set, get_redis
 from config import get_settings
@@ -176,8 +177,12 @@ async def _hermes_route(
     # so memory has a single owner (no dual read).
     #   session_id = conv_id -> thread continuity (per conversation)
     #   user_key   = user    -> stable per-user memory scope (same id the owner gate uses)
+    # The owner profile (who-I-am / goals / projects / prefs) is IRA-owned business data,
+    # so it IS injected every turn as context (distinct from Hermes recall).
+    profile_summary = await get_profile_summary()
+    blocks = [profile_summary] if profile_summary else None
     text = await asyncio.to_thread(
-        run_skill, skill, message, session_id=conv_id, user_key=user,
+        run_skill, skill, message, context_blocks=blocks, session_id=conv_id, user_key=user,
     )
     return text, skill
 
@@ -487,6 +492,10 @@ async def chat_stream(
         return _dispatched
 
     messages = [{"role": "system", "content": system_prompt}]
+    # v1 1.4: inject the owner profile every turn so the brain stays grounded.
+    profile_summary = await get_profile_summary()
+    if profile_summary:
+        messages.append({"role": "system", "content": profile_summary})
     if memory_ctx:
         messages.append({"role": "system", "content": f"Relevant context from memory:\n{memory_ctx}"})
     if search_ctx:
