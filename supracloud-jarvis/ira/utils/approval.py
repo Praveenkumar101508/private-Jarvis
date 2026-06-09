@@ -119,4 +119,44 @@ class ApprovalGuardrail:
 # App-wide singleton for the single-process native deployment.
 guardrail = ApprovalGuardrail()
 
-__all__ = ["ApprovalGuardrail", "Draft", "ConfirmResult", "guardrail"]
+
+async def owner_gated_action(
+    *,
+    owner_username: str,
+    is_owner: bool,
+    action: str,
+    preview: str,
+    execute: ExecuteFn,
+    confirm_token: Optional[str] = None,
+    guard: Optional[ApprovalGuardrail] = None,
+) -> dict:
+    """Combine the owner-gate and the approval guardrail for a high-stakes action.
+
+    Returns a status dict:
+      - {"status": "forbidden"}            — caller is not the verified owner
+      - {"status": "confirmation_required", "token", "preview", "expires_in"}
+                                           — no token supplied: a draft was staged
+      - {"status": "executed", "result"}   — token valid: the action ran
+      - {"status": "expired" | "not_found"} — token stale/invalid/already used
+
+    The action NEVER executes for a non-owner, and never executes without a valid
+    confirmation token. Endpoints map the status to HTTP codes.
+    """
+    g = guard or guardrail
+    if not is_owner:
+        return {"status": "forbidden", "action": action,
+                "detail": f"'{action}' is restricted to the verified owner."}
+    if not confirm_token:
+        d = g.draft(owner=owner_username, action=action, preview=preview, execute=execute)
+        return {"status": "confirmation_required", "action": action,
+                "token": d.token, "preview": preview, "expires_in": d.expires_in}
+    res = await g.confirm(owner=owner_username, token=confirm_token)
+    if res.executed:
+        return {"status": "executed", "action": action, "result": res.result}
+    return {"status": res.status, "action": action,
+            "detail": "Confirmation token invalid, already used, or expired."}
+
+
+__all__ = [
+    "ApprovalGuardrail", "Draft", "ConfirmResult", "guardrail", "owner_gated_action",
+]
