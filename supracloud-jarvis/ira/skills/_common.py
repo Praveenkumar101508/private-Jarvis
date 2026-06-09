@@ -46,17 +46,27 @@ def run_skill(
     *,
     context_blocks: Optional[Sequence[str]] = None,
     bridge: Optional[HermesBridge] = None,
+    session_id: Optional[str] = None,
+    user_key: Optional[str] = None,
     session_key: Optional[str] = None,
     **subs: object,
 ) -> str:
-    """Persona (+ optional IRA-gathered context blocks) -> Hermes bridge -> reply text."""
+    """Persona (+ optional IRA-gathered context blocks) -> Hermes bridge -> reply text.
+
+    Forwards the session headers to the bridge: ``session_id`` (thread continuity)
+    and ``user_key`` (stable per-user memory scope). ``session_key`` is a deprecated
+    alias for ``user_key`` kept for callers that haven't migrated.
+    """
     bridge = bridge or HermesBridge()
     system = load_persona(skill_name, **subs)
     blocks = [b for b in (context_blocks or []) if b]
     if blocks:
         system += "\n\n" + "\n\n".join(blocks)
     system += "\n\n" + _REASONING_DIRECTIVE
-    return bridge.ask(query, system=system, session_key=session_key)
+    return bridge.ask(
+        query, system=system,
+        session_id=session_id, user_key=user_key, session_key=session_key,
+    )
 
 
 __all__ = ["load_persona", "run_skill"]

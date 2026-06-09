@@ -170,13 +170,14 @@ async def _hermes_route(
     if skill not in _VALID_SKILLS:
         skill = "conversational"
 
-    memories_raw = await retrieve(message, user_id=user)
-    memory_ctx = "\n".join(m["content"] for m in memories_raw) if memories_raw else ""
-    blocks = [f"Relevant context from memory:\n{memory_ctx}"] if memory_ctx else None
-
-    # session_key scopes per-tenant memory inside Hermes (Phase 5 isolation).
+    # Memory is owned by Hermes in this path (project rule 5): the gateway loads the
+    # thread's own history via X-Hermes-Session-Id and the user's long-term memory via
+    # X-Hermes-Session-Key. IRA's own pgvector retrieve() is intentionally NOT read here
+    # so memory has a single owner (no dual read).
+    #   session_id = conv_id -> thread continuity (per conversation)
+    #   user_key   = user    -> stable per-user memory scope (same id the owner gate uses)
     text = await asyncio.to_thread(
-        run_skill, skill, message, context_blocks=blocks, session_key=conv_id,
+        run_skill, skill, message, session_id=conv_id, user_key=user,
     )
     return text, skill
 
