@@ -21,6 +21,7 @@ from api.routes.files import delete_file
 
 class _Cfg:
     ira_admin_username = "owner"
+    calcom_api_key = "cal-key"      # calendar configured (2.3 fail-soft guard)
 
 
 def _body(**kw):
@@ -53,6 +54,7 @@ def test_owner_unconfirmed_does_nothing(monkeypatch):
 
 def test_owner_confirmed_executes(monkeypatch):
     monkeypatch.setattr("api.middleware.auth.get_settings", lambda: _Cfg())
+    monkeypatch.setattr("actions.get_settings", lambda: _Cfg())   # calendar configured
     create = AsyncMock(return_value={"id": "evt1", "ok": True})
     monkeypatch.setattr(calmod, "create_calcom_event", create)
 

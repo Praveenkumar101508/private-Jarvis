@@ -14,6 +14,7 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
+from actions import is_configured, not_configured_message
 from api.middleware.auth import require_auth, is_owner
 from tasks.calendar import create_calcom_event, cancel_calcom_event
 from utils.approval import owner_gated_action
@@ -54,6 +55,10 @@ async def create_event(body: CreateEventRequest, _user: str = Depends(require_au
     ikey = body.idempotency_key or str(uuid.uuid4())
 
     async def _do():
+        # Fail soft: an unconfigured dependency returns a clear message, never throws.
+        if not is_configured("calendar"):
+            return {"status": "not_configured", "action": "create_calendar_event",
+                    "message": not_configured_message("calendar")}
         result = await create_calcom_event(
             event_type_id=body.event_type_id,
             start=body.start,
@@ -63,10 +68,8 @@ async def create_event(body: CreateEventRequest, _user: str = Depends(require_au
             idempotency_key=ikey,
         )
         if result is None:
-            raise HTTPException(
-                status_code=503,
-                detail="Cal.com integration not configured — set CALCOM_API_KEY in .env",
-            )
+            return {"status": "not_configured", "action": "create_calendar_event",
+                    "message": not_configured_message("calendar")}
         return result
 
     preview = (
@@ -90,9 +93,14 @@ async def cancel_event(
     """Cancel a Cal.com booking — owner-gated and confirmation-gated (high-stakes)."""
 
     async def _do():
+        # Fail soft when Cal.com isn't configured (distinguish from a real failure).
+        if not is_configured("calendar"):
+            return {"status": "not_configured", "action": "cancel_calendar_event",
+                    "message": not_configured_message("calendar")}
         ok = await cancel_calcom_event(external_id)
         if not ok:
-            raise HTTPException(status_code=502, detail="Cal.com cancellation failed — check logs")
+            return {"status": "error", "action": "cancel_calendar_event",
+                    "message": "Cal.com cancellation failed — check logs"}
         return {"cancelled": True, "external_id": external_id}
 
     outcome = await owner_gated_action(
