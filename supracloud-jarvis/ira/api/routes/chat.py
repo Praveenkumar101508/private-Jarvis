@@ -427,7 +427,12 @@ async def chat_stream(
             if not impl:
                 yield {"data": json.dumps({"token": "❌ No pending implementation. Run `architect implement [feature]` first.\n"})}
             else:
-                result = await apply_implementation(impl)
+                # `architect apply` is the explicit, human-gated REAL apply (git apply
+                # -> commit -> restart, no remote push — see utils/auto_implement.py).
+                # Pass dry_run=False so the "Applying…" message and the pending-state
+                # clear below are truthful (the default dry_run=True only validates).
+                # Mirrors POST /architect/apply.
+                result = await apply_implementation(impl, dry_run=False)
                 if result.success:
                     st["pending_apply"] = False
                     st["implementation"] = None
