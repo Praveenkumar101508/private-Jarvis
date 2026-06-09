@@ -102,6 +102,15 @@ async def require_auth(
     return payload.sub
 
 
+def is_owner(username: str) -> bool:
+    """True when `username` is the verified system owner (admin).
+
+    The shared owner check used by high-stakes action endpoints (calendar, files,
+    …) so they can fail-closed for non-owners.
+    """
+    return username == get_settings().ira_admin_username
+
+
 # ── Login endpoint helper ──────────────────────────────────────────────────────
 
 @_lru_cache(maxsize=1)

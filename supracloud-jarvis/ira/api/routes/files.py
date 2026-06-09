@@ -18,10 +18,11 @@ import os
 import uuid
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query
 from fastapi.responses import FileResponse
 
-from api.middleware.auth import require_auth
+from api.middleware.auth import require_auth, is_owner
+from utils.approval import owner_gated_action
 from utils.db import acquire
 from utils.file_utils import read_with_size_cap
 
@@ -48,6 +49,11 @@ async def upload_file(
     file: UploadFile = File(...),
     _user: str = Depends(require_auth),
 ):
+    # Writing files is a side effect: restrict to the verified owner (fail-closed).
+    # (The two-step draft/confirm flow doesn't fit a streamed multipart upload, so
+    # writes are owner-gated only; deletes below get the full confirm flow.)
+    if not is_owner(_user):
+        raise HTTPException(status_code=403, detail="Uploading files is restricted to the verified owner.")
     content = await read_with_size_cap(file, max_bytes=_MAX_BYTES)
     safe_name = Path(file.filename or "upload").name  # strip any directory
     file_id = str(uuid.uuid4())
@@ -101,18 +107,39 @@ async def download_file(file_id: str, _user: str = Depends(require_auth)):
 
 # ── Delete ────────────────────────────────────────────────────────────────────
 
-@router.delete("/{file_id}", status_code=204)
-async def delete_file(file_id: str, _user: str = Depends(require_auth)):
-    async with acquire() as conn:
-        row = await conn.fetchrow(
-            "SELECT storage_path FROM files WHERE id=$1 AND user_id=$2",
-            file_id, _user,
-        )
-    if not row:
-        raise HTTPException(status_code=404, detail="File not found")
-    async with acquire() as conn:
-        await conn.execute("DELETE FROM files WHERE id=$1 AND user_id=$2", file_id, _user)
-    try:
-        Path(row["storage_path"]).unlink(missing_ok=True)
-    except OSError:
-        pass  # row is gone; best-effort disk cleanup
+@router.delete("/{file_id}")
+async def delete_file(
+    file_id: str,
+    confirm_token: str | None = Query(None, description="Approval token; omit to receive a draft"),
+    _user: str = Depends(require_auth),
+):
+    """Delete a file — owner-gated and confirmation-gated (destructive)."""
+
+    async def _do():
+        async with acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT storage_path FROM files WHERE id=$1 AND user_id=$2",
+                file_id, _user,
+            )
+        if not row:
+            raise HTTPException(status_code=404, detail="File not found")
+        async with acquire() as conn:
+            await conn.execute("DELETE FROM files WHERE id=$1 AND user_id=$2", file_id, _user)
+        try:
+            Path(row["storage_path"]).unlink(missing_ok=True)
+        except OSError:
+            pass  # row is gone; best-effort disk cleanup
+        return {"deleted": True, "file_id": file_id}
+
+    outcome = await owner_gated_action(
+        owner_username=_user, is_owner=is_owner(_user),
+        action="delete_file", preview=f"Delete file {file_id}",
+        execute=_do, confirm_token=confirm_token,
+    )
+    if outcome["status"] == "forbidden":
+        raise HTTPException(status_code=403, detail=outcome["detail"])
+    if outcome["status"] in ("expired", "not_found"):
+        raise HTTPException(status_code=409, detail=outcome["detail"])
+    if outcome["status"] == "executed":
+        return outcome["result"]
+    return outcome  # confirmation_required

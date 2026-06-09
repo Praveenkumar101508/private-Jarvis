@@ -275,6 +275,9 @@ def create_app() -> FastAPI:
     from api.routes.profile import router as profile_router
     app.include_router(profile_router, prefix="/api/v1")         # v1 1.4: /profile owner profile (GET/PUT)
 
+    from api.routes.actions import router as actions_router
+    app.include_router(actions_router, prefix="/api/v1")         # v1 2.3: /actions (email-with-approval, status)
+
     # ── Global error handler ──────────────────────────────────────────────────
     @app.exception_handler(Exception)
     async def global_exception_handler(request: Request, exc: Exception):
