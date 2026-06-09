@@ -21,6 +21,11 @@ openai==1.58.1                  # MUST match requirements.txt (langchain-openai 
 langgraph==0.2.73
 langchain-core==0.3.28
 
+# Numeric / cache deps imported by modules the tests load (e.g. test_cutover_flag.py)
+# Without these, pytest fails at COLLECTION before any test runs.
+numpy==1.26.4
+redis==5.2.0
+
 # YAML routing config
 pyyaml==6.0.2
 
