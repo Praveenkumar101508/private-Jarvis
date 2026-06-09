@@ -43,23 +43,49 @@ class HermesBridge:
             timeout=self.cfg.timeout,
         )
 
-    def ask(self, prompt: str, *, system: Optional[str] = None, session_key: Optional[str] = None) -> str:
+    def ask(
+        self,
+        prompt: str,
+        *,
+        system: Optional[str] = None,
+        session_id: Optional[str] = None,
+        user_key: Optional[str] = None,
+        session_key: Optional[str] = None,
+    ) -> str:
         """Send a message to the Hermes gateway; return the final text reply.
 
-        NOTE (verified Phase 2): the gateway is an AGENT endpoint with its own system
-        prompt — a client `system` role is NOT reliably honored. So when `system`
-        context (e.g. a skill persona + data) is provided we fold it into the user
-        message, which the agent does read.
+        Per the Hermes gateway contract (both headers require the API key):
+          * ``X-Hermes-Session-Id``  — THREAD continuity. The gateway loads that
+            conversation's own history, so this is the per-conversation id.
+          * ``X-Hermes-Session-Key`` — a STABLE long-term MEMORY scope, keyed per
+            *user* (NOT per conversation).
 
-        session_key -> X-Hermes-Session-Key header (per-tenant memory isolation, Phase 5).
+        Send BOTH when present. ``system`` (e.g. a skill persona + gathered data) is
+        sent as a proper ``system`` message rather than folded into the user turn.
+        When neither id/key nor ``system`` is provided, behavior is identical to a
+        bare single-user-message completion.
+
+        ``session_key`` is a DEPRECATED alias for ``user_key`` (the old call sites
+        passed the memory scope under that name); kept so callers keep working until
+        they migrate. ``user_key`` wins if both are supplied.
         """
-        content = f"{system}\n\n---\n\n{prompt}" if system else prompt
-        kwargs = {}
-        if session_key:
-            kwargs["extra_headers"] = {"X-Hermes-Session-Key": session_key}
+        user_key = user_key or session_key  # back-compat: old name for the memory scope
+
+        messages = []
+        if system:
+            messages.append({"role": "system", "content": system})
+        messages.append({"role": "user", "content": prompt})
+
+        headers = {}
+        if session_id:
+            headers["X-Hermes-Session-Id"] = session_id
+        if user_key:
+            headers["X-Hermes-Session-Key"] = user_key
+
+        kwargs = {"extra_headers": headers} if headers else {}
         resp = self._client.chat.completions.create(
             model=self.cfg.model,
-            messages=[{"role": "user", "content": content}],
+            messages=messages,
             **kwargs,
         )
         return (resp.choices[0].message.content or "").strip()
