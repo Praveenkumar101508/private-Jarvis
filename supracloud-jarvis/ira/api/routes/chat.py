@@ -19,7 +19,7 @@ import time
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from sse_starlette.sse import EventSourceResponse
 
 from api.middleware.auth import require_auth
@@ -64,6 +64,10 @@ class ChatRequest(BaseModel):
 
 
 class ChatResponse(BaseModel):
+    # `model_used` collides with pydantic's protected "model_" namespace; opting out
+    # of the namespace check silences the UserWarning without renaming the field.
+    model_config = ConfigDict(protected_namespaces=())
+
     response: str
     session_id: str
     conversation_id: str
