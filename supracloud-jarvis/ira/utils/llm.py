@@ -218,3 +218,88 @@ async def stream_tokens(
         delta = chunk.choices[0].delta.content
         if delta:
             yield delta
+
+
+# ── Vision (image) path — local Ollama VL model, fail-soft ───────────────────
+# Prompt 3.1: a local vision-language model served by Ollama (e.g. qwen2.5-VL /
+# llava). Selection mirrors the text tiers (_use_ollama): local Ollama VL when the
+# backend is ollama, otherwise the vLLM vision endpoint. Both fail soft.
+
+_VISION_UNAVAILABLE = (
+    "Vision is unavailable — no vision-language model is configured. Pull a VL model "
+    "on the Shadow box (e.g. `ollama pull qwen2.5vl`) and set OLLAMA_VISION_MODEL."
+)
+
+
+def _vision_client_and_model() -> tuple[AsyncOpenAI | None, str | None]:
+    """Return (client, model) for the vision path, or (None, None) if unconfigured."""
+    cfg = get_settings()
+    if _use_ollama():
+        model = getattr(cfg, "ollama_vision_model", "") or ""
+        if not model:
+            return None, None
+        return _make_ollama_client(), model
+    if not cfg.vllm_vision_url:
+        return None, None
+    return _make_vllm_client(cfg.vllm_vision_url), (cfg.vllm_vision_model or "vision")
+
+
+def vision_available() -> bool:
+    """True when a vision-language model is configured for the active backend."""
+    client, _model = _vision_client_and_model()
+    return client is not None
+
+
+def _vision_messages(prompt: str, image_b64: str, mime_type: str, system: str | None) -> list[dict]:
+    data_url = f"data:{mime_type};base64,{image_b64}"
+    messages: list[dict] = []
+    if system:
+        messages.append({"role": "system", "content": system})
+    messages.append({"role": "user", "content": [
+        {"type": "text", "text": prompt},
+        {"type": "image_url", "image_url": {"url": data_url}},
+    ]})
+    return messages
+
+
+async def vision_complete(
+    *, prompt: str, image_b64: str, mime_type: str = "image/jpeg", system: str | None = None,
+) -> str:
+    """Call the VL model with an image + prompt and return text. Fail soft (never raises)."""
+    client, model = _vision_client_and_model()
+    if client is None:
+        return _VISION_UNAVAILABLE
+    try:
+        resp = await client.chat.completions.create(
+            model=model,
+            messages=_vision_messages(prompt, image_b64, mime_type, system),  # type: ignore[arg-type]
+            max_tokens=2048,
+            temperature=0.3,
+        )
+        return (resp.choices[0].message.content or "").strip()
+    except Exception as exc:  # noqa: BLE001 — fail soft
+        return f"Vision unavailable: {str(exc)[:160]}"
+
+
+async def stream_vision_tokens(
+    *, prompt: str, image_b64: str, mime_type: str = "image/jpeg", system: str | None = None,
+) -> AsyncIterator[str]:
+    """Stream tokens from the VL model; on unavailable/error yield a clear message (fail soft)."""
+    client, model = _vision_client_and_model()
+    if client is None:
+        yield _VISION_UNAVAILABLE
+        return
+    try:
+        stream = await client.chat.completions.create(
+            model=model,
+            messages=_vision_messages(prompt, image_b64, mime_type, system),  # type: ignore[arg-type]
+            max_tokens=2048,
+            temperature=0.3,
+            stream=True,
+        )
+        async for chunk in stream:
+            delta = chunk.choices[0].delta.content
+            if delta:
+                yield delta
+    except Exception as exc:  # noqa: BLE001 — fail soft
+        yield f"Vision unavailable: {str(exc)[:160]}"

@@ -238,6 +238,11 @@ class Settings(BaseSettings):
     # Cloud upgrade: set VLLM_VISION_URL=http://vllm-vision:8004/v1 with Qwen3-VL-72B
     vllm_vision_url: str = ""
     vllm_vision_model: str = "qwen3-vl"
+    # Local (Ollama) vision-language model — the sovereign image path served by the
+    # same Ollama as the text models. Pull it on the Shadow box first:
+    #   ollama pull qwen2.5vl     (or a llava tag)
+    # Empty string disables local vision (the helper then fails soft).
+    ollama_vision_model: str = "qwen2.5vl"
 
     # ── Expert Mode ───────────────────────────────────────────────────────────
     # Max specialist agents that may call the LLM at the same time.
