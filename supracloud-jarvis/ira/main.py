@@ -84,6 +84,18 @@ async def _validate_config(cfg) -> None:
     if any("broken" in w.lower() or "not set" in w.lower() for w in warnings):
         logger.warning("Fix the above config warnings before going to production.")
 
+    # Sovereignty guard: if the Hermes engine is ON, its gateway MUST be local or
+    # prompts could leave the box via a remote gateway. Warn loudly; never block.
+    from config import hermes_local_only_warning
+    _hermes_leak = hermes_local_only_warning()
+    if _hermes_leak:
+        logger.warning("=" * 70)
+        logger.warning("⚠️  HERMES SOVEREIGNTY WARNING  ⚠️")
+        logger.warning(f"   {_hermes_leak}")
+        logger.warning("   Point IRA_HERMES_URL at 127.0.0.1/localhost unless you")
+        logger.warning("   truly intend to route through a remote (cloud) gateway.")
+        logger.warning("=" * 70)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -259,6 +271,9 @@ def create_app() -> FastAPI:
 
     from api.routes.calendar import router as calendar_router
     app.include_router(calendar_router, prefix="/api/v1")        # Feat P27: /calendar/event create + cancel
+
+    from api.routes.profile import router as profile_router
+    app.include_router(profile_router, prefix="/api/v1")         # v1 1.4: /profile owner profile (GET/PUT)
 
     # ── Global error handler ──────────────────────────────────────────────────
     @app.exception_handler(Exception)

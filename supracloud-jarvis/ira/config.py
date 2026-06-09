@@ -14,8 +14,12 @@ CLOUD UPGRADE PATH (8×H100 80GB):
   Vision    — Qwen3-VL-72B   (multimodal, beats Gemini 1.5 Pro on vision evals)
 """
 
+import os
 from functools import lru_cache
 from pathlib import Path
+from typing import Optional
+from urllib.parse import urlparse
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Fix P19: only load .env when the file is present; in Docker, config comes
@@ -306,3 +310,38 @@ class Settings(BaseSettings):
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
     return Settings()
+
+
+# Hosts that keep the Hermes gateway traffic on the box.
+_LOCAL_HERMES_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
+
+
+def hermes_local_only_warning(
+    use_hermes: Optional[bool] = None,
+    hermes_url: Optional[str] = None,
+) -> Optional[str]:
+    """Sovereignty guard for the Hermes engine.
+
+    When IRA_USE_HERMES is true, the gateway URL MUST point at localhost/127.0.0.1
+    — a non-local URL would route prompts through a remote gateway (e.g. Nous
+    Portal), defeating the "nothing leaves the box" guarantee. Returns a warning
+    string when the URL is NOT local (so startup can warn loudly), else None.
+
+    Reads IRA_USE_HERMES / IRA_HERMES_URL from the environment when not passed in.
+    This NEVER blocks startup — it only describes the misconfiguration.
+    """
+    if use_hermes is None:
+        use_hermes = os.getenv("IRA_USE_HERMES", "false").strip().lower() in (
+            "1", "true", "yes", "on",
+        )
+    if not use_hermes:
+        return None
+    if hermes_url is None:
+        hermes_url = os.getenv("IRA_HERMES_URL", "http://127.0.0.1:8642/v1")
+    host = (urlparse(hermes_url).hostname or "").lower()
+    if host in _LOCAL_HERMES_HOSTS:
+        return None
+    return (
+        f"IRA_USE_HERMES=true but IRA_HERMES_URL={hermes_url!r} is NOT local "
+        f"(host={host!r}); prompts would leave the box via a remote gateway."
+    )

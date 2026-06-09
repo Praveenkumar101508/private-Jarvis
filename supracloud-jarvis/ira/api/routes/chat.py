@@ -25,6 +25,7 @@ from sse_starlette.sse import EventSourceResponse
 from api.middleware.auth import require_auth
 from agents.graph import run_graph
 from memory.store import ensure_conversation, get_recent_messages, retrieve
+from owner_profile import get_profile_summary
 from utils.llm import stream_tokens, should_use_deep, should_use_reasoning
 from utils.redis_client import cache_get, cache_set, get_redis
 from config import get_settings
@@ -170,13 +171,18 @@ async def _hermes_route(
     if skill not in _VALID_SKILLS:
         skill = "conversational"
 
-    memories_raw = await retrieve(message, user_id=user)
-    memory_ctx = "\n".join(m["content"] for m in memories_raw) if memories_raw else ""
-    blocks = [f"Relevant context from memory:\n{memory_ctx}"] if memory_ctx else None
-
-    # session_key scopes per-tenant memory inside Hermes (Phase 5 isolation).
+    # Memory is owned by Hermes in this path (project rule 5): the gateway loads the
+    # thread's own history via X-Hermes-Session-Id and the user's long-term memory via
+    # X-Hermes-Session-Key. IRA's own pgvector retrieve() is intentionally NOT read here
+    # so memory has a single owner (no dual read).
+    #   session_id = conv_id -> thread continuity (per conversation)
+    #   user_key   = user    -> stable per-user memory scope (same id the owner gate uses)
+    # The owner profile (who-I-am / goals / projects / prefs) is IRA-owned business data,
+    # so it IS injected every turn as context (distinct from Hermes recall).
+    profile_summary = await get_profile_summary()
+    blocks = [profile_summary] if profile_summary else None
     text = await asyncio.to_thread(
-        run_skill, skill, message, context_blocks=blocks, session_key=conv_id,
+        run_skill, skill, message, context_blocks=blocks, session_id=conv_id, user_key=user,
     )
     return text, skill
 
@@ -421,7 +427,12 @@ async def chat_stream(
             if not impl:
                 yield {"data": json.dumps({"token": "❌ No pending implementation. Run `architect implement [feature]` first.\n"})}
             else:
-                result = await apply_implementation(impl)
+                # `architect apply` is the explicit, human-gated REAL apply (git apply
+                # -> commit -> restart, no remote push — see utils/auto_implement.py).
+                # Pass dry_run=False so the "Applying…" message and the pending-state
+                # clear below are truthful (the default dry_run=True only validates).
+                # Mirrors POST /architect/apply.
+                result = await apply_implementation(impl, dry_run=False)
                 if result.success:
                     st["pending_apply"] = False
                     st["implementation"] = None
@@ -486,6 +497,10 @@ async def chat_stream(
         return _dispatched
 
     messages = [{"role": "system", "content": system_prompt}]
+    # v1 1.4: inject the owner profile every turn so the brain stays grounded.
+    profile_summary = await get_profile_summary()
+    if profile_summary:
+        messages.append({"role": "system", "content": profile_summary})
     if memory_ctx:
         messages.append({"role": "system", "content": f"Relevant context from memory:\n{memory_ctx}"})
     if search_ctx:
