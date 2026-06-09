@@ -76,6 +76,12 @@ duckduckgo-search==6.4.2        # Fix #120: pinned (6.4.3 was never released —
 pypdf==5.1.0                    # Fix #120: pinned (was >=4.0.0)
 python-docx==1.1.2              # Fix #120: pinned (was >=1.0.0)
 
+# ── Sovereign web-research channels (Phase 3B) — local backends only ─────────
+# SearXNG + Crawl4AI are self-hosted SERVICES (reached over HTTP via httpx, no pkg).
+# feedparser/yt-dlp are local python libs used by the rss/youtube channels.
+feedparser==6.0.11
+yt-dlp==2024.12.13
+
 # ── Feature #4: Native Document Generation ────────────────────────────────────
 reportlab==4.2.5                # Fix #120: pinned (was >=4.0.0)
 python-pptx==1.0.2              # Fix #120: pinned (was >=1.0.0)

@@ -268,6 +268,10 @@ class Settings(BaseSettings):
     web_search_enabled: bool = True
     web_search_provider: str = "duckduckgo"   # searxng | duckduckgo | tavily | serper
     searxng_url: str = "http://localhost:8888"
+    # Sovereign web-research layer (Phase 3B) — self-hosted backends only.
+    # SearXNG (search) reuses searxng_url above; Crawl4AI (clean web reader) here.
+    # Both MUST stay local/self-hosted so research queries never leave the box.
+    crawl4ai_url: str = "http://localhost:11235"
     tavily_api_key: str = ""
     serper_api_key: str = ""
     web_search_max_results: int = 5
