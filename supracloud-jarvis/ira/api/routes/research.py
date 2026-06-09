@@ -17,12 +17,13 @@ import re
 import time
 import uuid
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
 
 import channels
-from api.middleware.auth import require_auth
+from api.middleware.auth import require_auth, is_owner
+from channels.guard import guard_outbound
 from memory.store import ensure_conversation
 from utils.llm import stream_tokens
 
@@ -52,19 +53,38 @@ async def research_doctor(_user: str = Depends(require_auth)):
 
 @router.post("")
 async def research(req: ResearchRequest, _user: str = Depends(require_auth)):
-    """Search the web or read a URL via a local channel, then stream a grounded answer."""
+    """Search the web or read a URL via a local channel, then stream a grounded answer.
+
+    Owner-gated (only the verified owner may trigger outbound research) and
+    public-only (private/internal targets and smuggled secrets/file paths are
+    refused before any fetch).
+    """
+    # 3B.3: owner-gate — only the verified owner may reach the public internet.
+    if not is_owner(_user):
+        raise HTTPException(status_code=403, detail="Web research is restricted to the verified owner.")
+
     conv_id = await ensure_conversation(req.session_id)
     m = _URL_RE.search(req.message)
     url = req.url or (m.group(0) if m else None)
+    query = None if url else (req.query or req.message)
+
+    # 3B.3: public-only guard — refuse private/internal targets or smuggled content.
+    refusal = guard_outbound(url=url, query=query)
 
     async def gen():
         t0 = time.monotonic()
+        if refusal:
+            yield {"data": json.dumps({"token": refusal})}
+            yield {"data": json.dumps({
+                "done": True, "agent": "research", "blocked": True,
+                "session_id": req.session_id, "latency_ms": int((time.monotonic() - t0) * 1000),
+            })}
+            return
         try:
             if url:
                 context = await channels.read(url)
                 source = f"read {url}"
             else:
-                query = req.query or req.message
                 context = await channels.search(query)
                 source = f"web search: {query}"
 

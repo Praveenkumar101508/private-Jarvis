@@ -14,6 +14,7 @@ CLOUD UPGRADE PATH (8×H100 80GB):
   Vision    — Qwen3-VL-72B   (multimodal, beats Gemini 1.5 Pro on vision evals)
 """
 
+import ipaddress
 import os
 from functools import lru_cache
 from pathlib import Path
@@ -353,4 +354,43 @@ def hermes_local_only_warning(
     return (
         f"IRA_USE_HERMES=true but IRA_HERMES_URL={hermes_url!r} is NOT local "
         f"(host={host!r}); prompts would leave the box via a remote gateway."
+    )
+
+
+def _is_local_or_private_host(host: str) -> bool:
+    """True for localhost/loopback, *.local, or RFC1918/private (i.e. self-hosted)."""
+    host = (host or "").lower()
+    if host in _LOCAL_HERMES_HOSTS or host.endswith(".local"):
+        return True
+    try:
+        return ipaddress.ip_address(host).is_private
+    except ValueError:
+        return False
+
+
+def research_backends_warning(searxng_url: Optional[str] = None,
+                              crawl4ai_url: Optional[str] = None) -> Optional[str]:
+    """Sovereignty guard for the web-research backends (Phase 3B).
+
+    SearXNG and Crawl4AI MUST be local/self-hosted so research queries never leave
+    the box. Returns a warning string listing any backend whose host is not
+    local/self-hosted, else None. Never blocks startup.
+    """
+    if searxng_url is None or crawl4ai_url is None:
+        cfg = get_settings()
+        searxng_url = cfg.searxng_url if searxng_url is None else searxng_url
+        crawl4ai_url = getattr(cfg, "crawl4ai_url", "") if crawl4ai_url is None else crawl4ai_url
+
+    offenders = []
+    for label, url in (("SEARXNG_URL", searxng_url), ("CRAWL4AI_URL", crawl4ai_url)):
+        if not url:
+            continue
+        host = (urlparse(url).hostname or "").lower()
+        if not _is_local_or_private_host(host):
+            offenders.append(f"{label}={url!r} (host={host!r})")
+    if not offenders:
+        return None
+    return (
+        "web-research backends are NOT local/self-hosted: " + "; ".join(offenders)
+        + " — research queries could leave the box."
     )

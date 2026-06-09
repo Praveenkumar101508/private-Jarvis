@@ -86,7 +86,7 @@ async def _validate_config(cfg) -> None:
 
     # Sovereignty guard: if the Hermes engine is ON, its gateway MUST be local or
     # prompts could leave the box via a remote gateway. Warn loudly; never block.
-    from config import hermes_local_only_warning
+    from config import hermes_local_only_warning, research_backends_warning
     _hermes_leak = hermes_local_only_warning()
     if _hermes_leak:
         logger.warning("=" * 70)
@@ -94,6 +94,15 @@ async def _validate_config(cfg) -> None:
         logger.warning(f"   {_hermes_leak}")
         logger.warning("   Point IRA_HERMES_URL at 127.0.0.1/localhost unless you")
         logger.warning("   truly intend to route through a remote (cloud) gateway.")
+        logger.warning("=" * 70)
+
+    # Same for the web-research backends (SearXNG / Crawl4AI) — keep them local.
+    _research_leak = research_backends_warning()
+    if _research_leak:
+        logger.warning("=" * 70)
+        logger.warning("⚠️  WEB-RESEARCH SOVEREIGNTY WARNING  ⚠️")
+        logger.warning(f"   {_research_leak}")
+        logger.warning("   Point SEARXNG_URL / CRAWL4AI_URL at local/self-hosted endpoints.")
         logger.warning("=" * 70)
 
 

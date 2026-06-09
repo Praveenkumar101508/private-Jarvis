@@ -30,6 +30,8 @@ async def _drain(resp) -> str:
 
 
 def test_search_feeds_channel_text_to_brain_and_streams(monkeypatch):
+    monkeypatch.setattr("api.middleware.auth.get_settings",
+                        lambda: type("C", (), {"ira_admin_username": "owner"})())
     monkeypatch.setattr(rmod, "ensure_conversation", AsyncMock(return_value="c1"))
     monkeypatch.setattr("channels.search", AsyncMock(return_value="SEARXNG-RESULT-TEXT"))
 
@@ -53,6 +55,8 @@ def test_search_feeds_channel_text_to_brain_and_streams(monkeypatch):
 
 
 def test_message_with_url_routes_to_read(monkeypatch):
+    monkeypatch.setattr("api.middleware.auth.get_settings",
+                        lambda: type("C", (), {"ira_admin_username": "owner"})())
     monkeypatch.setattr(rmod, "ensure_conversation", AsyncMock(return_value="c1"))
     read_mock = AsyncMock(return_value="PAGE-TEXT")
     monkeypatch.setattr("channels.read", read_mock)
