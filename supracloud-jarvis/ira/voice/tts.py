@@ -21,16 +21,16 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+import sys
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
-from typing import AsyncIterator
 
 import numpy as np
 from livekit.agents import tts, utils
-from livekit.agents.tts import SynthesizedAudio, SynthesisEvent, SynthesisEventType
+from livekit.agents.types import DEFAULT_API_CONNECT_OPTIONS, APIConnectOptions
 
-from voice.language import get_kokoro_voice, is_indic, LANGUAGE_NAMES
+from voice.language import is_indic, LANGUAGE_NAMES
 
 logger = logging.getLogger("ira.tts")
 
@@ -165,8 +165,10 @@ def _synthesise_sync(
 
 class IRAKokoroTTS(tts.TTS):
     """
-    LiveKit-compatible TTS plugin backed by Kokoro-82M (af_bella).
-    Produces warm, professional audio in IRA's voice.
+    LiveKit Agents 1.x TTS plugin backed by Kokoro-82M (af_bella).
+
+    1.x change: audio is pushed through an `AudioEmitter` in `ChunkedStream._run`
+    (the 0.x `SynthesisEvent`/`SynthesizedAudio` event-channel API is gone).
     """
 
     def __init__(
@@ -182,87 +184,75 @@ class IRAKokoroTTS(tts.TTS):
         self._voice = voice
         self._speed = speed
 
-    def synthesize(self, text: str, *, language: str = "en") -> "IRAChunkedStream":
-        return IRAChunkedStream(
-            text=_prepare_text_for_voice(text, language),
-            voice=self._voice,
-            speed=self._speed,
-            lang=language,   # Fix #119: forward language so Kokoro uses correct phonology
-            tts=self,
-        )
+    def synthesize(
+        self,
+        text: str,
+        *,
+        conn_options: APIConnectOptions = DEFAULT_API_CONNECT_OPTIONS,
+    ) -> "IRAChunkedStream":
+        return IRAChunkedStream(tts=self, input_text=text, conn_options=conn_options)
 
 
 class IRAChunkedStream(tts.ChunkedStream):
     """
-    Streams synthesised audio sentence-by-sentence for low time-to-first-audio.
-
-    Fix #118: the previous implementation synthesised the ENTIRE response text
-    before emitting a single audio frame (fake streaming). Now each sentence is
-    synthesised and flushed immediately, reducing TTFA from the full-response
-    synthesis time (~several seconds) to a single-sentence synthesis time
-    (~0.3–0.8 s for typical voice responses).
+    Synthesises sentence-by-sentence for low time-to-first-audio, pushing each
+    sentence's PCM to the 1.x AudioEmitter as soon as it's ready.
     """
 
-    def __init__(
-        self,
-        text: str,
-        voice: str,
-        speed: float,
-        lang: str,
-        tts: IRAKokoroTTS,
-    ):
-        super().__init__(tts=tts, input_text=text)
-        self._text = text
-        self._voice = voice
-        self._speed = speed
-        self._lang = lang   # Fix #119: store language for Kokoro phonology selection
+    def __init__(self, *, tts: IRAKokoroTTS, input_text: str, conn_options):
+        super().__init__(tts=tts, input_text=input_text, conn_options=conn_options)
+        self._voice = tts._voice
+        self._speed = tts._speed
 
-    async def _run(self) -> None:
+    async def _run(self, output_emitter: tts.AudioEmitter) -> None:
         t0 = time.monotonic()
         model = _load_kokoro(self._voice)
         loop = asyncio.get_running_loop()
-        kokoro_lang = _kokoro_lang(self._lang)
+        # The LLM already replied in the target language; Kokoro reads en-us here
+        # until native IndicTTS is plugged in. (Language plumbing kept simple in 1.x.)
+        kokoro_lang = _kokoro_lang("en")
 
-        sentences = _split_sentences(self._text)
+        output_emitter.initialize(
+            request_id=utils.shortuuid(),
+            sample_rate=LIVEKIT_SAMPLE_RATE,
+            num_channels=1,
+            mime_type="audio/pcm",
+        )
+
+        sentences = _split_sentences(_prepare_text_for_voice(self.input_text, "en"))
         total_chars = 0
 
         for sentence in sentences:
             audio_24k = await loop.run_in_executor(
-                _TTS_EXECUTOR,
-                _synthesise_sync,
-                sentence,
-                self._voice,
-                self._speed,
-                model,
-                kokoro_lang,  # Fix #119
+                _TTS_EXECUTOR, _synthesise_sync, sentence, self._voice, self._speed, model, kokoro_lang,
             )
             if audio_24k is None:
                 continue
-
             total_chars += len(sentence)
+            audio_48k = _resample_24k_to_48k(audio_24k)  # 48kHz int16
+            # Push this sentence's audio immediately (low TTFA).
+            output_emitter.push(audio_48k.tobytes())
 
-            # Resample and emit this sentence's audio immediately
-            audio_48k = _resample_24k_to_48k(audio_24k)
-            for start in range(0, len(audio_48k), CHUNK_SAMPLES):
-                chunk = audio_48k[start : start + CHUNK_SAMPLES]
-                self._event_ch.send_nowait(
-                    SynthesisEvent(
-                        type=SynthesisEventType.AUDIO,
-                        audio=SynthesizedAudio(
-                            request_id=self._request_id,
-                            frame=utils.AudioFrame(
-                                data=chunk.tobytes(),
-                                sample_rate=LIVEKIT_SAMPLE_RATE,
-                                num_channels=1,
-                                samples_per_channel=len(chunk),
-                            ),
-                            delta_text="",
-                        ),
-                    )
-                )
-
+        output_emitter.flush()
         latency_ms = int((time.monotonic() - t0) * 1000)
         logger.info(
             f"TTS synthesis: {total_chars} chars / {len(sentences)} sentence(s) "
             f"in {latency_ms}ms  lang={kokoro_lang}"
         )
+
+
+# ── Standalone smoke test (run on the Shadow box) ─────────────────────────────
+# Usage:  python -m voice.tts "Hello, I am IRA." [out.wav]
+# Synthesises a sentence to a WAV file (no LiveKit), verifying the Kokoro path.
+if __name__ == "__main__":  # pragma: no cover
+    logging.basicConfig(level=logging.INFO)
+    text = sys.argv[1] if len(sys.argv) > 1 else "Hello, I am IRA, your assistant."
+    out = sys.argv[2] if len(sys.argv) > 2 else "ira_tts_smoke.wav"
+    _model = _load_kokoro(DEFAULT_VOICE)
+    samples = _synthesise_sync(text, DEFAULT_VOICE, SPEECH_SPEED, _model, "en-us")
+    if samples is None:
+        print("Kokoro unavailable — check model files (kokoro-v0_19.onnx, voices.bin).")
+        raise SystemExit(1)
+    import soundfile as sf  # type: ignore
+    sf.write(out, samples, KOKORO_SAMPLE_RATE)
+    print(f"wrote {out} ({len(samples)} samples @ {KOKORO_SAMPLE_RATE}Hz)")
