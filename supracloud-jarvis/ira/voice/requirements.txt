@@ -6,8 +6,12 @@ torch==2.4.1+cpu
 speechbrain==1.0.0                      # ECAPA-TDNN speaker embeddings
 
 # ── LiveKit Agents + Voice pipeline ────────────────────────────────────────────
-livekit-agents[silero]==0.11.7          # Core agent SDK + Silero VAD
-livekit==0.17.4                         # LiveKit Python SDK
+# LiveKit Agents 1.x. The invalid 0.11.7 pin did not exist on PyPI. In 1.x the 0.x
+# `[silero]` extra is gone — Silero VAD ships as a separate plugin package
+# (livekit-plugins-silero), pinned to the same minor as the core SDK.
+livekit-agents==1.5.17                   # Core agent SDK (1.x)
+livekit-plugins-silero==1.5.17           # Silero VAD plugin (replaces the 0.x [silero] extra)
+livekit==1.1.8                           # LiveKit Python SDK (pinned by livekit-agents 1.5.17)
 
 # ── STT ────────────────────────────────────────────────────────────────────────
 faster-whisper==1.0.3                   # Multilingual STT (Whisper large-v3)

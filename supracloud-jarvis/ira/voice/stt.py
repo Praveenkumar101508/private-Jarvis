@@ -16,15 +16,16 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import sys
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
-from typing import AsyncIterator
 
 import numpy as np
 from faster_whisper import WhisperModel
-from livekit.agents import stt, utils
-from livekit.agents.stt import SpeechData, SpeechEvent, SpeechEventType
+from livekit import rtc
+from livekit.agents import stt
+from livekit.agents.types import DEFAULT_API_CONNECT_OPTIONS, APIConnectOptions
 
 from voice.language import normalise_lang
 
@@ -130,8 +131,14 @@ def _transcribe_sync(
 
 class IRAFasterWhisperSTT(stt.STT):
     """
-    LiveKit-compatible STT plugin backed by Faster-Whisper.
-    Handles multilingual audio with automatic language detection.
+    LiveKit Agents 1.x STT plugin backed by Faster-Whisper (non-streaming/recognize).
+
+    1.x change: the 0.x `recognize()` override + `SpeechEvent`-by-hand path is replaced
+    by overriding `_recognize_impl(buffer, *, language, conn_options)`; the base class'
+    public `recognize()` wraps it. Multilingual with automatic language detection.
+
+    For lower latency, set WHISPER_MODEL=small (multilingual) or distil-large-v3
+    (English-only). Default large-v3 keeps the Indian/EU multilingual support.
     """
 
     def __init__(
@@ -149,28 +156,35 @@ class IRAFasterWhisperSTT(stt.STT):
         self._device = device
         self._compute_type = compute_type
         self._language = language
+        # 1.x: the AgentSession owns the audio, so the STT stashes each utterance's
+        # 16kHz/16-bit mono PCM here for the biometric gate to read (4.4).
+        self.last_utterance_pcm16: bytes = b""
 
     def _get_model(self) -> WhisperModel:
         return _load_model(self._model_size, self._device, self._compute_type)
 
-    async def recognize(
+    async def _recognize_impl(
         self,
-        buffer: utils.AudioBuffer,
+        buffer: rtc.AudioFrame | list[rtc.AudioFrame],
         *,
         language: str | None = None,
-    ) -> SpeechEvent:
+        conn_options: APIConnectOptions = DEFAULT_API_CONNECT_OPTIONS,
+    ) -> stt.SpeechEvent:
         t0 = time.monotonic()
 
-        # Convert LiveKit AudioBuffer to numpy array
-        audio_bytes = b"".join(
-            frame.data for frame in buffer
-        )
-        audio_array = _downsample(audio_bytes)
+        # 1.x: collapse the buffered frames into a single frame, then to bytes.
+        frame = rtc.combine_audio_frames(buffer)
+        audio_array = _downsample(bytes(frame.data))
+
+        # Stash 16kHz/16-bit mono PCM for the biometric gate (4.4) to verify this turn.
+        self.last_utterance_pcm16 = (
+            np.clip(audio_array, -1.0, 1.0) * 32767.0
+        ).astype(np.int16).tobytes()
 
         if len(audio_array) < 1600:  # < 0.1s — too short, skip
-            return SpeechEvent(
-                type=SpeechEventType.FINAL_TRANSCRIPT,
-                alternatives=[SpeechData(text="", language="en", confidence=0.0)],
+            return stt.SpeechEvent(
+                type=stt.SpeechEventType.FINAL_TRANSCRIPT,
+                alternatives=[stt.SpeechData(text="", language="en", confidence=0.0)],
             )
 
         model = self._get_model()
@@ -191,13 +205,34 @@ class IRAFasterWhisperSTT(stt.STT):
             f"len={len(transcript)} latency={latency_ms}ms"
         )
 
-        return SpeechEvent(
-            type=SpeechEventType.FINAL_TRANSCRIPT,
+        return stt.SpeechEvent(
+            type=stt.SpeechEventType.FINAL_TRANSCRIPT,
             alternatives=[
-                SpeechData(
+                stt.SpeechData(
                     text=transcript,
                     language=detected_lang,
                     confidence=confidence,
                 )
             ],
         )
+
+
+# ── Standalone smoke test (run on the Shadow box) ─────────────────────────────
+# Usage:  python -m voice.stt <path-to-audio.wav>
+# Loads the model, transcribes the file, and prints the text. Verifies the
+# faster-whisper path end-to-end without LiveKit.
+if __name__ == "__main__":  # pragma: no cover
+    logging.basicConfig(level=logging.INFO)
+    if len(sys.argv) < 2:
+        print("usage: python -m voice.stt <audio.wav>")
+        raise SystemExit(2)
+    import soundfile as sf  # type: ignore
+    wav, sr = sf.read(sys.argv[1], dtype="float32")
+    if wav.ndim > 1:
+        wav = wav.mean(axis=1)
+    if sr != WHISPER_SAMPLE_RATE:
+        from scipy.signal import resample_poly
+        wav = resample_poly(wav, WHISPER_SAMPLE_RATE, sr).astype(np.float32)
+    _model = _load_model("small", "cpu", "int8")
+    text, lang, conf = _transcribe_sync(wav.astype(np.float32), _model, None)
+    print(f"[{lang} conf={conf:.2f}] {text}")

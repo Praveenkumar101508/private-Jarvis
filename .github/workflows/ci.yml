@@ -34,3 +34,4 @@ jobs:
           tests/test_deliberation.py
           tests/test_architect.py
           tests/test_security_invariants.py
+          tests/test_voice_imports.py
