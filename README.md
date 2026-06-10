@@ -117,27 +117,29 @@
 
 ## ⚡ Quick Start
 
-```bash
+IRA runs **native on Windows** (Shadow PC) — Ollama + the Hermes gateway, no Docker.
+Bring up the whole stack with the native launcher:
+
+```powershell
 # 1 — Clone
-git clone -b claude/setup-private-session-1gF9a \
-  https://github.com/Praveenkumar101508/private-Jarvis.git
-cd private-Jarvis/supracloud-jarvis
+git clone https://github.com/Praveenkumar101508/private-Jarvis.git
+cd private-Jarvis\supracloud-jarvis
 
-# 2 — Generate secrets, TLS cert, and .env
-bash scripts/setup.sh
+# 2 — Configure: copy .env.example -> .env and fill in the secrets
+copy .env.example .env
 
-# 3 — Build and start all 10 services
-docker compose build && docker compose up -d
+# 3 — Start the full native stack (Postgres, Memurai, Ollama, Hermes gateway,
+#      SearXNG/Crawl4AI, ira-api, frontend) with health checks, in order:
+pwsh -File .\start-ira.ps1
 
-# 4 — Verify everything is healthy
-bash scripts/verify.sh
+# 4 — Verify per-pillar health
+#      GET http://127.0.0.1:8000/health/detail
 ```
 
-> ⏳ First start downloads ~15 GB of model weights. Monitor with:
-> ```bash
-> docker compose logs -f ira-api
-> ```
-> Wait for `Application startup complete`, then visit **`https://your-server-ip`**
+> The old `docker compose up` path is **retired** (there is no docker-compose.yml).
+> `start-ira.ps1` prints an `OK`/`WARN`/`FAIL` line per service and a final
+> `ALL UP`. SearXNG/Crawl4AI are optional — web research fails soft without them.
+> Pull models first on the Shadow box: `ollama pull qwen3:14b` (+ `qwen2.5vl` for vision).
 
 ### Prerequisites
 

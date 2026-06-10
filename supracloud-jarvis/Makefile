@@ -26,14 +26,20 @@ secrets-view:
 
 # ── Docker helpers ────────────────────────────────────────────────────────────
 
+# IRA runs NATIVE on Windows (Shadow PC) — there is no docker-compose.yml.
+# Bring up the full stack (Postgres, Memurai, Ollama, Hermes gateway, SearXNG/
+# Crawl4AI, ira-api, frontend) with the native launcher:
 up:
-	docker compose up -d
+	@echo "IRA runs native on Windows — start the stack with:"
+	@echo "    pwsh -File ./start-ira.ps1"
+	@echo "(see start-ira.ps1; the old 'docker compose up' path is retired — no compose file)"
 
 down:
-	docker compose down
+	@echo "Stop the native services from the Services panel (Postgres/Memurai) or"
+	@echo "close the Ollama/Hermes/uvicorn/next windows started by start-ira.ps1."
 
 logs:
-	docker compose logs -f --tail=100
+	@echo "Native stack: check each service's own console window / Windows Event Viewer."
 
 # Start with decrypted secrets piped directly to docker compose
 up-secure:
