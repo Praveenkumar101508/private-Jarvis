@@ -44,8 +44,23 @@ _stub("psutil")
 # uvloop — optional performance lib
 _stub("uvloop")
 
-# livekit.api — only available inside the Docker image
-_livekit = _stub("livekit")
-_livekit_api = _stub("livekit.api")
-_livekit.api = _livekit_api
-_livekit_api.WebhookReceiver = object
+# livekit — stub ONLY if the real Agents SDK isn't importable. When livekit-agents
+# IS installed (voice image / Shadow box), conftest must NOT shadow it, or the voice
+# import-smoke (test_voice_imports.py) would silently importorskip itself and never
+# actually validate against the real LiveKit 1.x API. We probe livekit.agents
+# specifically (a bare leftover `livekit` namespace dir must still fall back to the stub).
+import importlib.util as _ilu
+
+
+def _real_livekit_agents_present() -> bool:
+    try:
+        return _ilu.find_spec("livekit.agents") is not None
+    except (ImportError, ValueError, ModuleNotFoundError):
+        return False
+
+
+if not _real_livekit_agents_present():
+    _livekit = _stub("livekit")
+    _livekit_api = _stub("livekit.api")
+    _livekit.api = _livekit_api
+    _livekit_api.WebhookReceiver = object
