@@ -23,7 +23,7 @@ _asyncpg.Connection = object
 
 
 # utils.db — wraps asyncpg; replaced entirely by test patches
-_db = _stub("utils.db", acquire=None)
+_db = _stub("utils.db", acquire=None, get_pool=None)
 
 
 # worker.notifier — Telegram/email/WebSocket; replaced by test patches
@@ -37,6 +37,9 @@ _stub("worker.backup",
 
 # sentence_transformers — ML library not in test env
 _stub("sentence_transformers")
+
+# psutil — system metrics lib used by the health route; not in the lightweight test env
+_stub("psutil")
 
 # uvloop — optional performance lib
 _stub("uvloop")

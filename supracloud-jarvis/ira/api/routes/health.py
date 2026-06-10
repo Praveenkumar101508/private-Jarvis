@@ -83,3 +83,94 @@ async def health():
             "vllm_deep": deep,
         },
     )
+
+
+# ── Per-pillar detail (5.3) ───────────────────────────────────────────────────
+# Reports each subsystem independently and NEVER raises — every probe degrades to
+# a status instead of throwing, so one subsystem being down doesn't break /health
+# (and, by the same fail-soft design across the request paths, doesn't break chat).
+
+async def _check_ollama(base_url: str) -> ServiceStatus:
+    t = time.monotonic()
+    root = base_url.removesuffix("/v1")
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            r = await client.get(f"{root}/api/tags")
+        return ServiceStatus(status="ok" if r.status_code == 200 else "degraded",
+                             latency_ms=int((time.monotonic() - t) * 1000))
+    except Exception:
+        return ServiceStatus(status="down", latency_ms=0)
+
+
+async def _check_hermes() -> ServiceStatus:
+    import os
+    enabled = os.getenv("IRA_USE_HERMES", "false").strip().lower() in ("1", "true", "yes", "on")
+    if not enabled:
+        return ServiceStatus(status="degraded", latency_ms=0)  # off — legacy engine active
+    url = os.getenv("IRA_HERMES_URL", "http://127.0.0.1:8642/v1").rstrip("/")
+    key = os.getenv("IRA_HERMES_KEY", "")
+    t = time.monotonic()
+    try:
+        headers = {"Authorization": f"Bearer {key}"} if key else {}
+        async with httpx.AsyncClient(timeout=5) as client:
+            r = await client.get(f"{url}/models", headers=headers)
+        return ServiceStatus(status="ok" if r.status_code == 200 else "degraded",
+                             latency_ms=int((time.monotonic() - t) * 1000))
+    except Exception:
+        return ServiceStatus(status="down", latency_ms=0)
+
+
+def _norm(result) -> dict:
+    """Normalize a ServiceStatus / leaked exception into a plain status dict."""
+    if isinstance(result, ServiceStatus):
+        return {"status": result.status, "latency_ms": result.latency_ms}
+    return {"status": "down", "latency_ms": 0}
+
+
+@router.get("/health/detail")
+async def health_detail():
+    """Independent status for each pillar/subsystem. Always 200; never raises."""
+    cfg = get_settings()
+
+    pg, rd, brain, hermes = await asyncio.gather(
+        _check_postgres(), _check_redis(),
+        _check_ollama(getattr(cfg, "ollama_base_url", "http://localhost:11434/v1")),
+        _check_hermes(),
+        return_exceptions=True,
+    )
+
+    # Web-research channels + action deps — both already fail soft.
+    try:
+        import channels
+        research = await channels.doctor()
+    except Exception as exc:  # noqa: BLE001
+        research = {"error": str(exc)[:80]}
+    try:
+        from actions import action_status
+        actions = action_status(cfg)
+    except Exception as exc:  # noqa: BLE001
+        actions = {"error": str(exc)[:80]}
+
+    try:
+        from utils.llm import vision_available
+        vision_ok = vision_available()
+    except Exception:
+        vision_ok = False
+
+    pillars = {
+        "brain": {"ollama": _norm(brain), "hermes": _norm(hermes)},
+        "memory": {"postgres": _norm(pg), "redis": _norm(rd),
+                   "embedding_model": getattr(cfg, "embedding_model", "")},
+        "vision": {"configured": bool(vision_ok),
+                   "model": getattr(cfg, "ollama_vision_model", "")},
+        "voice": {"configured": bool(getattr(cfg, "livekit_api_key", "")),
+                  "note": "voice runs as a separate service; config presence only"},
+        "web_research": research,
+        "actions": actions,
+    }
+
+    mem_ok = _norm(pg)["status"] == "ok" and _norm(rd)["status"] == "ok"
+    brain_ok = _norm(brain)["status"] == "ok" or _norm(hermes)["status"] == "ok"
+    overall = "ok" if (mem_ok and brain_ok) else ("degraded" if (mem_ok or brain_ok) else "down")
+
+    return {"status": overall, "version": cfg.ira_version, "pillars": pillars}
