@@ -1,123 +1,114 @@
 """
-IRA Voice Agent — LiveKit Agents worker.
+IRA Voice Agent — LiveKit Agents 1.x worker.
 
-Architecture:
-  User speaks → LiveKit room → IRA Voice Agent
-    → Silero VAD (detect speech end)
-    → Faster-Whisper STT (multilingual transcription + language detection)
-    → IRA API (LangGraph multi-agent brain via HTTP)
-    → Kokoro TTS (af_bella — warm, professional female voice)
-    → LiveKit room → User hears IRA's response
+  User speaks → LiveKit room → Silero VAD → Faster-Whisper STT (1.x)
+    → IRA LLM adapter (HTTP to ira-api /chat/stream, the IRA brain)
+    → Kokoro TTS (1.x) → LiveKit room → user hears IRA
 
-This process runs as a standalone worker that connects to the LiveKit server
-and waits for participants to join voice rooms. One agent instance is spawned
-per active room.
+Rewritten for LiveKit Agents 1.x:
+  * AgentSession + Agent + RoomInputOptions (no 0.x ctx plumbing).
+  * The LLM adapter subclasses llm.LLM and emits 1.x ChatChunk(delta=ChoiceDelta);
+    the 0.x llm.Choice / ChatRole / multi-choice API is gone.
+  * Bug fix: the IRALLMStream constructor parameter named `llm` shadowed the imported
+    `llm` module (guaranteed AttributeError on llm.ChatContext()); renamed to `adapter`.
 
-Environment variables required:
-  LIVEKIT_URL        — LiveKit server WebSocket URL
-  LIVEKIT_API_KEY    — LiveKit API key
-  LIVEKIT_API_SECRET — LiveKit API secret
-  IRA_API_URL        — Internal URL to ira-api (e.g. http://ira-api:8000)
-  IRA_API_TOKEN      — JWT token for ira-api authentication
+NOTE: this targets the LiveKit Agents 1.x API and is validated on the Shadow box
+(no GPU/audio here). Per-utterance biometric audio is read from the STT plugin's
+last_utterance_pcm16 stash.
+
+Env: LIVEKIT_URL / LIVEKIT_API_KEY / LIVEKIT_API_SECRET, IRA_API_URL, IRA_API_TOKEN.
 """
 
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import uuid
-from typing import AsyncIterator
 
 import httpx
-from livekit import rtc
 from livekit.agents import (
+    Agent,
     AgentSession,
     JobContext,
     RoomInputOptions,
     WorkerOptions,
     cli,
     llm,
+    utils,
 )
+from livekit.agents.types import DEFAULT_API_CONNECT_OPTIONS
 from livekit.plugins import silero
 
+from voice.gate import gate_from_audio
+from voice.language import get_greeting
 from voice.stt import IRAFasterWhisperSTT
 from voice.tts import IRAKokoroTTS
-from voice.language import get_greeting, normalise_lang, LANGUAGE_NAMES
 
 logger = logging.getLogger("ira.voice")
 
-# Fix P17: probe the real function name; verify_owner never existed — using it
-# caused "Biometric pipeline: DISABLED" even when verification worked downstream.
 try:
     from voice.biometrics import is_owner_authenticated  # noqa: F401
     logger.info("Biometric pipeline: ACTIVE — ECAPA-TDNN speaker verification ready")
 except ImportError as _bio_err:
     logger.warning(f"Biometric pipeline: DISABLED — {_bio_err}")
 
-# ── Configuration ─────────────────────────────────────────────────────────────
-# All config values are read lazily via _get_voice_config() so that env changes
-# take effect when the next voice session starts, without a container restart.
 
 def _get_voice_config() -> dict:
     return {
         "api_url": os.getenv("IRA_API_URL", "http://ira-api:8000"),
         "api_token": os.getenv("IRA_API_TOKEN", ""),
-        # Whisper model size — large-v3: best accuracy; small: fastest (~0.3-0.5s)
         "whisper_model": os.getenv("WHISPER_MODEL", "large-v3"),
-        # Fix #123: voice from IRA_VOICE env — "af_bella" (warm) or "af_heart" (softer)
         "voice": os.getenv("IRA_VOICE", "af_bella"),
-        # Guard against zombie sessions — 4h cap per session
         "max_session_seconds": float(os.getenv("MAX_SESSION_SECONDS", str(4 * 3600))),
     }
 
 
-# ── IRA LLM Adapter ───────────────────────────────────────────────────────────
+def _last_user_text(chat_ctx) -> str:
+    """Extract the latest user message text from a 1.x ChatContext (defensively)."""
+    for item in reversed(getattr(chat_ctx, "items", []) or []):
+        if getattr(item, "role", None) != "user":
+            continue
+        text = getattr(item, "text_content", None)
+        if text:
+            return text
+        content = getattr(item, "content", None)
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            return " ".join(str(p) for p in content if isinstance(p, str))
+    return ""
+
+
+# ── IRA LLM Adapter (1.x) ─────────────────────────────────────────────────────
 
 class IRALLMAdapter(llm.LLM):
-    """
-    Bridges LiveKit Agents' LLM interface to IRA's FastAPI + LangGraph backend.
-    Each chat() call sends the user's message to /api/v1/chat and streams back
-    the response token-by-token via SSE.
-    """
+    """Bridges LiveKit Agents' LLM interface to IRA's brain (HTTP /chat/stream)."""
 
-    def __init__(self, session_id: str):
+    def __init__(self, session_id: str, stt: IRAFasterWhisperSTT):
         super().__init__()
         self._session_id = session_id
-        _cfg = _get_voice_config()
+        self._stt = stt          # read per-utterance audio for the biometric gate
+        cfg = _get_voice_config()
         self._http = httpx.AsyncClient(
-            base_url=_cfg["api_url"],
-            headers={"Authorization": f"Bearer {_cfg['api_token']}"},
+            base_url=cfg["api_url"],
+            headers={"Authorization": f"Bearer {cfg['api_token']}"},
             timeout=httpx.Timeout(connect=5, read=120, write=30, pool=5),
         )
-        # Stores the raw PCM bytes of the latest user utterance for biometric verification
-        self._pending_audio: bytes = b""
 
-    def set_audio_bytes(self, audio: bytes) -> None:
-        """Called by the speech-committed handler before chat() is invoked."""
-        self._pending_audio = audio
-
-    def chat(
-        self,
-        *,
-        chat_ctx: llm.ChatContext,
-        conn_options: llm.LLMOptions | None = None,
-    ) -> "IRALLMStream":
-        # Extract the latest user message from LiveKit's chat context
-        user_msg = ""
-        for msg in reversed(chat_ctx.messages):
-            if msg.role == llm.ChatRole.USER:
-                user_msg = str(msg.content) if msg.content else ""
-                break
-        # Pass the buffered audio so the biometric gate inside _run() can verify
-        audio = self._pending_audio
-        self._pending_audio = b""  # reset after each turn
+    def chat(self, *, chat_ctx, tools=None, conn_options=DEFAULT_API_CONNECT_OPTIONS, **kwargs):
+        user_msg = _last_user_text(chat_ctx)
+        audio = self._stt.last_utterance_pcm16          # the utterance that produced it
+        self._stt.last_utterance_pcm16 = b""            # consume
         return IRALLMStream(
-            llm=self,
+            adapter=self,                                # NOTE: not `llm` — that shadows the module
+            chat_ctx=chat_ctx,
+            tools=tools or [],
+            conn_options=conn_options,
             session_id=self._session_id,
             user_message=user_msg,
             http=self._http,
-            is_owner=False,
             audio_bytes=audio,
         )
 
@@ -126,48 +117,39 @@ class IRALLMAdapter(llm.LLM):
 
 
 class IRALLMStream(llm.LLMStream):
-    """Streams IRA's response back to the voice pipeline token-by-token."""
+    """Streams IRA's response back to the voice pipeline as 1.x ChatChunks."""
 
-    def __init__(
-        self,
-        llm: IRALLMAdapter,
-        session_id: str,
-        user_message: str,
-        http: httpx.AsyncClient,
-        is_owner: bool = False,
-        audio_bytes: bytes = b"",
-    ):
-        super().__init__(llm=llm, chat_ctx=llm.ChatContext(), tools=[])
+    def __init__(self, *, adapter, chat_ctx, tools, conn_options,
+                 session_id, user_message, http, audio_bytes=b""):
+        super().__init__(adapter, chat_ctx=chat_ctx, tools=tools, conn_options=conn_options)
         self._session_id = session_id
         self._user_message = user_message
         self._http = http
-        self._is_owner = is_owner
         self._audio_bytes = audio_bytes
+
+    def _emit(self, content: str) -> None:
+        self._event_ch.send_nowait(
+            llm.ChatChunk(id=utils.shortuuid(),
+                          delta=llm.ChoiceDelta(role="assistant", content=content))
+        )
 
     async def _run(self) -> None:
         if not self._user_message.strip():
             return
 
-        # Run biometric verification against the audio that produced this transcript
-        owner_verified = self._is_owner
-        if not owner_verified and self._audio_bytes:
-            try:
-                from voice.biometrics import is_owner_authenticated
-                owner_verified = await is_owner_authenticated(self._audio_bytes, session_id=self._session_id)
-            except Exception as e:
-                logger.warning(f"Biometric check failed gracefully: {e}")
-                owner_verified = False
+        # 4.4: biometric owner-gate (fail-closed) on the audio that produced this turn.
+        decision = await gate_from_audio(self._audio_bytes, session_id=self._session_id)
+        is_owner = decision["is_owner"]
 
         try:
             async with self._http.stream(
-                "POST",
-                "/api/v1/chat/stream",
+                "POST", "/api/v1/chat/stream",
                 json={
                     "message": self._user_message,
                     "session_id": self._session_id,
                     "stream": True,
-                    "is_voice_owner": owner_verified,
-                    "is_voice": True,  # Enforces concise 1-2 sentence voice replies
+                    "is_voice_owner": is_owner,   # feeds IRA's server-side owner gate
+                    "is_voice": True,             # concise 1–2 sentence voice replies
                 },
             ) as resp:
                 resp.raise_for_status()
@@ -178,169 +160,68 @@ class IRALLMStream(llm.LLMStream):
                     if not payload:
                         continue
                     try:
-                        import json
                         data = json.loads(payload)
-                        if "token" in data:
-                            self._event_ch.send_nowait(
-                                llm.ChatChunk(
-                                    choices=[
-                                        llm.Choice(
-                                            delta=llm.ChoiceDelta(
-                                                role=llm.ChatRole.ASSISTANT,
-                                                content=data["token"],
-                                            )
-                                        )
-                                    ]
-                                )
-                            )
-                        elif data.get("done"):
-                            break
                     except Exception:
                         continue
-        except Exception as e:
+                    if data.get("token"):
+                        self._emit(data["token"])
+                    elif data.get("done"):
+                        break
+        except Exception as e:  # noqa: BLE001 — graceful spoken fallback
             logger.error(f"IRA API stream error: {e}")
-            # Graceful fallback: short error response
-            self._event_ch.send_nowait(
-                llm.ChatChunk(
-                    choices=[
-                        llm.Choice(
-                            delta=llm.ChoiceDelta(
-                                role=llm.ChatRole.ASSISTANT,
-                                content="I'm sorry, I encountered a brief issue. Please try again.",
-                            )
-                        )
-                    ]
-                )
+            self._emit("I'm sorry, I encountered a brief issue. Please try again.")
+
+
+# ── IRA agent + entrypoint (1.x) ──────────────────────────────────────────────
+
+class IRAVoiceAgent(Agent):
+    def __init__(self) -> None:
+        super().__init__(
+            instructions=(
+                "You are IRA, a warm, professional assistant. The brain is IRA's own "
+                "backend; keep spoken replies to one or two sentences."
             )
+        )
 
-
-# ── Agent entrypoint ──────────────────────────────────────────────────────────
 
 async def entrypoint(ctx: JobContext) -> None:
-    """
-    Called by the LiveKit worker when a participant joins a room.
-    Sets up IRA's full voice pipeline for that room.
-    """
     logger.info(f"IRA voice agent starting for room: {ctx.room.name}")
-
     await ctx.connect()
 
-    # Unique session per voice room — links to IRA's memory system
     session_id = f"voice_{ctx.room.name}_{uuid.uuid4().hex[:8]}"
+    cfg = _get_voice_config()
 
-    # Load config lazily so env changes take effect on the next session start
-    _cfg = _get_voice_config()
+    stt = IRAFasterWhisperSTT(model_size=cfg["whisper_model"], device="cpu", compute_type="int8")
+    tts_engine = IRAKokoroTTS(voice=cfg["voice"], speed=1.05)
+    vad = silero.VAD.load(min_silence_duration=0.3, min_speech_duration=0.1)
+    adapter = IRALLMAdapter(session_id=session_id, stt=stt)
 
-    # Initialise components
-    stt = IRAFasterWhisperSTT(model_size=_cfg["whisper_model"], device="cpu", compute_type="int8")
-    tts_engine = IRAKokoroTTS(voice=_cfg["voice"], speed=1.05)  # Fix #123: voice from env
-    vad = silero.VAD.load(
-        min_silence_duration=0.3,   # 300ms — slightly longer pause before cutting off
-        min_speech_duration=0.1,    # 100ms — catches "wait", "stop", single words
-        activation_threshold=0.5,   # Standard sensitivity — reduces false triggers
-        max_buffered_speech=60.0,   # Allow up to 60s utterances
-    )
-    ira_llm = IRALLMAdapter(session_id=session_id)
-
-    session = AgentSession(
-        stt=stt,
-        llm=ira_llm,
-        tts=tts_engine,
-        vad=vad,
-        turn_detection=None,  # VAD handles turn detection
-    )
-
-    # Greet the user when they join
-    await session.say(
-        get_greeting("en"),  # IRA's intro — language switches after first user utterance
-        allow_interruptions=True,
-    )
-
-    # Subscribe to audio from the first participant (or wait for one to join)
-    participant = await _wait_for_participant(ctx)
-    if participant is None:
-        logger.warning("No participant joined within timeout. Agent exiting.")
-        return
-
-    logger.info(f"IRA is listening to participant: {participant.identity}")
-
-    @session.on("user_speech_committed")
-    def on_user_speech(event):
-        # Capture per-utterance audio for biometric verification
-        # livekit-agents 0.11.x surfaces audio bytes in the speech_committed event
-        if hasattr(event, "audio") and event.audio:
-            try:
-                ira_llm.set_audio_bytes(bytes(event.audio))
-            except Exception as e:
-                logger.debug(f"Biometric audio capture skipped: {e}")
-
-        # Language detection from committed speech event
-        detected = getattr(event, "language", "en") or "en"
-        lang = normalise_lang(detected)
-        if lang != "en":
-            lang_name = LANGUAGE_NAMES.get(lang, lang)
-            logger.info(f"Language switched to: {lang_name} ({lang})")
+    session = AgentSession(stt=stt, llm=adapter, tts=tts_engine, vad=vad)
 
     await session.start(
-        ctx.room,
-        participant=participant,
-        room_input_options=RoomInputOptions(
-            # Subscribe to microphone audio only (not video)
-            audio_enabled=True,
-            video_enabled=False,
-        ),
+        agent=IRAVoiceAgent(),
+        room=ctx.room,
+        room_input_options=RoomInputOptions(),
     )
 
-    logger.info(f"IRA voice session active for {participant.identity}")
+    # Greet once the session is live; language switches after the first utterance.
+    await session.say(get_greeting("en"), allow_interruptions=True)
 
-    # Keep the agent alive until the participant disconnects — but cap at
-    # max_session_seconds to prevent zombie sessions if the disconnect event is
-    # never delivered (e.g., hard network drop, container restart). (#32)
-    max_session_seconds = _cfg["max_session_seconds"]
+    # Keep the session alive until the room disconnects, capped to avoid zombies.
+    done = asyncio.Event()
+    ctx.room.on("disconnected", lambda *_: done.set())
     try:
-        await asyncio.wait_for(ctx.wait_for_disconnect(), timeout=max_session_seconds)
-        logger.info("Participant disconnected. IRA voice session ending.")
+        await asyncio.wait_for(done.wait(), timeout=cfg["max_session_seconds"])
+        logger.info("Room disconnected. IRA voice session ending.")
     except asyncio.TimeoutError:
-        logger.warning(
-            f"Voice session for {participant.identity} reached the "
-            f"{max_session_seconds / 3600:.0f}h maximum duration. Ending automatically."
-        )
-    await ira_llm.aclose()
+        logger.warning("Voice session hit the max duration. Ending automatically.")
+    finally:
+        await adapter.aclose()
 
-
-async def _wait_for_participant(ctx: JobContext, timeout: float = 30.0):
-    """Wait for a real (non-agent) participant to join the room."""
-    participants = [
-        p for p in ctx.room.remote_participants.values()
-        if not p.identity.startswith("ira-")
-    ]
-    if participants:
-        return participants[0]
-
-    # Wait for someone to join
-    future: asyncio.Future = asyncio.get_running_loop().create_future()
-
-    def on_participant_connected(participant: rtc.RemoteParticipant):
-        if not participant.identity.startswith("ira-") and not future.done():
-            future.set_result(participant)
-
-    ctx.room.on("participant_connected", on_participant_connected)
-    try:
-        return await asyncio.wait_for(future, timeout=timeout)
-    except asyncio.TimeoutError:
-        return None
-
-
-# ── Worker entry point ────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s — %(message)s",
     )
-    cli.run_app(
-        WorkerOptions(
-            entrypoint_fnc=entrypoint,
-            # Worker connects to LiveKit and waits for room events
-        )
-    )
+    cli.run_app(WorkerOptions(entrypoint_fnc=entrypoint))
