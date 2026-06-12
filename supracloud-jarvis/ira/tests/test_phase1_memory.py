@@ -1,12 +1,11 @@
-"""Prompt 1.6 — Phase-1 memory integration test.
+"""Phase-1 memory integration test — IRA-owned thread continuity on the Hermes path.
 
-Simulates a 3-turn conversation through the Hermes path (chat() with IRA_USE_HERMES
-on) and asserts the bridge sends, on EVERY turn:
-  - X-Hermes-Session-Id == the (stable) conversation id  -> thread continuity
-  - X-Hermes-Session-Key == the owner id                 -> stable memory scope
-
-The gateway HTTP call is mocked at the OpenAI-client level (hermes_bridge.OpenAI), so
-we assert on the real headers the bridge emits — no live server, no real model.
+Hermes 0.15.2's `hermes -z` one-shots can't resume a per-conversation session, so the
+chat Hermes path (_hermes_route) owns thread memory: it loads recent turns from
+Postgres, injects them as context to the skill, and persists each turn. This simulates
+a 3-turn conversation and asserts that by turn 3 the earlier fact ("4pm") is fed into
+the skill context, and that every turn is persisted. run_skill + the store are mocked,
+so no Hermes/Ollama/DB is needed.
 """
 import os
 
@@ -15,7 +14,6 @@ for _k in ("IRA_SECRET_KEY", "IRA_ADMIN_PASSWORD", "POSTGRES_PASSWORD", "REDIS_P
 
 import asyncio
 import sys
-from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 _st = sys.modules.get("sentence_transformers")
@@ -33,38 +31,40 @@ class _Cfg:
     owner_name = "Praveen"
 
 
-def test_three_turns_send_stable_session_id_and_owner_memory_key(monkeypatch):
-    # Capture every gateway call's kwargs (incl. extra_headers) via a fake OpenAI client.
-    calls: list[dict] = []
+def test_three_turns_ira_owned_memory(monkeypatch):
+    store: list[dict] = []  # stands in for the Postgres conversation history
 
-    def _fake_openai(*_a, **_k):
-        def _create(**kwargs):
-            calls.append(kwargs)
-            return SimpleNamespace(
-                choices=[SimpleNamespace(message=SimpleNamespace(content="ok"))]
-            )
-        return SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=_create)))
+    async def fake_recent(conv_id, limit=10):
+        return list(store)
 
-    monkeypatch.setattr("hermes_bridge.OpenAI", _fake_openai)
+    async def fake_save(conv_id, role, content, **kw):
+        store.append({"role": role, "content": content})
 
-    # Route through the Hermes engine, owner user, stable conversation id.
+    captured: dict = {}
+
+    def fake_run_skill(skill, message, *, context_blocks=None, **kwargs):
+        captured["blocks"] = context_blocks
+        return f"reply to: {message}"
+
     monkeypatch.setattr(chatmod, "_USE_HERMES", True)
     monkeypatch.setattr(chatmod, "get_settings", lambda: _Cfg())
     monkeypatch.setattr(chatmod, "cache_get", AsyncMock(return_value=None))
     monkeypatch.setattr(chatmod, "cache_set", AsyncMock())
-    monkeypatch.setattr(chatmod, "ensure_conversation", AsyncMock(return_value="conv-stable"))
-    monkeypatch.setattr(chatmod, "retrieve", AsyncMock(return_value=[]))
+    monkeypatch.setattr(chatmod, "ensure_conversation", AsyncMock(return_value="conv1"))
+    monkeypatch.setattr(chatmod, "get_recent_messages", fake_recent)
+    monkeypatch.setattr("memory.store.save_message", fake_save)
+    monkeypatch.setattr("skills._common.run_skill", fake_run_skill)
     monkeypatch.setattr("agents.supervisor.classify",
                         AsyncMock(return_value={"active_agent": "conversational", "use_deep_model": False}))
 
-    for turn in ("first message", "second message", "third message"):
+    for turn in ("My demo is at 4pm.", "Thanks.", "When is my demo?"):
         resp = asyncio.run(chat(ChatRequest(message=turn, session_id="s1"), _user="owner"))
         assert resp.model_used == "hermes"
 
-    assert len(calls) == 3, f"expected one gateway call per turn, got {len(calls)}"
+    # By turn 3, the prior turns (incl. the 4pm fact) were fed into the skill context.
+    blob = "\n".join(captured["blocks"] or [])
+    assert "4pm" in blob, f"recent history not injected: {captured['blocks']!r}"
 
-    session_ids = {c["extra_headers"]["X-Hermes-Session-Id"] for c in calls}
-    session_keys = {c["extra_headers"]["X-Hermes-Session-Key"] for c in calls}
-
-    assert session_ids == {"conv-stable"}, f"session id must be stable across turns, got {session_ids}"
-    assert session_keys == {"owner"}, f"memory scope must equal the owner id, got {session_keys}"
+    # Every turn was persisted (3 user + 3 assistant).
+    assert sum(1 for m in store if m["role"] == "user") == 3
+    assert sum(1 for m in store if m["role"] == "assistant") == 3

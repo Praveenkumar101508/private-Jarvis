@@ -171,19 +171,38 @@ async def _hermes_route(
     if skill not in _VALID_SKILLS:
         skill = "conversational"
 
-    # Memory is owned by Hermes in this path (project rule 5): the gateway loads the
-    # thread's own history via X-Hermes-Session-Id and the user's long-term memory via
-    # X-Hermes-Session-Key. IRA's own pgvector retrieve() is intentionally NOT read here
-    # so memory has a single owner (no dual read).
-    #   session_id = conv_id -> thread continuity (per conversation)
-    #   user_key   = user    -> stable per-user memory scope (same id the owner gate uses)
-    # The owner profile (who-I-am / goals / projects / prefs) is IRA-owned business data,
-    # so it IS injected every turn as context (distinct from Hermes recall).
+    # Thread continuity is IRA-owned on the subprocess engine. `hermes -z` one-shots
+    # cannot resume a per-conversation session (verified: `--continue <name> -z`
+    # neither stores nor recalls across calls), so IRA loads the recent turns from its
+    # own Postgres history, passes them as context, and persists this turn below. The
+    # owner profile (who-I-am / goals / prefs) is IRA-owned business data, injected every
+    # turn. (IRA's pgvector semantic retrieve() is still NOT read here — that long-term
+    # recall stays a single-owner concern for a later phase; this only restores thread
+    # memory.)
+    from memory.store import save_message
+
     profile_summary = await get_profile_summary()
-    blocks = [profile_summary] if profile_summary else None
+    recent = await get_recent_messages(conv_id, limit=10)
+    blocks: list[str] = []
+    if profile_summary:
+        blocks.append(profile_summary)
+    if recent:
+        history = "\n".join(f"{m['role']}: {m['content']}" for m in recent)
+        blocks.append("Recent conversation so far (oldest first):\n" + history)
+
     text = await asyncio.to_thread(
-        run_skill, skill, message, context_blocks=blocks, session_id=conv_id, user_key=user,
+        run_skill, skill, message, context_blocks=blocks or None, session_id=conv_id, user_key=user,
     )
+
+    # Persist this turn so the next one can recall it (awaited so a sequential next
+    # request sees it; best-effort — never fail the reply on a memory write).
+    try:
+        await save_message(conv_id, "user", message, user_id=user)
+        await save_message(conv_id, "assistant", text, model_used="hermes", user_id=user)
+    except Exception:
+        import logging
+        logging.getLogger("ira.chat").warning("hermes-route: save_message failed", exc_info=True)
+
     return text, skill
 
 
