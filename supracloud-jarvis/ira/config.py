@@ -28,6 +28,16 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 # env_file=".env" unconditionally causes a harmless but noisy cold-start warning.
 _ENV_FILE = ".env" if Path(".env").exists() else None
 
+# Native (non-Docker) runs read config from a CWD-relative .env. pydantic-settings
+# loads it into the Settings object, but several modules read flags DIRECTLY via
+# os.getenv (e.g. IRA_USE_HERMES in api/routes/chat.py and hermes_bridge.py) — those
+# consult os.environ, NOT this Settings .env. In Docker the values are real env vars
+# so os.getenv works; running uvicorn natively we must mirror .env into os.environ.
+# load_dotenv(override=False) leaves real env vars (Docker) authoritative.
+if _ENV_FILE:
+    from dotenv import load_dotenv
+    load_dotenv(_ENV_FILE, override=False)
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(

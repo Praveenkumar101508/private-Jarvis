@@ -60,36 +60,44 @@ def test_dod_1_owner_gated_access(monkeypatch):
     assert ei.value.status_code == 403
 
 
-# ── DoD 2: 3-turn chat keeps thread + owner memory scope ──────────────────────
+# ── DoD 2: 3-turn chat keeps thread memory (IRA-owned on the Hermes path) ─────
 
 def test_dod_2_three_turn_memory_continuity(monkeypatch):
     import api.routes.chat as chatmod
     from api.routes.chat import ChatRequest, chat
 
-    calls: list[dict] = []
+    store: list[dict] = []  # the Postgres conversation history
 
-    def _fake_openai(*_a, **_k):
-        def _create(**kwargs):
-            calls.append(kwargs)
-            return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content="ok"))])
-        return SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=_create)))
+    async def fake_recent(conv_id, limit=10):
+        return list(store)
 
-    monkeypatch.setattr("hermes_bridge.OpenAI", _fake_openai)
+    async def fake_save(conv_id, role, content, **kw):
+        store.append({"role": role, "content": content})
+
+    captured: dict = {}
+
+    def fake_run_skill(skill, message, *, context_blocks=None, **kwargs):
+        captured["blocks"] = context_blocks
+        return f"reply to: {message}"
+
     monkeypatch.setattr(chatmod, "_USE_HERMES", True)
     monkeypatch.setattr(chatmod, "get_settings", lambda: _Owner())
     monkeypatch.setattr(chatmod, "cache_get", AsyncMock(return_value=None))
     monkeypatch.setattr(chatmod, "cache_set", AsyncMock())
     monkeypatch.setattr(chatmod, "ensure_conversation", AsyncMock(return_value="conv-stable"))
-    monkeypatch.setattr(chatmod, "retrieve", AsyncMock(return_value=[]))
+    monkeypatch.setattr(chatmod, "get_recent_messages", fake_recent)
+    monkeypatch.setattr("memory.store.save_message", fake_save)
+    monkeypatch.setattr("skills._common.run_skill", fake_run_skill)
     monkeypatch.setattr("agents.supervisor.classify",
                         AsyncMock(return_value={"active_agent": "conversational", "use_deep_model": False}))
 
-    for turn in ("turn one", "turn two", "turn three"):
-        _run(chat(ChatRequest(message=turn, session_id="s1"), _user="owner"))
+    for turn in ("My demo is at 4pm.", "Thanks.", "When is my demo?"):
+        resp = _run(chat(ChatRequest(message=turn, session_id="s1"), _user="owner"))
+        assert resp.model_used == "hermes"
 
-    ids = {c["extra_headers"]["X-Hermes-Session-Id"] for c in calls}
-    keys = {c["extra_headers"]["X-Hermes-Session-Key"] for c in calls}
-    assert ids == {"conv-stable"} and keys == {"owner"}
+    # Turn 3 fed the earlier fact into the skill context, and every turn was persisted.
+    assert "4pm" in "\n".join(captured["blocks"] or [])
+    assert sum(1 for m in store if m["role"] == "user") == 3
 
 
 # ── DoD 3: >=3 real actions succeed ───────────────────────────────────────────

@@ -103,19 +103,21 @@ async def _check_ollama(base_url: str) -> ServiceStatus:
 
 
 async def _check_hermes() -> ServiceStatus:
+    # Hermes 0.15.2 has no HTTP gateway — IRA shells out to the `hermes` CLI
+    # (see hermes_bridge.py). So the probe verifies the engine is ON and the
+    # executable is resolvable; we don't run `hermes -z` here (it cold-loads the
+    # 14B model and would make /health slow).
     import os
     enabled = os.getenv("IRA_USE_HERMES", "false").strip().lower() in ("1", "true", "yes", "on")
     if not enabled:
         return ServiceStatus(status="degraded", latency_ms=0)  # off — legacy engine active
-    url = os.getenv("IRA_HERMES_URL", "http://127.0.0.1:8642/v1").rstrip("/")
-    key = os.getenv("IRA_HERMES_KEY", "")
-    t = time.monotonic()
     try:
-        headers = {"Authorization": f"Bearer {key}"} if key else {}
-        async with httpx.AsyncClient(timeout=5) as client:
-            r = await client.get(f"{url}/models", headers=headers)
-        return ServiceStatus(status="ok" if r.status_code == 200 else "degraded",
-                             latency_ms=int((time.monotonic() - t) * 1000))
+        from hermes_bridge import HermesConfig
+        from pathlib import Path
+        import shutil
+        bin_path = HermesConfig().hermes_bin
+        ok = bool(shutil.which(bin_path) or Path(bin_path).exists())
+        return ServiceStatus(status="ok" if ok else "down", latency_ms=0)
     except Exception:
         return ServiceStatus(status="down", latency_ms=0)
 

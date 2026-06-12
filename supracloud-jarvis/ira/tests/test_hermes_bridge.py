@@ -1,87 +1,67 @@
-"""Integration smoke test for the Hermes bridge (IRA -> HTTP -> gateway).
+"""Unit tests for the Hermes bridge — subprocess `hermes -z` against local Ollama.
 
-Skips unless the gateway is reachable AND IRA_HERMES_KEY is set, so CI without a
-running gateway stays green. Run locally with `hermes gateway` up and the env from
-ira/config/hermes.env.example exported.
+Hermes 0.15.2 ships no HTTP gateway, so the bridge shells out to the `hermes` CLI.
+subprocess.run is mocked, so no hermes/Ollama is needed. Covers: the one-shot command
+shape, system prepended to the prompt, stdout returned, a non-zero exit raising, and
+that session_id/user_key are accepted but NOT used (thread memory is IRA-owned now).
 """
-import os
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
 
+import hermes_bridge
 from hermes_bridge import HermesBridge, HermesConfig
 
 
-def _gateway_available() -> bool:
-    if not os.getenv("IRA_HERMES_KEY"):
-        return False
-    try:
-        import httpx
-
-        cfg = HermesConfig()
-        r = httpx.get(
-            cfg.base_url.rstrip("/") + "/models",
-            headers={"Authorization": f"Bearer {cfg.api_key}"},
-            timeout=5,
-        )
-        return r.status_code == 200
-    except Exception:
-        return False
+def _bridge_with_proc(monkeypatch, *, stdout="ok", returncode=0, stderr=""):
+    """Patch subprocess.run on the bridge module; return (bridge, run mock)."""
+    run = MagicMock(return_value=SimpleNamespace(stdout=stdout, stderr=stderr, returncode=returncode))
+    monkeypatch.setattr(hermes_bridge.subprocess, "run", run)
+    return HermesBridge(HermesConfig()), run
 
 
-@pytest.mark.skipif(
-    not _gateway_available(),
-    reason="Hermes gateway not reachable / IRA_HERMES_KEY unset",
-)
-def test_bridge_ask_returns_text():
-    reply = HermesBridge().ask("What is 2 + 2? Reply with only the number.")
-    assert isinstance(reply, str) and reply.strip(), "bridge returned empty text"
-    assert "4" in reply, f"unexpected reply: {reply!r}"
+def test_ask_builds_oneshot_command(monkeypatch):
+    bridge, run = _bridge_with_proc(monkeypatch, stdout="BRIDGE_OK")
+    out = bridge.ask("hello")
+    assert out == "BRIDGE_OK"
+    cmd = run.call_args.args[0]
+    assert cmd[0] == bridge.cfg.hermes_bin
+    assert "-z" in cmd and cmd[-1] == "hello"
+    assert "--continue" not in cmd                 # one-shot is stateless
 
 
-# ── Unit tests for the session-header contract (no live gateway needed) ───────
-
-def _bridge_with_mock():
-    """A HermesBridge whose HTTP client is mocked, plus the create() mock."""
-    bridge = HermesBridge(HermesConfig(api_key="test-key"))
-    fake = SimpleNamespace(
-        choices=[SimpleNamespace(message=SimpleNamespace(content="ok"))]
-    )
-    bridge._client = MagicMock()
-    bridge._client.chat.completions.create.return_value = fake
-    return bridge, bridge._client.chat.completions.create
+def test_ask_prepends_system_to_prompt(monkeypatch):
+    bridge, run = _bridge_with_proc(monkeypatch)
+    bridge.ask("question?", system="You are terse.")
+    sent = run.call_args.args[0][-1]               # the -z prompt
+    assert sent.startswith("You are terse.")
+    assert "question?" in sent
 
 
-def test_ask_sends_both_session_headers_and_system_message():
-    bridge, create = _bridge_with_mock()
-    bridge.ask("hello", system="persona", session_id="conv-1", user_key="owner-1")
-    kwargs = create.call_args.kwargs
-    headers = kwargs["extra_headers"]
-    assert headers["X-Hermes-Session-Id"] == "conv-1"   # thread continuity
-    assert headers["X-Hermes-Session-Key"] == "owner-1"  # stable memory scope
-    messages = kwargs["messages"]
-    assert messages[0] == {"role": "system", "content": "persona"}
-    assert messages[-1] == {"role": "user", "content": "hello"}
+def test_ask_accepts_but_ignores_session_ids(monkeypatch):
+    bridge, run = _bridge_with_proc(monkeypatch)
+    bridge.ask("hi", session_id="conv-1", user_key="owner", session_key="legacy")
+    cmd = run.call_args.args[0]
+    # No --continue, and none of the ids leak into the command (memory is IRA-owned).
+    assert "--continue" not in cmd
+    assert "conv-1" not in cmd and "owner" not in cmd and "legacy" not in cmd
 
 
-def test_ask_bare_call_is_unchanged():
-    bridge, create = _bridge_with_mock()
-    bridge.ask("hi")
-    kwargs = create.call_args.kwargs
-    assert "extra_headers" not in kwargs
-    assert kwargs["messages"] == [{"role": "user", "content": "hi"}]
+def test_ask_nonzero_exit_raises(monkeypatch):
+    bridge, _ = _bridge_with_proc(monkeypatch, stdout="", returncode=2, stderr="boom")
+    with pytest.raises(RuntimeError) as ei:
+        bridge.ask("hi")
+    assert "exited 2" in str(ei.value) and "boom" in str(ei.value)
 
 
-def test_ask_session_key_is_deprecated_alias_for_memory_scope():
-    bridge, create = _bridge_with_mock()
-    bridge.ask("hi", session_key="legacy-scope")
-    headers = create.call_args.kwargs["extra_headers"]
-    assert headers["X-Hermes-Session-Key"] == "legacy-scope"
-    assert "X-Hermes-Session-Id" not in headers
+def test_ask_returns_stripped_stdout(monkeypatch):
+    bridge, _ = _bridge_with_proc(monkeypatch, stdout="  answer \n")
+    assert bridge.ask("hi") == "answer"
 
 
-def test_ask_user_key_wins_over_session_key():
-    bridge, create = _bridge_with_mock()
-    bridge.ask("hi", user_key="new", session_key="old")
-    assert create.call_args.kwargs["extra_headers"]["X-Hermes-Session-Key"] == "new"
+def test_config_keeps_back_compat_fields():
+    # The HTTP-era fields stay (some callers/tests import them) but are unused now.
+    cfg = HermesConfig()
+    assert hasattr(cfg, "base_url") and hasattr(cfg, "api_key") and hasattr(cfg, "model")
+    assert cfg.hermes_bin  # resolved (env -> PATH -> native install -> "hermes")

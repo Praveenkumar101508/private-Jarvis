@@ -47,6 +47,9 @@ def _stub_io(monkeypatch):
     monkeypatch.setattr(chatmod, "cache_set", AsyncMock())
     monkeypatch.setattr(chatmod, "ensure_conversation", AsyncMock(return_value="conv1"))
     monkeypatch.setattr(chatmod, "retrieve", AsyncMock(return_value=[]))
+    # _hermes_route owns thread memory now: it loads recent turns + persists each turn.
+    monkeypatch.setattr(chatmod, "get_recent_messages", AsyncMock(return_value=[]))
+    monkeypatch.setattr("memory.store.save_message", AsyncMock())
 
 
 def test_flag_off_routes_to_legacy_run_graph(monkeypatch):

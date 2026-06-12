@@ -5,13 +5,23 @@ This repo merges **Hermes** (the agent engine, `hermes-agent==0.15.2`) with **IR
 This file is **ground truth** — where it conflicts with `MERGE_PLAN.md`, this file wins.
 
 ## Architecture in one line
-Hermes runs **out-of-process** as a native-Windows service exposing an **OpenAI-compatible
-gateway on `127.0.0.1:8642`**. IRA talks to it over HTTP through **one bridge file**. Hermes
-is **never installed into IRA's venv** — its hard pins conflict with IRA's (see rule 3).
+Hermes runs **out-of-process** as a native-Windows CLI. IRA reaches the full agent through
+**one bridge file** by shelling out to **`hermes -z`** (one-shot), which runs against LOCAL
+Ollama configured in Hermes' own `config.yaml`. Hermes is **never installed into IRA's venv**
+— its hard pins conflict with IRA's (see rule 3).
+
+> ⚠️ **CORRECTION (verified against installed hermes-agent 0.15.2, 2026-06-11):** 0.15.2 ships
+> **no** local, key-gated, OpenAI-compatible gateway on `:8642` and **no** `API_SERVER_KEY`
+> (`hermes gateway` = messaging; `hermes proxy` = cloud-only). The earlier "HTTP gateway on
+> :8642" design here is OBSOLETE — the bridge is now a **`hermes -z` subprocess**. Hermes
+> config lives at `%LOCALAPPDATA%\hermes\config.yaml` (NOT `~/.hermes/`), nested under `model:`.
+> Because `hermes -z` can't resume a per-conversation session, **thread memory is IRA-owned**
+> (chat `_hermes_route` loads recent Postgres turns as context + persists each turn) — which
+> refines rule 5 below.
 
 ## Non-negotiable rules
 1. **Never edit Hermes core** or anything under `supracloud-jarvis/hermes-vendor/`. Extend ONLY via skills, subagents, MCP, and config. Hermes is pinned (`hermes-agent==0.15.2`) and runs in its OWN native install — not IRA's venv.
-2. **ALL IRA→Hermes calls go through `supracloud-jarvis/ira/hermes_bridge.py` only** — now an HTTP client to the gateway, NOT a Python import. Nothing else in IRA touches Hermes. (Engine-swap exit hatch: rewrite only this file.)
+2. **ALL IRA→Hermes calls go through `supracloud-jarvis/ira/hermes_bridge.py` only** — a `hermes -z` SUBPROCESS wrapper (stdlib only; no `openai`/`hermes` import). Nothing else in IRA touches Hermes. (Engine-swap exit hatch: rewrite only this file.)
 3. **Do NOT add `hermes-agent` to `ira/requirements.txt`.** It hard-pins `openai==2.24.0`, `pydantic==2.13.4`, `croniter==6.0.0`, `httpx`, `requests`, `tenacity` — all conflict with IRA's pins, and IRA's `langchain-openai` needs `openai 1.x`. Proven `pip install` ResolutionImpossible. The bridge uses IRA's EXISTING `openai`/`httpx` over HTTP — no new dependency.
 4. Secrets (incl. `API_SERVER_KEY`) live in **env**, never in the repo. Keep the gateway bound to `127.0.0.1`.
 5. **Postgres = business data only.** Memory/recall belongs to Hermes.
