@@ -31,6 +31,9 @@ torchaudio==2.4.1+cpu           # MUST match torch exactly. speechbrain pulls to
 # ── Auth & Security ────────────────────────────────────────────────────────────
 python-jose[cryptography]==3.4.0
 passlib[bcrypt]==1.7.4
+bcrypt==4.0.1                    # Pin <4.1: passlib 1.7.4's bcrypt backend self-test feeds a
+                                 # >72-byte string to bcrypt.hashpw; bcrypt>=4.1 raises instead of
+                                 # truncating -> backend init crashes -> 500 at /auth/token.
 email-validator>=2.0,<3          # Required by pydantic.EmailStr (used in webhooks.py)
 slowapi==0.1.9                  # Rate limiting for FastAPI
 pyotp==2.9.0                    # Feat P26: TOTP two-factor authentication

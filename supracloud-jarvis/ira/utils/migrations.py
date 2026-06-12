@@ -49,7 +49,12 @@ async def run_migrations(pool: asyncpg.Pool) -> None:
         logger.warning("migrations: postgres/ directory not found at %s — skipping", _POSTGRES_DIR)
         return
 
+    # init.sql is the BASE schema; the numbered 0NN_*.sql migrations build on its
+    # tables. Plain sorted() puts "init.sql" AFTER "002…009" ('i' > '0'), so on a
+    # fresh DB (no docker-entrypoint-initdb.d) the numbered migrations would run before
+    # the tables they reference exist. Force init.sql first, then the rest in order.
     sql_files = sorted(_POSTGRES_DIR.glob("*.sql"))
+    sql_files.sort(key=lambda p: (p.name != "init.sql", p.name))
     if not sql_files:
         logger.info("migrations: no SQL files found in %s", _POSTGRES_DIR)
         return

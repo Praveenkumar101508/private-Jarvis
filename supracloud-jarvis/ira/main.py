@@ -19,6 +19,7 @@ import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
+from fastapi.security import OAuth2PasswordRequestForm  # module scope: FastAPI must resolve it
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from slowapi import Limiter, _rate_limit_exceeded_handler
@@ -222,14 +223,17 @@ def create_app() -> FastAPI:
     )
 
     # ── Auth endpoint (not a router — keeps it simple) ────────────────────────
-    from fastapi.security import OAuth2PasswordRequestForm
+    # OAuth2PasswordRequestForm is imported at MODULE scope (top of file). Under
+    # `from __future__ import annotations` FastAPI resolves the `form:` annotation as a
+    # ForwardRef against module globals; a local import leaves it unresolved -> the
+    # /auth/token route raises TypeError("ForwardRef(...) is not callable") at startup.
     from fastapi import Depends, Form
 
     @app.post("/auth/token", tags=["auth"], summary="Get a JWT token")
     @limiter.limit("5/minute")   # Fix P10: app-layer brute-force protection (nginx may be bypassed)
     async def login(
         request: Request,
-        form: OAuth2PasswordRequestForm = Depends(),
+        form: OAuth2PasswordRequestForm = Depends(OAuth2PasswordRequestForm),
         totp_code: str | None = Form(None),  # Feat P26: optional TOTP field
     ):
         if not authenticate_user(form.username, form.password):
