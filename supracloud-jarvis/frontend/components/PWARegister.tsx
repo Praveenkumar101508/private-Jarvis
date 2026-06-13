@@ -4,15 +4,17 @@ import { useEffect } from "react";
 
 /**
  * Registers the PWA service worker (public/sw.js) so IRA is installable
- * ("Add to Home Screen") and the app shell loads offline. Production only —
- * a dev SW fights Next's HMR and caches stale chunks.
+ * ("Add to Home Screen") and the app shell loads offline. Production only, and
+ * skippable with NEXT_PUBLIC_PWA=false — a dev SW fights Next's HMR and caches
+ * stale chunks.
  */
 export default function PWARegister() {
   useEffect(() => {
     if (
       typeof navigator !== "undefined" &&
       "serviceWorker" in navigator &&
-      process.env.NODE_ENV === "production"
+      process.env.NODE_ENV === "production" &&
+      process.env.NEXT_PUBLIC_PWA !== "false"
     ) {
       navigator.serviceWorker.register("/sw.js").catch(() => {
         /* SW registration is best-effort; the app works without it */
