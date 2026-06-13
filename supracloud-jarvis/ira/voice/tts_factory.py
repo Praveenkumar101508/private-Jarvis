@@ -17,7 +17,13 @@ from __future__ import annotations
 import logging
 import os
 
-from livekit.agents import tts
+# `tts` is only used for the `-> tts.TTS` return annotation (a string under
+# `from __future__ import annotations`). Import it softly so this module loads on a
+# host without livekit; make_tts still returns a real engine when livekit is present.
+try:
+    from livekit.agents import tts
+except Exception:  # pragma: no cover - only on hosts without livekit-agents
+    tts = None
 
 logger = logging.getLogger("ira.tts.factory")
 
