@@ -50,6 +50,10 @@ class Settings(BaseSettings):
     # ── Identity ──────────────────────────────────────────────────────────────
     ira_version: str = "1.0.0"
     ira_domain: str = "jarvis.local"
+    # Tailscale Serve host (e.g. shadow.tailnet-name.ts.net) — set so the phone PWA's
+    # HTTPS origin is allowed by CORS. Mobile getUserMedia (mic) requires HTTPS, which
+    # `tailscale serve` provides with a valid *.ts.net cert. Blank = not used.
+    ira_ts_host: str = ""
 
     # ── Auth ──────────────────────────────────────────────────────────────────
     ira_secret_key: str

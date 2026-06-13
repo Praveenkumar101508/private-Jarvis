@@ -235,6 +235,10 @@ def create_app() -> FastAPI:
     allowed_origins = [f"https://{cfg.ira_domain}"]
     if cfg.dev_mode:
         allowed_origins += ["http://localhost:3000", "http://127.0.0.1:3000"]
+    # Phone access over Tailscale Serve (HTTPS) — allow the *.ts.net origin so the
+    # mobile PWA's mic (getUserMedia needs a secure context) and API calls work.
+    if getattr(cfg, "ira_ts_host", ""):
+        allowed_origins.append(f"https://{cfg.ira_ts_host}")
     # Fix #45: PATCH and PUT were missing — endpoints that use them (architect
     # apply, profile updates) would fail CORS preflight in the browser. OPTIONS
     # is implied by CORSMiddleware but listed explicitly for clarity.
