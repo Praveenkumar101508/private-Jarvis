@@ -49,9 +49,16 @@ const BARGE_IN_RMS = 0.06;
 const BARGE_IN_MS = 150;             // sustained speech needed to trigger barge-in
 
 // Frontend env (NEXT_PUBLIC_* only).
-const ACTIVATION = (process.env.NEXT_PUBLIC_VOICE_ACTIVATION || "wakeword").toLowerCase();
 const WAKE_WORD = (process.env.NEXT_PUBLIC_WAKE_WORD || "hey ira").toLowerCase();
 const STT_MODE = (process.env.NEXT_PUBLIC_VOICE_STT || "whisper").toLowerCase();
+// Sovereign default: wake word uses the browser's Web Speech (audio leaves the box),
+// so when STT is the sovereign whisper path, default activation to clap (Web Audio,
+// fully local). An explicit NEXT_PUBLIC_VOICE_ACTIVATION always wins.
+const ACTIVATION = (
+  process.env.NEXT_PUBLIC_VOICE_ACTIVATION || (STT_MODE === "whisper" ? "clap" : "wakeword")
+).toLowerCase();
+// Wake word AND webspeech both route audio through the browser vendor — NOT private.
+const USES_CLOUD_SPEECH = ACTIVATION === "wakeword" || STT_MODE === "webspeech";
 
 // ── Small helpers ─────────────────────────────────────────────────────────────
 function authHeader(token: string): Record<string, string> {
@@ -629,9 +636,12 @@ export default function VoiceConsole({ token, sessionId }: Props) {
         )}
       </button>
 
-      {/* Opt-in Web Speech mode is NOT private — make that unmissable. */}
-      {STT_MODE === "webspeech" && (
-        <span className="absolute -top-3 right-0 z-50 text-[8px] px-1 rounded bg-red-900/80 border border-red-500/50 text-red-300 whitespace-nowrap">
+      {/* Wake word + Web Speech both send audio to the browser vendor — NOT private. */}
+      {USES_CLOUD_SPEECH && (
+        <span
+          title="Web Speech sends audio to the browser vendor — not private. Use clap + whisper for a fully on-device path."
+          className="absolute -top-3 right-0 z-50 text-[8px] px-1 rounded bg-red-900/80 border border-red-500/50 text-red-300 whitespace-nowrap"
+        >
           not private
         </span>
       )}
