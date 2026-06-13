@@ -322,6 +322,12 @@ async def chat_stream(
         deep_search=req.deep_search,
     )
 
+    # Voice path: force the fast tier (qwen3:8b) for low time-to-first-audio. Spoken
+    # replies are short, so trade the deep model's depth for latency (Phase 4).
+    if req.is_voice:
+        use_deep = False
+        use_reasoning = False
+
     # ── Biometric gate: block restricted domains for non-owners ───────────────
     cfg = get_settings()
     if not cfg.dev_mode and is_restricted_domain(req.message) and not owner:

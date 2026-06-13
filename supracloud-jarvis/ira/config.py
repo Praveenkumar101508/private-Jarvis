@@ -123,12 +123,12 @@ class Settings(BaseSettings):
     # This is INDEPENDENT of dev_mode: with llm_backend="ollama" the engine is local
     # but auth + biometric gates stay ON (we are not relying on dev_mode here).
     llm_backend: str = "ollama"
-    # All tiers map to one 14B model on a 20GB GPU. Pull with: ollama pull qwen3:14b
+    # Two-model stack on the 20GB A4500: qwen3:8b (fast, voice — low TTFT) and
+    # qwen3:14b (deep/reasoning). Pull both: `ollama pull qwen3:8b` + `qwen3:14b`.
     # Per-tier override via OLLAMA_MODEL_FAST / OLLAMA_MODEL_DEEP / OLLAMA_MODEL_REASONING.
-    # NOTE: the migration playbook used "qwen2.5:14b" as a placeholder; "qwen3:14b"
-    # matches this repo's Qwen3 stack. Swap to the best current 14B tag in Ollama's
-    # library (tags change often) — it's a one-line / one-env change.
-    ollama_model_fast: str = "qwen3:14b"
+    # Both fit warm together with KV-cache quant (OLLAMA_FLASH_ATTENTION=1,
+    # OLLAMA_KV_CACHE_TYPE=q8_0); the voice path pins the fast tier for latency.
+    ollama_model_fast: str = "qwen3:8b"
     ollama_model_deep: str = "qwen3:14b"
     ollama_model_reasoning: str = "qwen3:14b"
 
