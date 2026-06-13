@@ -152,6 +152,10 @@ async def lifespan(app: FastAPI):
     _t = asyncio.create_task(_warm_embeddings())
     _t.add_done_callback(lambda t: t.exception() and logger.warning(f"Embedding warm-up failed: {t.exception()}"))
 
+    # Pre-warm the on-device Supertonic TTS so the first POST /voice/say is not cold.
+    _ts = asyncio.create_task(_warm_supertonic())
+    _ts.add_done_callback(lambda t: t.exception() and logger.warning(f"Supertonic warm-up failed: {t.exception()}"))
+
     # Initialise LangGraph checkpointer (AsyncPostgresSaver → persistent state)
     await init_checkpointer(cfg.database_dsn)
     logger.info("LangGraph agent graph compiled")
@@ -187,6 +191,26 @@ async def _warm_embeddings():
             logger.info("BGE reranker model warmed and ready")
         except Exception as e:
             logger.warning(f"Reranker model warm-up failed: {e}")
+
+
+async def _warm_supertonic():
+    """Load the on-device Supertonic TTS engine once at startup (fail-soft).
+
+    Runs the blocking model load off the event loop. If Supertonic isn't installed
+    (e.g. a text-only deployment), this is a no-op and POST /voice/say returns 503
+    until the engine is available — it never blocks or fails startup.
+    """
+    import asyncio
+    await asyncio.sleep(2)  # let the server finish starting first
+    try:
+        from voice.tts_supertonic import prewarm
+        ready = await asyncio.to_thread(prewarm)
+        if ready:
+            logger.info("Supertonic TTS engine warmed and ready")
+        else:
+            logger.info("Supertonic TTS not available — /voice/say will 503 until installed")
+    except Exception as e:
+        logger.info(f"Supertonic warm-up skipped: {e}")
 
 
 # ── App factory ────────────────────────────────────────────────────────────────

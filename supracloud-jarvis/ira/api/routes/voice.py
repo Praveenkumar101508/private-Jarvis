@@ -9,10 +9,12 @@ GET  /voice/profile/status → check whether an owner voice profile exists
 from __future__ import annotations
 
 import logging
+import os
 import secrets
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Response
+from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
 
 from api.middleware.auth import require_auth
@@ -98,6 +100,46 @@ async def get_livekit_token(_user: str = Depends(require_auth)):
         room=cfg.livekit_room_name,
         livekit_url=_livekit_url,
     )
+
+
+# ── Local TTS (browser-native voice) ──────────────────────────────────────────
+
+class SayRequest(BaseModel):
+    text: str
+    voice: str | None = None   # M1–M5 / F1–F5; defaults to IRA_VOICE (F1, female)
+
+
+@router.post("/say")
+async def say(req: SayRequest, _user: str = Depends(require_auth)):
+    """Synthesise `text` to a WAV with the on-device Supertonic engine (female F1
+    default) and return it as audio/wav.
+
+    This is the browser-native voice path: the frontend POSTs each reply sentence
+    here and plays the audio locally — no LiveKit, no cloud. `require_auth` bypasses
+    the token in DEV_MODE and enforces it otherwise.
+    """
+    text = (req.text or "").strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="`text` must not be empty.")
+
+    voice = req.voice or os.getenv("IRA_VOICE", "F1")
+    steps = int(os.getenv("IRA_TTS_STEPS", "6"))   # low = fast time-to-first-audio
+
+    # Lazy import: the Supertonic module pulls numpy/scipy/supertonic and is only
+    # needed on the voice host — keep it out of module import so the route loads
+    # (and its sibling endpoints test) without those heavy deps.
+    try:
+        from voice.tts_supertonic import synthesize_wav
+    except Exception as e:  # noqa: BLE001
+        logger.error(f"Supertonic TTS module unavailable: {e}")
+        raise HTTPException(status_code=503, detail="On-device TTS engine unavailable.")
+
+    # Synthesis is CPU/GPU-bound and synchronous — run it off the event loop.
+    wav_bytes = await run_in_threadpool(synthesize_wav, text, voice, "en", steps)
+    if not wav_bytes:
+        raise HTTPException(status_code=503, detail="TTS synthesis failed or produced no audio.")
+
+    return Response(content=wav_bytes, media_type="audio/wav")
 
 
 # ── Anti-replay challenge ─────────────────────────────────────────────────────

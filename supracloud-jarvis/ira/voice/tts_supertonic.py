@@ -33,17 +33,33 @@ Config via env:
 from __future__ import annotations
 
 import asyncio
+import io
 import logging
 import os
 import re
 import sys
 import threading
 import time
+import wave
 from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
-from livekit.agents import tts, utils
-from livekit.agents.types import DEFAULT_API_CONNECT_OPTIONS, APIConnectOptions
+
+# LiveKit Agents is needed ONLY for the in-process LiveKit plugin classes below.
+# The browser-native path (synthesize_wav → POST /api/v1/voice/say) does NOT use
+# it, so import it softly: this module must load on a host without livekit so the
+# HTTP synth path and its unit tests work in the lightweight (no-livekit) env.
+try:
+    from livekit.agents import tts, utils
+    from livekit.agents.types import DEFAULT_API_CONNECT_OPTIONS, APIConnectOptions
+    _TTSBase = tts.TTS
+    _ChunkedStreamBase = tts.ChunkedStream
+    _LIVEKIT_AVAILABLE = True
+except Exception:  # pragma: no cover - only on hosts without livekit-agents
+    tts = utils = None
+    DEFAULT_API_CONNECT_OPTIONS = APIConnectOptions = None
+    _TTSBase = _ChunkedStreamBase = object
+    _LIVEKIT_AVAILABLE = False
 
 from voice.language import is_indic
 
@@ -168,7 +184,70 @@ def _synthesise_sync(text: str, speed: float, steps: int, engine, style, lang: s
         return None
 
 
-class IRASupertonicTTS(tts.TTS):
+# ── In-process WAV synth core (browser-native HTTP path) ──────────────────────
+# synthesize_wav is the single reusable core behind POST /api/v1/voice/say. It
+# calls the SAME _synthesise_sync that the LiveKit IRASupertonicChunkedStream
+# uses, so there is exactly one synthesis path. It returns a complete 44.1 kHz
+# mono 16-bit WAV (no resample, no LiveKit dependency) the browser plays directly.
+
+def _encode_wav(samples_f32: np.ndarray, sample_rate: int) -> bytes:
+    """Encode mono float32 [-1, 1] samples to a 16-bit PCM WAV byte string."""
+    audio = np.clip(np.asarray(samples_f32, dtype=np.float32).reshape(-1), -1.0, 1.0)
+    pcm16 = (audio * 32767).astype(np.int16)
+    buf = io.BytesIO()
+    with wave.open(buf, "wb") as wf:
+        wf.setnchannels(1)
+        wf.setsampwidth(2)
+        wf.setframerate(sample_rate)
+        wf.writeframes(pcm16.tobytes())
+    return buf.getvalue()
+
+
+def synthesize_wav(
+    text: str,
+    voice: str = DEFAULT_VOICE,
+    lang: str = "en",
+    steps: int | None = None,
+) -> bytes:
+    """Synthesise `text` to a complete 44.1 kHz mono 16-bit WAV byte string.
+
+    Shared core behind both the HTTP /voice/say endpoint and (via _synthesise_sync)
+    the LiveKit plugin. Returns b"" if the engine is unavailable or produced no
+    audio — callers map that to HTTP 503.
+    """
+    engine, default_style = _load_engine(voice)
+    if engine is None:
+        return b""
+    # Reuse the cached default style when the requested voice matches it; otherwise
+    # resolve the requested style, falling back to the default if it's unknown.
+    if voice == DEFAULT_VOICE:
+        style = default_style
+    else:
+        try:
+            style = engine.get_voice_style(voice)
+        except Exception as e:
+            logger.error(f"Voice '{voice}' not found ({e}); using default '{DEFAULT_VOICE}'.")
+            style = default_style
+    n_steps = DEFAULT_STEPS if steps is None else int(steps)
+    synth_lang = _supertonic_lang(lang)
+    chunks: list[np.ndarray] = []
+    for sentence in _split_sentences(text):
+        audio_44k = _synthesise_sync(sentence, SPEECH_SPEED, n_steps, engine, style, synth_lang)
+        if audio_44k is not None:
+            chunks.append(np.asarray(audio_44k, dtype=np.float32).reshape(-1))
+    if not chunks:
+        return b""
+    return _encode_wav(np.concatenate(chunks), SUPERTONIC_SAMPLE_RATE)
+
+
+def prewarm(voice: str = DEFAULT_VOICE) -> bool:
+    """Load the Supertonic engine once (call at app startup so the first /voice/say
+    is not cold). Returns True if the engine is ready, False otherwise."""
+    engine, _ = _load_engine(voice)
+    return engine is not None
+
+
+class IRASupertonicTTS(_TTSBase):
     """LiveKit Agents 1.x TTS plugin backed by Supertonic-3.
 
     Drop-in for IRAKokoroTTS: same constructor shape (voice, speed), same
@@ -193,7 +272,7 @@ class IRASupertonicTTS(tts.TTS):
         return IRASupertonicChunkedStream(tts=self, input_text=text, conn_options=conn_options)
 
 
-class IRASupertonicChunkedStream(tts.ChunkedStream):
+class IRASupertonicChunkedStream(_ChunkedStreamBase):
     """Synthesises sentence-by-sentence for low TTFA, pushing each sentence's PCM
     to the 1.x AudioEmitter as soon as it's ready."""
 
