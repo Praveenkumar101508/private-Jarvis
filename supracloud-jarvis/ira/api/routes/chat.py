@@ -277,6 +277,26 @@ async def chat_stream(
     # Only trust is_voice_owner when the request genuinely originates from the voice service
     owner = _is_owner(_user) or (_is_voice_service(_user) and req.is_voice_owner)
 
+    # Sovereign coding agent (Phase 1): route coding intents (voice or text) to Aider
+    # on a fresh branch. Owner-gated, branch-only. Speak an ack, then the result.
+    from agents.coding_agent import is_coding_request, run_coding_task, spoken_result, default_repo_path
+    if is_coding_request(req.message):
+        async def _coding_stream_gen():
+            t0 = time.monotonic()
+            yield {"data": json.dumps({"token": "On it — I'll branch off, make the change, run the tests, and report back."})}
+            result = await run_coding_task(req.message, default_repo_path(), is_owner=owner)
+            yield {"data": json.dumps({"token": " " + spoken_result(result)})}
+            yield {"data": json.dumps({
+                "done": True,
+                "agent": "coding",
+                "coding": {k: result.get(k) for k in
+                           ("ok", "reason", "action", "branch", "commit", "files_changed", "tests_passed")},
+                "latency_ms": int((time.monotonic() - t0) * 1000),
+                "session_id": req.session_id,
+            })}
+
+        return EventSourceResponse(_coding_stream_gen())
+
     if _USE_HERMES:                                  # NEW engine path (default OFF) — also serves voice (HTTP → here)
         text, agent = await _hermes_route(
             req.message, conv_id=conv_id, owner=owner, user=_user,

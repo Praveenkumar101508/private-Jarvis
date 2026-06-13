@@ -9,10 +9,13 @@
 // for native/no-Docker dev; "ira-api:8000" remains the Docker default). The
 // browser uses same-origin ("") -> next.config.js rewrites /api,/auth,/health
 // to the local API, so no nginx is needed in local mode.
+// Browser: same-origin ("") by default — `tailscale serve` path-routes /api,/auth,
+// /health to the backend, so the phone PWA needs no rewrite. Set NEXT_PUBLIC_API_BASE
+// only if the API is served from a different host than the frontend.
 const INTERNAL =
   typeof window === "undefined"
     ? process.env.IRA_API_INTERNAL_URL || "http://ira-api:8000"
-    : "";
+    : process.env.NEXT_PUBLIC_API_BASE || "";
 
 function base() {
   return INTERNAL;
