@@ -57,6 +57,11 @@ LIVEKIT_SAMPLE_RATE = 48_000
 WHISPER_SAMPLE_RATE = 16_000
 DOWNSAMPLE_RATIO = LIVEKIT_SAMPLE_RATE // WHISPER_SAMPLE_RATE  # = 3
 
+# VAD tuning — a larger min-silence waits longer before treating a pause as the end
+# of speech, so accented / half-finished utterances aren't clipped mid-sentence.
+_VAD_MIN_SILENCE_MS = int(os.getenv("WHISPER_VAD_MIN_SILENCE_MS", "700"))
+_VAD_MIN_SPEECH_MS = int(os.getenv("WHISPER_VAD_MIN_SPEECH_MS", "200"))
+
 
 # Fix #124: thread-safe Whisper model cache — same double-checked locking pattern
 # as _load_kokoro in tts.py, preventing duplicate model loads on concurrent calls.
@@ -136,10 +141,14 @@ def _transcribe_sync(
     """
     segments, info = model.transcribe(
         audio,
-        language=language,           # None = auto-detect
+        language=language,           # None = auto-detect (multilingual)
         beam_size=5,
         vad_filter=True,             # Skip silent segments
-        vad_parameters={"min_silence_duration_ms": 300},
+        # Tuned so brief pauses / trailing-off don't clip the utterance mid-sentence.
+        vad_parameters={
+            "min_silence_duration_ms": _VAD_MIN_SILENCE_MS,
+            "min_speech_duration_ms": _VAD_MIN_SPEECH_MS,
+        },
         word_timestamps=False,
     )
     transcript = " ".join(seg.text.strip() for seg in segments).strip()
@@ -152,7 +161,9 @@ def _transcribe_sync(
 # Browser MediaRecorder posts webm/opus; the acceptance path posts WAV. Both decode
 # here. Default to a small/fast model for low latency — trade the last few % of
 # accuracy for speed; override with WHISPER_MODEL (e.g. distil-large-v3, EN-only).
-DEFAULT_HTTP_WHISPER_MODEL = os.getenv("WHISPER_MODEL", "small")
+# distil-large-v3 is fast + accurate for English (incl. accented/partial speech).
+# For multilingual input (e.g. spoken Tamil/Hindi) set WHISPER_MODEL=large-v3.
+DEFAULT_HTTP_WHISPER_MODEL = os.getenv("WHISPER_MODEL", "distil-large-v3")
 
 
 def _decode_to_16k_mono(blob: bytes) -> np.ndarray:

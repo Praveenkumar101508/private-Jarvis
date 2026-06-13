@@ -46,3 +46,26 @@ def make_tts(voice: str, speed: float = 1.05) -> tts.TTS:
     from voice.tts import IRAKokoroTTS
     logger.info(f"TTS engine: Kokoro (voice={voice})")
     return IRAKokoroTTS(voice=voice, speed=speed)
+
+
+# Languages handled by the native Indic engine; everything else uses Supertonic.
+_INDIC_LANGS = frozenset({"ta", "te", "kn", "ml"})
+
+
+def synthesize_say(text: str, *, lang: str = "en", voice: str | None = None,
+                   steps: int | None = None) -> bytes:
+    """Pick the TTS engine by language and return a 44.1 kHz WAV (the HTTP /voice/say
+    path). Tamil/Telugu/Kannada/Malayalam route to the native Indic engine; if it's
+    unavailable they fail soft to Supertonic's 'na'. Everything else — including Hindi
+    and Supertonic's other 30 languages — uses Supertonic."""
+    code = (lang or "en").lower().split("-")[0]
+    if code in _INDIC_LANGS:
+        try:
+            from voice.tts_indic import synthesize_wav_indic
+            wav = synthesize_wav_indic(text, lang=code)
+            if wav:
+                return wav
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"Indic TTS error ({e}); falling back to Supertonic 'na'.")
+    from voice.tts_supertonic import synthesize_wav, DEFAULT_VOICE
+    return synthesize_wav(text, voice or DEFAULT_VOICE, code, steps)
