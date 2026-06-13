@@ -50,6 +50,7 @@ from api.routes.computer_use import router as computer_use_router
 from api.routes.audio_gen import router as audio_gen_router
 from api.routes.deep_research import router as deep_research_router
 from api.routes.multimodal import router as multimodal_router
+from api.routes.strategy import router as strategy_router
 from api.middleware.auth import authenticate_user, create_token
 
 logging.basicConfig(
@@ -303,6 +304,7 @@ def create_app() -> FastAPI:
     app.include_router(audio_gen_router, prefix="/api/v1")       # /audio/generate + /audio/tts + /audio/transcribe
     app.include_router(deep_research_router, prefix="/api/v1")   # /research/deep + /research/article + /research/report
     app.include_router(multimodal_router, prefix="/api/v1")      # /multimodal/analyse
+    app.include_router(strategy_router, prefix="/api/v1")        # Phase 6: /strategy/outcome + /strategy/predictions
 
     from api.routes.files import router as files_router
     app.include_router(files_router, prefix="/api/v1")           # Feat P25: /files upload/list/download/delete

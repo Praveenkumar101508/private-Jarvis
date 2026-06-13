@@ -305,6 +305,7 @@ class Settings(BaseSettings):
     strategy_depth: int = 1                 # lookahead steps; HARD-capped at 2 in run_strategy
     strategy_self_consistency: int = 1      # >1 = sample N times & average the estimates
     strategy_deep_synthesis: bool = True    # use the deep (qwen3:14b) tier for the analysis
+    strategy_calibration_enabled: bool = True  # Phase 6: calibrate success estimates vs the owner's recorded outcomes
 
     # ── Dev Mode (Shadow PC / local development) ──────────────────────────────
     # DEV_MODE=true routes LLM calls to a local Ollama instance,
