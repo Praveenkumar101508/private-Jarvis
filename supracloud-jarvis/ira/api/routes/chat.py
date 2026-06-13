@@ -297,6 +297,30 @@ async def chat_stream(
 
         return EventSourceResponse(_coding_stream_gen())
 
+    # Strategy mode (Phase 5): explicit strategic asks get bounded, ranked, honest
+    # deliberation. Multi-call, so it only runs when explicitly invoked (detector),
+    # never on the normal low-latency fast path. Spoken summary for voice.
+    from agents.strategy_mode import is_strategy_request, run_strategy
+    if is_strategy_request(req.message):
+        async def _strategy_stream_gen():
+            t0 = time.monotonic()
+            yield {"data": json.dumps({"token": "Let me think this through… "})}
+            result = await run_strategy(req.message, context="")
+            body = result.to_spoken_summary() if req.is_voice else result.to_markdown()
+            for word in body.split(" "):
+                yield {"data": json.dumps({"token": word + " "})}
+                await asyncio.sleep(0.005)
+            yield {"data": json.dumps({
+                "done": True,
+                "agent": "strategy",
+                "strategy": {"confidence": result.confidence, "degraded": result.degraded,
+                             "options": len(result.options)},
+                "latency_ms": int((time.monotonic() - t0) * 1000),
+                "session_id": req.session_id,
+            })}
+
+        return EventSourceResponse(_strategy_stream_gen())
+
     if _USE_HERMES:                                  # NEW engine path (default OFF) — also serves voice (HTTP → here)
         text, agent = await _hermes_route(
             req.message, conv_id=conv_id, owner=owner, user=_user,
