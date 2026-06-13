@@ -44,7 +44,7 @@ from livekit.plugins import silero
 from voice.gate import gate_from_audio
 from voice.language import get_greeting
 from voice.stt import IRAFasterWhisperSTT
-from voice.tts import IRAKokoroTTS
+from voice.tts_factory import make_tts
 
 logger = logging.getLogger("ira.voice")
 
@@ -192,7 +192,7 @@ async def entrypoint(ctx: JobContext) -> None:
     cfg = _get_voice_config()
 
     stt = IRAFasterWhisperSTT(model_size=cfg["whisper_model"], device="cpu", compute_type="int8")
-    tts_engine = IRAKokoroTTS(voice=cfg["voice"], speed=1.05)
+    tts_engine = make_tts(cfg["voice"], speed=1.05)
     vad = silero.VAD.load(min_silence_duration=0.3, min_speech_duration=0.1)
     adapter = IRALLMAdapter(session_id=session_id, stt=stt)
 
