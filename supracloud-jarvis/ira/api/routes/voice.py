@@ -142,6 +142,56 @@ async def say(req: SayRequest, _user: str = Depends(require_auth)):
     return Response(content=wav_bytes, media_type="audio/wav")
 
 
+# ── Local STT (sovereign) + owner gate ────────────────────────────────────────
+
+class TranscribeResponse(BaseModel):
+    text: str
+    is_owner: bool
+
+
+@router.post("/transcribe", response_model=TranscribeResponse)
+async def transcribe(
+    audio: UploadFile = File(..., description="Recorded utterance (webm/opus or WAV)."),
+    _user: str = Depends(require_auth),
+):
+    """Transcribe an uploaded utterance locally with faster-whisper (sovereign — the
+    audio never leaves the box) and, when biometrics are active (i.e. NOT DEV_MODE),
+    run the ECAPA owner-gate on the same audio.
+
+    Returns the transcript and whether the speaker is the enrolled owner. DEV_MODE →
+    is_owner=True (gate bypassed). Non-owner / no profile / low confidence / model
+    unavailable → is_owner=False (fail closed).
+    """
+    blob = await audio.read()
+    if not blob:
+        raise HTTPException(status_code=400, detail="No audio uploaded.")
+
+    # Lazy import: faster-whisper + PyAV are heavy and only on the voice host — keep
+    # them out of module import so this route loads (and tests) without them.
+    try:
+        from voice.stt import transcribe_audio_bytes
+    except Exception as e:  # noqa: BLE001
+        logger.error(f"Local STT engine unavailable: {e}")
+        raise HTTPException(status_code=503, detail="Local STT engine unavailable.")
+
+    try:
+        text, _lang, _conf, pcm16 = await run_in_threadpool(transcribe_audio_bytes, blob)
+    except Exception as e:  # noqa: BLE001 — undecodable/corrupt audio
+        logger.error(f"Transcription failed: {e}")
+        raise HTTPException(status_code=422, detail="Could not decode or transcribe the audio.")
+
+    cfg = get_settings()
+    if cfg.dev_mode:
+        is_owner = True
+    else:
+        # Fail-closed ECAPA owner check on the same 16kHz PCM the STT decoded.
+        from voice.gate import gate_from_audio
+        decision = await gate_from_audio(pcm16, session_id="voice_transcribe")
+        is_owner = bool(decision["is_owner"])
+
+    return TranscribeResponse(text=text, is_owner=is_owner)
+
+
 # ── Anti-replay challenge ─────────────────────────────────────────────────────
 
 # A pool of short, unambiguous phrases for the user to speak during enrolment.

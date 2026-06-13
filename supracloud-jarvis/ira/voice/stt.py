@@ -15,17 +15,36 @@ For lower latency on short queries, swap large-v3 for 'medium' or 'small'.
 from __future__ import annotations
 
 import asyncio
+import io
 import logging
+import os
 import sys
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
-from faster_whisper import WhisperModel
-from livekit import rtc
-from livekit.agents import stt
-from livekit.agents.types import DEFAULT_API_CONNECT_OPTIONS, APIConnectOptions
+
+# faster-whisper (the STT engine) and livekit-agents (the plugin base) live only on
+# the voice host. The sovereign HTTP path (transcribe_audio_bytes → POST
+# /api/v1/voice/transcribe) and CI must import this module without them, so import
+# both softly; the heavy work fails gracefully if a dep is genuinely missing.
+try:
+    from faster_whisper import WhisperModel
+except Exception:  # pragma: no cover - only where faster-whisper isn't installed
+    WhisperModel = None
+
+try:
+    from livekit import rtc
+    from livekit.agents import stt
+    from livekit.agents.types import DEFAULT_API_CONNECT_OPTIONS, APIConnectOptions
+    _STTBase = stt.STT
+    _LIVEKIT_AVAILABLE = True
+except Exception:  # pragma: no cover - only on hosts without livekit-agents
+    rtc = stt = None
+    DEFAULT_API_CONNECT_OPTIONS = APIConnectOptions = None
+    _STTBase = object
+    _LIVEKIT_AVAILABLE = False
 
 from voice.language import normalise_lang
 
@@ -129,7 +148,42 @@ def _transcribe_sync(
     return transcript, detected_lang, confidence
 
 
-class IRAFasterWhisperSTT(stt.STT):
+# ── Sovereign HTTP transcription (browser-native voice; no LiveKit) ────────────
+# Browser MediaRecorder posts webm/opus; the acceptance path posts WAV. Both decode
+# here. Default to a small/fast model for low latency — trade the last few % of
+# accuracy for speed; override with WHISPER_MODEL (e.g. distil-large-v3, EN-only).
+DEFAULT_HTTP_WHISPER_MODEL = os.getenv("WHISPER_MODEL", "small")
+
+
+def _decode_to_16k_mono(blob: bytes) -> np.ndarray:
+    """Decode an uploaded audio blob (wav / webm-opus / ogg / mp3 …) to 16 kHz mono
+    float32 via faster-whisper's PyAV-backed decoder — handles the browser's
+    MediaRecorder output and plain WAV alike, resampling to 16 kHz."""
+    from faster_whisper.audio import decode_audio
+    return decode_audio(io.BytesIO(blob), sampling_rate=WHISPER_SAMPLE_RATE)
+
+
+def transcribe_audio_bytes(
+    blob: bytes,
+    model_size: str | None = None,
+    device: str = "cpu",
+    compute_type: str = "int8",
+    language: str | None = None,
+) -> tuple[str, str, float, bytes]:
+    """Transcribe an uploaded audio blob locally for POST /api/v1/voice/transcribe.
+
+    Returns (text, detected_lang, confidence, pcm16) where pcm16 is the 16 kHz/16-bit
+    mono PCM the biometric owner-gate consumes — so the blob is decoded exactly once
+    and the same audio drives both transcription and the owner check.
+    """
+    audio = _decode_to_16k_mono(blob)
+    pcm16 = (np.clip(audio, -1.0, 1.0) * 32767.0).astype(np.int16).tobytes()
+    model = _load_model(model_size or DEFAULT_HTTP_WHISPER_MODEL, device, compute_type)
+    text, detected_lang, confidence = _transcribe_sync(audio, model, language)
+    return text, detected_lang, confidence, pcm16
+
+
+class IRAFasterWhisperSTT(_STTBase):
     """
     LiveKit Agents 1.x STT plugin backed by Faster-Whisper (non-streaming/recognize).
 
