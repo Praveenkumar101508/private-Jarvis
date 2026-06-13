@@ -109,6 +109,10 @@ export default function VoiceConsole({ token, sessionId }: Props) {
   const watchRafRef = useRef<number | null>(null);
   const bargeRafRef = useRef<number | null>(null);
 
+  // Push-to-talk (the primary mobile control)
+  const pttRecorderRef = useRef<MediaRecorder | null>(null);
+  const pttChunksRef = useRef<BlobPart[]>([]);
+
   // Playback queue (gapless)
   const playheadRef = useRef(0);
   const sourcesRef = useRef<Set<AudioBufferSourceNode>>(new Set());
@@ -493,34 +497,34 @@ export default function VoiceConsole({ token, sessionId }: Props) {
     [token, sessionId, setState, enqueueTTS, startBargeMonitor]
   );
 
-  const onActivated = useCallback(async () => {
-    try {
+  // Sovereign-STT path shared by wake/clap activation AND push-to-talk: POST the
+  // captured audio to /transcribe, gate on the owner, then converse.
+  const transcribeAndRespond = useCallback(
+    async (blob: Blob) => {
+      if (!blob.size) {
+        setState("listening");
+        armLoopRef.current();
+        return;
+      }
       let text = "";
       let isOwner = true;
-      if (STT_MODE === "webspeech") {
-        // Fast, NOT private — the browser vendor receives the audio. No local audio
-        // is captured, so the sovereign owner-gate can't run on this path.
-        text = await recognizeOnce();
-      } else {
-        const blob = await captureUtteranceBlob();
-        if (!blob.size) {
-          setState("listening");
-          armLoopRef.current();
-          return;
-        }
+      try {
         const fd = new FormData();
         fd.append("audio", blob, "utterance.webm");
         const res = await fetch("/api/v1/voice/transcribe", {
           method: "POST",
-          headers: authHeader(token), // no Content-Type — browser sets the multipart boundary
+          headers: authHeader(tokenRef.current), // no Content-Type — browser sets the multipart boundary
           body: fd,
         });
         const data = await res.json();
         text = (data.text || "").trim();
         isOwner = data.is_owner !== false;
+      } catch {
+        setState("listening");
+        armLoopRef.current();
+        return;
       }
-
-      if (!text.trim()) {
+      if (!text) {
         setState("listening");
         armLoopRef.current();
         return;
@@ -532,11 +536,31 @@ export default function VoiceConsole({ token, sessionId }: Props) {
         return;
       }
       await converse(text, isOwner);
-    } catch (e) {
+    },
+    [converse, speakOnce, setState]
+  );
+
+  const onActivated = useCallback(async () => {
+    try {
+      if (STT_MODE === "webspeech") {
+        // Fast, NOT private — the browser vendor receives the audio. No local audio
+        // is captured, so the sovereign owner-gate can't run on this path.
+        const text = (await recognizeOnce()).trim();
+        if (!text) {
+          setState("listening");
+          armLoopRef.current();
+          return;
+        }
+        await converse(text, true);
+        return;
+      }
+      const blob = await captureUtteranceBlob();
+      await transcribeAndRespond(blob);
+    } catch {
       setState("listening");
       armLoopRef.current();
     }
-  }, [token, captureUtteranceBlob, recognizeOnce, converse, speakOnce, setState]);
+  }, [captureUtteranceBlob, recognizeOnce, transcribeAndRespond, converse, setState]);
 
   // ── Arm / disarm the whole loop ───────────────────────────────────────────
   // Assigned every render so it always sees the latest onActivated/start* closures.
@@ -575,6 +599,47 @@ export default function VoiceConsole({ token, sessionId }: Props) {
     if (stateRef.current === "idle") void start();
     else stop();
   }, [start, stop]);
+
+  // ── Push-to-talk (hold to talk) — primary control on mobile ───────────────
+  // Wake word can't run backgrounded on iOS, so PTT is the reliable phone path:
+  // press requests the mic + records, release transcribes through the sovereign
+  // path. Haptic ticks give eyes-free (driving) feedback.
+  const startPTT = useCallback(async () => {
+    setError("");
+    try {
+      await ensureAudio();
+    } catch {
+      setError("Microphone permission denied.");
+      return;
+    }
+    armedRef.current = true; // a turn ends by returning to the listening loop
+    stopWatch(); // pause wake/clap detection while the button is held
+    stopPlayback(); // barge-in: cut any current speech
+    if (typeof navigator !== "undefined") navigator.vibrate?.(30);
+    setState("listening");
+    const stream = micRef.current!;
+    const mime = pickRecorderMime();
+    const rec = mime ? new MediaRecorder(stream, { mimeType: mime }) : new MediaRecorder(stream);
+    pttChunksRef.current = [];
+    rec.ondataavailable = (e) => {
+      if (e.data.size) pttChunksRef.current.push(e.data);
+    };
+    rec.onstop = () => {
+      const blob = new Blob(pttChunksRef.current, { type: rec.mimeType || "audio/webm" });
+      void transcribeAndRespond(blob);
+    };
+    pttRecorderRef.current = rec;
+    rec.start();
+  }, [ensureAudio, stopWatch, stopPlayback, setState, transcribeAndRespond]);
+
+  const stopPTT = useCallback(() => {
+    const rec = pttRecorderRef.current;
+    pttRecorderRef.current = null;
+    if (rec && rec.state === "recording") {
+      if (typeof navigator !== "undefined") navigator.vibrate?.(15);
+      rec.stop(); // -> onstop -> transcribeAndRespond
+    }
+  }, []);
 
   // Cleanup on unmount.
   useEffect(() => {
@@ -657,6 +722,37 @@ export default function VoiceConsole({ token, sessionId }: Props) {
           {error}
         </div>
       )}
+
+      {/* Push-to-talk — primary mobile control (hold to talk). Hidden on desktop,
+          where the header orb + wake/clap is used. */}
+      <button
+        onPointerDown={(e) => {
+          e.preventDefault();
+          void startPTT();
+        }}
+        onPointerUp={(e) => {
+          e.preventDefault();
+          stopPTT();
+        }}
+        onPointerLeave={() => stopPTT()}
+        onPointerCancel={() => stopPTT()}
+        onContextMenu={(e) => e.preventDefault()}
+        aria-label="Push to talk — hold and speak"
+        style={{ touchAction: "none" }}
+        className={clsx(
+          "fixed bottom-6 left-1/2 -translate-x-1/2 z-40 w-20 h-20 rounded-full border-2",
+          "flex items-center justify-center shadow-2xl select-none transition-transform active:scale-95 sm:hidden",
+          orbColor[voiceState]
+        )}
+      >
+        {voiceState === "speaking" ? (
+          <Volume2 className="w-7 h-7" />
+        ) : voiceState === "thinking" ? (
+          <Loader2 className="w-7 h-7 animate-spin" />
+        ) : (
+          <Mic className="w-7 h-7" />
+        )}
+      </button>
     </div>
   );
 }
