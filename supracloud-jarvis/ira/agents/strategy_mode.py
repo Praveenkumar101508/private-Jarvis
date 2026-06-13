@@ -231,6 +231,45 @@ def _build_prompt(query: str, context: str, branches: int, depth: int) -> str:
     )
 
 
+async def _calibrate_and_persist(result: StrategyResult, query: str) -> None:
+    """Persist the raw estimates and calibrate them against the owner's recorded
+    outcomes (Phase 6). Fail-soft: if calibration is disabled or the DB is unavailable
+    this is a no-op and the run proceeds with raw estimates.
+
+    Calibration here = correcting the model's success estimates against the owner's OWN
+    history — NOT retraining, NOT ground-truth simulation.
+    """
+    if result.degraded or not result.options:
+        return
+    try:
+        from config import get_settings
+        if not bool(getattr(get_settings(), "strategy_calibration_enabled", True)):
+            return
+        from agents import strategy_calibration as cal
+    except Exception:  # noqa: BLE001
+        return
+
+    domain = cal.infer_domain(query)
+    # Persist the RAW model estimates (pre-calibration) so future calibration measures
+    # the model's own bias against realised outcomes.
+    try:
+        for o in result.options:
+            o.utility = _utility(o.success_probability, o.risk, o.effort)
+        await cal.persist_predictions(query, domain, result.options)
+    except Exception as e:  # noqa: BLE001
+        logger.warning(f"strategy: prediction persist skipped ({e})")
+    # Nudge the displayed success estimates toward the owner's own track record.
+    try:
+        adj, n = await cal.load_calibration(domain)
+    except Exception as e:  # noqa: BLE001
+        logger.warning(f"strategy: calibration load skipped ({e})")
+        return
+    if n > 0 and adj:
+        for o in result.options:
+            o.success_probability = cal.apply_adjustment(o.success_probability, adj)
+        result.calibrated_on = n
+
+
 async def run_strategy(query: str, *, context: str = "") -> StrategyResult:
     """Run bounded strategic deliberation and return a ranked, honest StrategyResult."""
     from config import get_settings
@@ -263,6 +302,8 @@ async def run_strategy(query: str, *, context: str = "") -> StrategyResult:
         )
 
     result = _parse_result(_merge(parsed), query)
+    # Phase 6: persist the raw estimates + calibrate against the owner's own outcomes.
+    await _calibrate_and_persist(result, query)
     for o in result.options:
         o.utility = _utility(o.success_probability, o.risk, o.effort)
     result.options.sort(key=lambda o: o.utility, reverse=True)
