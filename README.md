@@ -73,7 +73,7 @@
 | 🧬 Biometric voice auth | ⚠️ **Beta** | Requires enrolment |
 | 🎬 Video generation | 🔧 **Requires Replicate** | External API |
 | 🎵 Audio/music generation | 🔧 **Requires Replicate** | External API |
-| 🌏 Multilingual voice | 🔧 **Experimental** | Indic → English TTS (known limitation) |
+| 🌏 Multilingual voice | ✅ **Native Indic TTS** | ta/te/kn/ml (IndicParler) · Hindi via Supertonic · fail-soft |
 | 🖥️ Computer use (Playwright) | 🔧 **Experimental** | SSRF protections required |
 
 </div>
@@ -402,6 +402,7 @@ failure is gone). LiveKit is kept as a **legacy** transport behind a flag.
 ```powershell
 pwsh -File .\start-ira.ps1                     # Postgres → Redis → Ollama → Hermes → Supertonic → API → frontend
 pwsh -File .\start-ira.ps1 -InstallAutostart   # also boot the whole stack at logon
+pwsh -File .\start-ira.ps1 -InstallService     # register a BOOT task — runs with no login (self-elevates)
 ```
 
 Then open the app in Chrome and say **"Hey IRA, what time is it?"** — she replies in
@@ -413,8 +414,9 @@ a female voice, fully in the browser, first audio in ~2 s.
 `=livekit` mounts the legacy LiveKit `VoiceOrb` instead. The LiveKit code is untouched.
 
 ⚠️ Known limitations:
-- Indic-language TTS uses Supertonic's language-agnostic fallback (Hindi is native;
-  Tamil/Telugu/Kannada/Malayalam → `na`).
+- Tamil/Telugu/Kannada/Malayalam use a **native Indic TTS** engine (IndicParler) when
+  it's installed on the box; Hindi + Supertonic's other languages stay on Supertonic.
+  Without the Indic model they **fail soft** to Supertonic's `na`.
 - First transcribe after a cold start loads the Whisper model (a few seconds);
   `start-ira.ps1` warms Ollama + Supertonic to cut cold starts.
 
@@ -438,6 +440,25 @@ curl -X POST https://your-domain/api/v1/voice/enroll \
 ```
 
 > 💡 Record in a quiet room, speaking naturally for 3–5 seconds per clip.
+
+---
+
+## 🆕 IRA v2 — Sovereign Coding · Mobile · Multilingual · Strategy
+
+Additive on top of the browser-native voice loop (v1 voice + LiveKit untouched). All local-first.
+
+| Capability | What it does |
+|:-----------|:-------------|
+| 👨‍💻 **Sovereign coding agent** | Voice/text coding asks ("fix the bug in x.py") run **Aider** on a **fresh branch** — owner-gated, **never edits main, no push**. Local **`qwen2.5-coder:14b`** by default (`CODER_BACKEND=local`); `=claude` is an explicit, logged cloud opt-in. delete / force-push / deploy → asks first. |
+| 📱 **Mobile PWA + Tailscale** | Installable PWA with a large **hold-to-talk** button. Reach the box from your phone over **`tailscale serve` HTTPS** — required for the mobile mic (`getUserMedia` needs a secure context). No public port. See `TAILSCALE_SETUP.md`. |
+| 🌏 **Native Indic voice** | Native **Tamil/Telugu/Kannada/Malayalam** TTS (IndicParler) via `tts_factory`; **Hindi + Supertonic's other 30 languages** stay on Supertonic; **fail-soft** to `na` if the Indic model isn't installed. Whisper STT is configurable (`WHISPER_MODEL`, tuned VAD, language auto-detect). |
+| 🧭 **Strategy mode** | Explicit strategic asks ("should I…", "best strategy…") get **bounded, ranked, honest** option analysis (success / risk / effort → utility) with assumptions, confidence, and what-would-change-it. Kept off the low-latency voice path. |
+| 📈 **Strategy calibration** | Records each run's estimates, lets you log the **real outcome** (`POST /strategy/outcome`), and calibrates future estimates against **your own track record** — surfaced as "calibrated on N decisions". Honest framing: calibration vs your own history, **not** retraining or ground-truth simulation. |
+| 🔌 **Unattended boot** | `start-ira.ps1 -InstallService` registers an **AtStartup** task that runs with **no login** (24/7 over Tailscale); `-InstallAutostart` is the logon-level launcher. |
+
+**GPU note:** the coder fits the 20 GB A4500 at 14B; **32B is a one-line bump for a 24 GB+ GPU** — never loaded by default. The coder and the chat model may not co-reside in 20 GB (accept a model-swap delay).
+
+> Renting a GPU server and production deployment are a **separate, later playbook** — everything here is built and verified **locally** on the Shadow box.
 
 ---
 
@@ -529,6 +550,8 @@ curl -X POST -H "Authorization: Bearer <jwt>" \
 | `POST` | `/api/v1/voice/transcribe` | 📝 Sovereign STT + owner gate → `{text, is_owner}` |
 | `GET`  | `/api/v1/voice/token` | 🎙️ LiveKit access token (legacy transport) |
 | `POST` | `/api/v1/voice/enroll` | 🧬 Biometric voice enrolment |
+| `POST` | `/api/v1/strategy/outcome` | 📈 Record a decision's real outcome → recalibrate |
+| `GET`  | `/api/v1/strategy/predictions` | 🗂️ Recent strategy predictions (to find ids) |
 | `POST` | `/api/v1/calendar/event` | 📅 Create Cal.com booking |
 | `DELETE` | `/api/v1/calendar/event/{id}` | ❌ Cancel booking |
 | `POST` | `/api/v1/files/upload` | 📁 Upload persistent file |

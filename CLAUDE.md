@@ -62,7 +62,35 @@ The LiveKit voice loop does NOT work on the native Shadow runtime (the `livekit`
   `IRA_USE_HERMES` toggles Ollama-direct vs Hermes for BOTH text and voice; both return real
   replies (direct-Ollama = lowest latency).
 - **One command:** `start-ira.ps1` (Postgres→Redis→Ollama pull+warm→Hermes `hermes -z`→Supertonic
-  warm→API→frontend); `-InstallAutostart` drops a Startup-folder launcher.
+  warm→API→frontend); `-InstallAutostart` drops a Startup-folder (logon) launcher and
+  `-InstallService` registers an AtStartup S4U task that runs with no login (see v2 below).
+
+## IRA v2 (Part-6 playbook) — sovereign coding, mobile, multilingual, strategy
+Additive on top of the browser-voice work; v1 voice loop + LiveKit untouched. Local-first.
+- **Sovereign coding agent** (`agents/coding_agent.py::run_coding_task`): voice/text coding asks
+  route here. **Owner-gated, branch-only, never edits main, no push.** `CODER_BACKEND=local`
+  (default) drives Aider + Ollama `qwen2.5-coder:14b` (fits 20 GB; **32B only on 24 GB+** — a
+  one-line env bump, never default); `=claude` is an explicit, logged cloud egress.
+  delete/force-push/deploy → `needs-confirmation` (mirrors the gated self-modification rule).
+- **Mobile PWA + Tailscale** (`frontend/public/sw.js`, `PWARegister.tsx`, `TAILSCALE_SETUP.md`):
+  installable, large hold-to-talk button for phones. Phone access via **`tailscale serve` HTTPS**
+  — `getUserMedia` needs a secure context, so the mic fails over plain http. `IRA_TS_HOST` +
+  `NEXT_PUBLIC_API_BASE` set CORS/origin; `NEXT_PUBLIC_PWA=false` disables the SW. **No public port.**
+- **Multilingual** (`voice/tts_indic.py` via `tts_factory.synthesize_say`): native Indic TTS
+  (default IndicParler) for **ta/te/kn/ml**; **Hindi + Supertonic's other 30 languages stay on
+  Supertonic**; **fail-soft to Supertonic `na`** if the Indic model is absent. STT: `WHISPER_MODEL`
+  (default `distil-large-v3`; `large-v3` for Indic), tuned VAD (`WHISPER_VAD_*`), language auto-detect.
+- **Strategy mode** (`agents/strategy_mode.py`, `is_strategy_request`/`run_strategy`): bounded,
+  ranked, honest deliberation for explicit strategic asks; **off** the low-latency voice fast path.
+  `STRATEGY_*` knobs (branches, depth ≤2, self-consistency, deep synthesis) in `config.py`.
+- **Strategy calibration** (`agents/strategy_calibration.py`, `postgres/010_*`): persists each run's
+  raw estimates; `POST /api/v1/strategy/outcome` records the real result; future runs apply a stored
+  per-domain offset (shrunk for sparse data) toward the owner's track record — surfaced as
+  "calibrated on N decisions". **Honest:** calibration vs the owner's OWN outcomes — NOT retraining,
+  NOT ground-truth simulation. `strategy_calibration_enabled` (default on); fail-soft without a DB.
+- **Unattended boot:** `start-ira.ps1 -InstallService` (AtStartup S4U, no login) for 24/7;
+  `-InstallAutostart` is the logon-level launcher. Local only.
+- **Out of scope (separate later playbook):** renting a GPU server / production deployment.
 
 ## Bridge shape (Phase 2 reference — HTTP client, not an import)
 ```python
