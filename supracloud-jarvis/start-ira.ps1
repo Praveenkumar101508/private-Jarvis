@@ -12,16 +12,24 @@
   SearXNG / Crawl4AI and Supertonic are optional (fail soft) — a miss is WARN, not
   fatal. Prints a per-service status line and a final "ALL UP" or the first failure.
 
+  Autostart options: -InstallAutostart drops a per-user *logon* launcher (no admin);
+  for an unattended box use -InstallService, which registers a Task Scheduler task
+  triggered AtStartup running as the current user via S4U ("run whether or not a user
+  is logged on") so the stack survives reboots with nobody logged in. Local only —
+  binds to localhost / the Tailscale interface, never the public internet.
+
 .USAGE
   pwsh -File .\start-ira.ps1                   # bring everything up
   pwsh -File .\start-ira.ps1 -SkipFrontend     # backend only
   pwsh -File .\start-ira.ps1 -InstallAutostart # also drop a login autostart launcher
+  pwsh -File .\start-ira.ps1 -InstallService   # register a BOOT task (self-elevates), then exit
   Loads .env from this folder if present.
 #>
 [CmdletBinding()]
 param(
     [switch]$SkipFrontend,
     [switch]$InstallAutostart,
+    [switch]$InstallService,
     [int]$ReadyTimeoutSec = 90
 )
 
@@ -121,6 +129,56 @@ sh.Run "pwsh -NoProfile -ExecutionPolicy Bypass -File ""$self""", 0, False
 "@
     Set-Content -Path $vbsPath -Value $vbs -Encoding ASCII
     Write-Host "Installed login autostart: $vbsPath" -ForegroundColor Green
+}
+
+# ── Optional: install a BOOT-level task (admin; runs with NO login) ─────────────
+# Beyond -InstallAutostart (which only fires at *logon*), this registers a Task
+# Scheduler task triggered AtStartup, running as the current user via S4U ("run
+# whether or not a user is logged on"), so the stack survives reboots unattended —
+# readying the box for 24/7 access over Tailscale. Local only; no public exposure.
+# Registering an AtStartup task needs elevation, so self-elevate (UAC) if necessary.
+# This is install-and-exit: it does NOT also start the stack now (run the script
+# plainly, or just reboot, for that).
+if ($InstallService) {
+    $taskName = "IRA-Stack-Boot"
+    $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(
+        [Security.Principal.WindowsBuiltInRole]::Administrator)
+
+    if (-not $isAdmin) {
+        Write-Host "Registering a boot task needs admin — requesting elevation (UAC)..." -ForegroundColor Yellow
+        try {
+            $relaunch = "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`" -InstallService"
+            Start-Process pwsh -Verb RunAs -Wait -ArgumentList $relaunch
+            Write-Host "Boot task '$taskName' installed (elevated). The stack will come up at next boot." -ForegroundColor Green
+        } catch {
+            Write-Host "Elevation declined/failed — open an elevated PowerShell and re-run with -InstallService." -ForegroundColor Red
+            exit 1
+        }
+        exit 0
+    }
+
+    # Already elevated: register (idempotently) the AtStartup task.
+    $pwshExe = (Get-Command pwsh -ErrorAction SilentlyContinue).Source
+    if (-not $pwshExe) { $pwshExe = (Get-Command powershell -ErrorAction SilentlyContinue).Source }
+    $action  = New-ScheduledTaskAction -Execute $pwshExe `
+        -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`""
+    $trigger = New-ScheduledTaskTrigger -AtStartup
+    $trigger.Delay = "PT30S"   # let drivers / network / Postgres / Memurai settle first
+    $userId  = "$env:USERDOMAIN\$env:USERNAME"
+    # S4U = run whether or not the user is logged on, WITHOUT storing a password.
+    $principal = New-ScheduledTaskPrincipal -UserId $userId -LogonType S4U -RunLevel Highest
+    $settings  = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
+        -StartWhenAvailable -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1) `
+        -ExecutionTimeLimit ([TimeSpan]::Zero)   # no run-time limit (long-lived stack)
+    Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue
+    Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger `
+        -Principal $principal -Settings $settings `
+        -Description "Bring up the IRA native stack at boot (no login required). Local only." | Out-Null
+    Write-Host "Installed boot task '$taskName' — runs at startup as $userId (S4U), no login needed." -ForegroundColor Green
+    Write-Host "  Note: a boot/S4U task uses the machine PATH; if ollama/python/npm/pwsh are per-user-only," -ForegroundColor DarkGray
+    Write-Host "        add them to the system PATH (or set full paths in .env) so the task can find them." -ForegroundColor DarkGray
+    Write-Host "  Remove with (elevated):  Unregister-ScheduledTask -TaskName $taskName -Confirm:`$false" -ForegroundColor DarkGray
+    exit 0
 }
 
 Write-Host "Starting IRA native stack..." -ForegroundColor Cyan
