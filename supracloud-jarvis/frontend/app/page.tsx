@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import ChatInterface from "@/components/ChatInterface";
 import VoiceOrb from "@/components/VoiceOrb";
+import VoiceConsole from "@/components/VoiceConsole";
 import Sidebar, { type AppMode } from "@/components/Sidebar";
 import StatusBar from "@/components/StatusBar";
 import { useAuthStore, useUIStore, useChatStore } from "@/lib/store";
@@ -212,11 +213,17 @@ export default function Home() {
 
           <div className="flex items-center gap-3">
             <StatusBar token={token} />
-            <VoiceOrb
-              livekitUrl={livekitUrl || process.env.NEXT_PUBLIC_LIVEKIT_URL || "ws://localhost:7880"}
-              livekitToken={livekitToken}
-              autoConnect={autoVoice}
-            />
+            {/* Browser-native voice is the default working path on the native
+                Shadow PC; LiveKit is legacy, selectable via NEXT_PUBLIC_VOICE_TRANSPORT=livekit. */}
+            {(process.env.NEXT_PUBLIC_VOICE_TRANSPORT || "browser") === "livekit" ? (
+              <VoiceOrb
+                livekitUrl={livekitUrl || process.env.NEXT_PUBLIC_LIVEKIT_URL || "ws://localhost:7880"}
+                livekitToken={livekitToken}
+                autoConnect={autoVoice}
+              />
+            ) : (
+              <VoiceConsole token={token} sessionId={sessionId} />
+            )}
             <button
               onClick={handleLogout}
               className="text-xs text-neutral-500 hover:text-neutral-300 transition-colors px-2 py-1 rounded-lg hover:bg-neutral-800"
