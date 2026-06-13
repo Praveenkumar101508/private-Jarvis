@@ -25,6 +25,7 @@ nginx/certs/
 node_modules/
 __pycache__/
 *.pyc
+*.tsbuildinfo
 
 # Build outputs
 dist/
