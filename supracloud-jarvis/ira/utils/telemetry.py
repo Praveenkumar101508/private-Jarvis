@@ -60,11 +60,40 @@ def setup_telemetry(service_name: str = "ira-api") -> None:
 
 
 def get_tracer():
-    """Get the tracer. Returns a no-op tracer if telemetry is disabled."""
+    """Get the tracer. Returns a no-op tracer if telemetry is disabled OR if
+    opentelemetry isn't installed — so otel stays a fully optional dependency."""
     if _tracer is not None:
         return _tracer
-    from opentelemetry import trace
-    return trace.get_tracer("ira-noop")
+    try:
+        from opentelemetry import trace
+        return trace.get_tracer("ira-noop")
+    except Exception:
+        return _NOOP_TRACER
+
+
+# ── No-op fallbacks (opentelemetry absent / telemetry disabled) ───────────────
+# So trace_span() never raises ModuleNotFoundError when otel isn't installed.
+class _NoopSpan:
+    def is_recording(self) -> bool:
+        return False
+
+    def set_attribute(self, *args, **kwargs) -> None:
+        pass
+
+    def record_exception(self, *args, **kwargs) -> None:
+        pass
+
+    def set_status(self, *args, **kwargs) -> None:
+        pass
+
+
+class _NoopTracer:
+    @contextmanager
+    def start_as_current_span(self, name: str, *args, **kwargs):
+        yield _NoopSpan()
+
+
+_NOOP_TRACER = _NoopTracer()
 
 
 @contextmanager
