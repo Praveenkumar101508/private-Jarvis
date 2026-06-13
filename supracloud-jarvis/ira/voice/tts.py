@@ -27,8 +27,21 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
-from livekit.agents import tts, utils
-from livekit.agents.types import DEFAULT_API_CONNECT_OPTIONS, APIConnectOptions
+
+# LiveKit Agents is only needed for the in-process LiveKit plugin classes below.
+# Import it softly so this module (and voice/tts_factory) loads on a host without
+# livekit — the browser-native path and the factory-selection test need that.
+try:
+    from livekit.agents import tts, utils
+    from livekit.agents.types import DEFAULT_API_CONNECT_OPTIONS, APIConnectOptions
+    _TTSBase = tts.TTS
+    _ChunkedStreamBase = tts.ChunkedStream
+    _LIVEKIT_AVAILABLE = True
+except Exception:  # pragma: no cover - only on hosts without livekit-agents
+    tts = utils = None
+    DEFAULT_API_CONNECT_OPTIONS = APIConnectOptions = None
+    _TTSBase = _ChunkedStreamBase = object
+    _LIVEKIT_AVAILABLE = False
 
 from voice.language import is_indic, LANGUAGE_NAMES
 
@@ -163,7 +176,7 @@ def _synthesise_sync(
         return None
 
 
-class IRAKokoroTTS(tts.TTS):
+class IRAKokoroTTS(_TTSBase):
     """
     LiveKit Agents 1.x TTS plugin backed by Kokoro-82M (af_bella).
 
@@ -193,7 +206,7 @@ class IRAKokoroTTS(tts.TTS):
         return IRAChunkedStream(tts=self, input_text=text, conn_options=conn_options)
 
 
-class IRAChunkedStream(tts.ChunkedStream):
+class IRAChunkedStream(_ChunkedStreamBase):
     """
     Synthesises sentence-by-sentence for low time-to-first-audio, pushing each
     sentence's PCM to the 1.x AudioEmitter as soon as it's ready.

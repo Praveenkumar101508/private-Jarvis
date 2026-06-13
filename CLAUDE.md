@@ -40,6 +40,30 @@ Shadow PC (`SHADOW-CR4M2J8D`, RTX A4500 20 GB). Docker daemon not running, WSL v
 ## Reasoning skills vs the agentic gateway (Phase-6 note)
 The gateway runs the FULL Hermes agent (files/shell/web tools). IRA's Option-A skills are reasoning-only (IRA runs the tools), so `skills/_common.run_skill` injects a no-tools directive. The model still sometimes over-reaches into a tool call (notably the security persona → tries to read `/var/log/auth.log`). Constraining/stripping the gateway toolset for reasoning skills is a **Phase-6** task.
 
+## Voice (browser-native) — the default working path (verified 2026-06-13)
+The LiveKit voice loop does NOT work on the native Shadow runtime (the `livekit` server
++ `ira-voice` agent only exist in docker-compose, so the frontend never gets a token →
+"Voice unavailable — no token"). Voice now runs **browser-native**, gated by
+`NEXT_PUBLIC_VOICE_TRANSPORT` (default `browser`; `livekit` = legacy, code untouched).
+- **TTS:** on-device **Supertonic-3** (female `F1`). One synth core
+  `voice/tts_supertonic.synthesize_wav` (44.1 kHz WAV) is shared by `POST /api/v1/voice/say`
+  AND the LiveKit plugin. Engine via `voice/tts_factory.make_tts` (`IRA_VOICE_ENGINE=supertonic|kokoro`).
+  The API pre-warms it at startup.
+- **STT (sovereign):** local faster-whisper `voice/stt.transcribe_audio_bytes` behind
+  `POST /api/v1/voice/transcribe` → `{text, is_owner}`; the SAME audio drives the ECAPA owner
+  gate (`voice/gate.gate_from_audio`, fail-closed). DEV_MODE → `is_owner=true`.
+  `NEXT_PUBLIC_VOICE_STT=webspeech` is the opt-in, NOT-private fast mode (badged in the UI).
+- **Activation:** `NEXT_PUBLIC_VOICE_ACTIVATION=wakeword` ("hey ira") | `clap` (double-clap),
+  in `frontend/components/VoiceConsole.tsx`. Barge-in stops playback.
+- **Sovereignty seam — do NOT undo:** `voice/{tts,tts_supertonic,tts_factory,stt}.py` import
+  livekit-agents **softly**, so the browser/HTTP path loads (and unit-tests) WITHOUT livekit;
+  the LiveKit plugin classes bind the real base class only when livekit is present.
+- **Engine:** the voice path pins the fast tier `qwen3:8b` (`is_voice` forces `use_deep=False`).
+  `IRA_USE_HERMES` toggles Ollama-direct vs Hermes for BOTH text and voice; both return real
+  replies (direct-Ollama = lowest latency).
+- **One command:** `start-ira.ps1` (Postgres→Redis→Ollama pull+warm→Hermes `hermes -z`→Supertonic
+  warm→API→frontend); `-InstallAutostart` drops a Startup-folder launcher.
+
 ## Bridge shape (Phase 2 reference — HTTP client, not an import)
 ```python
 from openai import OpenAI          # IRA already depends on openai==1.54.4 — no new dep

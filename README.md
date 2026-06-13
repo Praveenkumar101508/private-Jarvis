@@ -379,17 +379,44 @@ User triggers Expert Mode  ─────►  3 sessions/hour per user
 
 ## 🎙️ Voice Interface
 
-IRA uses **LiveKit WebRTC** + **Faster-Whisper** (STT) + **Kokoro TTS**.
+**Browser-native voice is the default working path.** The whole loop — activation →
+STT → IRA → speech — runs in the browser against the local IRA API, so there's no
+LiveKit server and no token (the native Shadow-PC *"Voice unavailable — no token"*
+failure is gone). LiveKit is kept as a **legacy** transport behind a flag.
 
-✅ What works:
-- English voice conversations with full LLM context
-- Voice biometric authentication (requires enrolment)
-- Multilingual speech recognition (Whisper detects 99 languages)
+- **TTS** — on-device **Supertonic-3** (female `F1` by default), 44.1 kHz, via
+  `POST /api/v1/voice/say`. Legacy Kokoro is still selectable with `IRA_VOICE_ENGINE=kokoro`.
+- **STT (sovereign by default)** — local **faster-whisper** via `POST /api/v1/voice/transcribe`;
+  the audio never leaves the box, and the same audio drives the ECAPA owner gate
+  (`is_owner`). An opt-in **Web Speech** mode (`NEXT_PUBLIC_VOICE_STT=webspeech`) is
+  faster but **sends audio to the browser vendor — not private** (the UI shows a
+  "not private" badge).
+- **Owner-activated** — starts on a **wake word** ("hey ira") or a **double-clap**
+  (`NEXT_PUBLIC_VOICE_ACTIVATION=wakeword|clap`); with biometrics on, only the
+  enrolled owner's voice proceeds. Speaking over IRA (**barge-in**) stops playback.
+- **Engine** — voice uses Ollama `qwen3:8b` (fast) by default, or Hermes when
+  `IRA_USE_HERMES=true`. Both work; direct-Ollama has the lowest latency.
+
+**One command to start everything** (native Windows, no Docker):
+
+```powershell
+pwsh -File .\start-ira.ps1                     # Postgres → Redis → Ollama → Hermes → Supertonic → API → frontend
+pwsh -File .\start-ira.ps1 -InstallAutostart   # also boot the whole stack at logon
+```
+
+Then open the app in Chrome and say **"Hey IRA, what time is it?"** — she replies in
+a female voice, fully in the browser, first audio in ~2 s.
+
+### Transport flag
+
+`NEXT_PUBLIC_VOICE_TRANSPORT=browser` (default) uses the in-browser loop;
+`=livekit` mounts the legacy LiveKit `VoiceOrb` instead. The LiveKit code is untouched.
 
 ⚠️ Known limitations:
-- TTS is English only (Kokoro `af_bella` voice)
-- Indic language responses are synthesised as English phonetics
-- First voice session after restart takes 30–60 s while Whisper loads
+- Indic-language TTS uses Supertonic's language-agnostic fallback (Hindi is native;
+  Tamil/Telugu/Kannada/Malayalam → `na`).
+- First transcribe after a cold start loads the Whisper model (a few seconds);
+  `start-ira.ps1` warms Ollama + Supertonic to cut cold starts.
 
 ### Biometric Enrolment
 
@@ -498,7 +525,9 @@ curl -X POST -H "Authorization: Bearer <jwt>" \
 | `POST` | `/api/v1/multimodal/analyse` | 🔀 Multi-modal fusion (SSE) |
 | `POST` | `/api/v1/architect/propose` | 🏛️ Architect proposal (SSE) |
 | `POST` | `/api/v1/architect/apply` | ✅ Apply diffs + commit |
-| `GET`  | `/api/v1/voice/token` | 🎙️ LiveKit access token |
+| `POST` | `/api/v1/voice/say` | 🔊 On-device Supertonic TTS → WAV (browser voice) |
+| `POST` | `/api/v1/voice/transcribe` | 📝 Sovereign STT + owner gate → `{text, is_owner}` |
+| `GET`  | `/api/v1/voice/token` | 🎙️ LiveKit access token (legacy transport) |
 | `POST` | `/api/v1/voice/enroll` | 🧬 Biometric voice enrolment |
 | `POST` | `/api/v1/calendar/event` | 📅 Create Cal.com booking |
 | `DELETE` | `/api/v1/calendar/event/{id}` | ❌ Cancel booking |
