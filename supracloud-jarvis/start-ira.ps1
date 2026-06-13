@@ -92,12 +92,35 @@ if (-not (Test-Tcp "localhost" $redisPort)) {
 if (Wait-Until { Test-Tcp "localhost" $redisPort } $ReadyTimeoutSec) { Set-Status "redis" "OK" "port $redisPort (Memurai)" }
 else { Set-Status "redis" "FAIL" "not reachable on $redisPort" }
 
-# ── 3. Ollama ─────────────────────────────────────────────────────────────────
+# ── 3. Ollama (serve, then ensure the fast/deep models are pulled and warm) ─────
 $ollamaBase = (Get-EnvOr "OLLAMA_BASE_URL" "http://localhost:11434/v1") -replace "/v1$",""
+$keepAlive  = Get-EnvOr "OLLAMA_KEEP_ALIVE" "30m"
+$fastModel  = Get-EnvOr "OLLAMA_MODEL_FAST" "qwen3:8b"     # voice / low-latency tier
+$deepModel  = Get-EnvOr "OLLAMA_MODEL_DEEP" "qwen3:14b"    # deep / reasoning tier
 if (-not (Test-Http "$ollamaBase/api/tags")) {
+    # KV-cache quant + flash attention so qwen3:8b and qwen3:14b both fit warm on the
+    # 20GB A4500; keep_alive keeps them resident between turns (faster TTFT).
+    [Environment]::SetEnvironmentVariable("OLLAMA_KEEP_ALIVE", $keepAlive, "Process")
+    if (-not (Get-EnvOr "OLLAMA_FLASH_ATTENTION" "")) { [Environment]::SetEnvironmentVariable("OLLAMA_FLASH_ATTENTION", "1", "Process") }
+    if (-not (Get-EnvOr "OLLAMA_KV_CACHE_TYPE" "")) { [Environment]::SetEnvironmentVariable("OLLAMA_KV_CACHE_TYPE", "q8_0", "Process") }
     Start-Process -FilePath "ollama" -ArgumentList "serve" -WindowStyle Hidden -ErrorAction SilentlyContinue
 }
-if (Wait-Until { Test-Http "$ollamaBase/api/tags" } $ReadyTimeoutSec) { Set-Status "ollama" "OK" $ollamaBase }
+if (Wait-Until { Test-Http "$ollamaBase/api/tags" } $ReadyTimeoutSec) {
+    # Pull each model if missing, then warm it (load into VRAM, pinned by keep_alive).
+    $tags = ""
+    try { $tags = (& ollama list 2>$null | Out-String) } catch {}
+    foreach ($m in @($fastModel, $deepModel)) {
+        if ($tags -notmatch [regex]::Escape($m)) {
+            Write-Host "  ollama pull $m ..." -ForegroundColor DarkGray
+            & ollama pull $m 2>$null
+        }
+        try {
+            $body = @{ model = $m; prompt = "ok"; stream = $false; keep_alive = $keepAlive } | ConvertTo-Json
+            Invoke-RestMethod -Method Post -Uri "$ollamaBase/api/generate" -Body $body -ContentType "application/json" -TimeoutSec 120 | Out-Null
+        } catch {}
+    }
+    Set-Status "ollama" "OK" "$ollamaBase ($fastModel + $deepModel warm, keep_alive=$keepAlive)"
+}
 else { Set-Status "ollama" "FAIL" "no response at $ollamaBase" }
 
 # ── 4. Hermes gateway (:8642) ─────────────────────────────────────────────────
