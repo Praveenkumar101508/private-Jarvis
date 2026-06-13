@@ -107,35 +107,37 @@ async def get_livekit_token(_user: str = Depends(require_auth)):
 class SayRequest(BaseModel):
     text: str
     voice: str | None = None   # M1–M5 / F1–F5; defaults to IRA_VOICE (F1, female)
+    lang: str | None = None    # ISO 639-1; ta/te/kn/ml -> native Indic engine, else Supertonic
 
 
 @router.post("/say")
 async def say(req: SayRequest, _user: str = Depends(require_auth)):
-    """Synthesise `text` to a WAV with the on-device Supertonic engine (female F1
-    default) and return it as audio/wav.
+    """Synthesise `text` to a WAV and return it as audio/wav.
 
-    This is the browser-native voice path: the frontend POSTs each reply sentence
-    here and plays the audio locally — no LiveKit, no cloud. `require_auth` bypasses
-    the token in DEV_MODE and enforces it otherwise.
+    Picks the TTS engine by language: Tamil/Telugu/Kannada/Malayalam use the native
+    Indic engine (fail-soft to Supertonic), everything else (incl. Hindi) uses the
+    on-device Supertonic engine (female F1 default). Browser-native path — no LiveKit,
+    no cloud. `require_auth` bypasses the token in DEV_MODE and enforces it otherwise.
     """
     text = (req.text or "").strip()
     if not text:
         raise HTTPException(status_code=400, detail="`text` must not be empty.")
 
     voice = req.voice or os.getenv("IRA_VOICE", "F1")
+    lang = req.lang or "en"
     steps = int(os.getenv("IRA_TTS_STEPS", "6"))   # low = fast time-to-first-audio
 
-    # Lazy import: the Supertonic module pulls numpy/scipy/supertonic and is only
-    # needed on the voice host — keep it out of module import so the route loads
+    # Lazy import: the synth engines pull numpy/scipy/supertonic/torch and are only
+    # needed on the voice host — keep them out of module import so the route loads
     # (and its sibling endpoints test) without those heavy deps.
     try:
-        from voice.tts_supertonic import synthesize_wav
+        from voice.tts_factory import synthesize_say
     except Exception as e:  # noqa: BLE001
-        logger.error(f"Supertonic TTS module unavailable: {e}")
+        logger.error(f"TTS engine module unavailable: {e}")
         raise HTTPException(status_code=503, detail="On-device TTS engine unavailable.")
 
     # Synthesis is CPU/GPU-bound and synchronous — run it off the event loop.
-    wav_bytes = await run_in_threadpool(synthesize_wav, text, voice, "en", steps)
+    wav_bytes = await run_in_threadpool(synthesize_say, text, lang=lang, voice=voice, steps=steps)
     if not wav_bytes:
         raise HTTPException(status_code=503, detail="TTS synthesis failed or produced no audio.")
 
