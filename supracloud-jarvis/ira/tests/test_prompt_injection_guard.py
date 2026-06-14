@@ -181,8 +181,6 @@ def test_approval_gate_requires_confirm_before_action():
     assert executed == []
     # After confirm with correct token: executes
     import asyncio
-    result = asyncio.get_event_loop().run_until_complete(
-        gate.confirm(owner="admin", token=draft.token)
-    )
+    result = asyncio.run(gate.confirm(owner="admin", token=draft.token))
     assert result.executed
     assert executed == ["sent"]
