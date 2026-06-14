@@ -214,6 +214,15 @@ async def require_auth(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
+    # P5.2: canary token check — fires CRITICAL event, then rejects as normal 401
+    from utils.canary import check_canary_token
+    if await check_canary_token(creds.credentials):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
     payload = decode_token(creds.credentials)
 
     if payload.tok == "refresh":

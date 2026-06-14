@@ -55,6 +55,7 @@ from api.middleware.auth import (
     authenticate_user, create_login_tokens, create_token,
     decode_token, revoke_token, bump_token_version,
 )
+from utils.canary import canary_router, check_canary_username
 
 logging.basicConfig(
     level=logging.INFO,
@@ -270,6 +271,14 @@ def create_app() -> FastAPI:
     ):
         from utils.account_lockout import is_locked, record_failure, clear_failures
 
+        # P5.2: ghost-username tripwire — fires CRITICAL event, still returns 401
+        source_ip = request.client.host if request.client else None
+        if await check_canary_username(form.username, source_ip=source_ip):
+            return JSONResponse(
+                status_code=401,
+                content={"detail": "Invalid credentials"},
+            )
+
         # P2.3: check lockout BEFORE running bcrypt (avoid unnecessary CPU)
         if await is_locked(form.username):
             return JSONResponse(
@@ -368,6 +377,8 @@ def create_app() -> FastAPI:
         )
 
     # ── Routers ───────────────────────────────────────────────────────────────
+    # P5.2: honeypot paths FIRST — must be registered before any catch-all 404
+    app.include_router(canary_router)
     app.include_router(health_router)
     app.include_router(chat_router, prefix="/api/v1")
     app.include_router(agents_router, prefix="/api/v1")
