@@ -26,6 +26,7 @@ from api.middleware.auth import require_auth, is_owner
 from channels.guard import guard_outbound
 from memory.store import ensure_conversation
 from utils.llm import stream_tokens
+from utils.security_events import classify_guard_refusal, emit_event
 
 router = APIRouter(prefix="/research", tags=["research"])
 
@@ -70,6 +71,11 @@ async def research(req: ResearchRequest, _user: str = Depends(require_auth)):
 
     # 3B.3: public-only guard — refuse private/internal targets or smuggled content.
     refusal = guard_outbound(url=url, query=query)
+
+    # P5.1: emit security event for every guard block
+    if refusal:
+        ev_type, ev_sev = classify_guard_refusal(refusal, has_url=bool(url))
+        asyncio.create_task(emit_event(ev_type, ev_sev, description=refusal[:500]))
 
     async def gen():
         t0 = time.monotonic()

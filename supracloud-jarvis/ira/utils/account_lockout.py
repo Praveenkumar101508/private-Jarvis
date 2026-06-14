@@ -44,6 +44,17 @@ async def record_failure(username: str) -> tuple[int, bool]:
         # Reset the sliding window on each failure
         await r.expire(fail_key, FAIL_WINDOW_SECONDS)
 
+        # P5.1: emit security event for every auth failure
+        try:
+            from utils.security_events import emit_event
+            await emit_event(
+                "login_failure",
+                "medium",
+                description=f"Login failure for '{username}': attempt {count}/{MAX_FAILURES}",
+            )
+        except Exception as se:
+            logger.debug("emit_event failed (non-critical): %s", se)
+
         if count >= MAX_FAILURES:
             # Escalating lock: 15 min → 30 min → 60 min … capped at 24 h
             lock_ttl = min(
@@ -54,6 +65,19 @@ async def record_failure(username: str) -> tuple[int, bool]:
             logger.warning(
                 "Account locked for %s: %d failures → lock %ds", username, count, lock_ttl
             )
+            # P5.1: emit HIGH event when account is actually locked
+            try:
+                from utils.security_events import emit_event
+                await emit_event(
+                    "account_locked",
+                    "high",
+                    description=(
+                        f"Account '{username}' locked after {count} failures. "
+                        f"Lock duration: {lock_ttl}s."
+                    ),
+                )
+            except Exception as se:
+                logger.debug("emit_event failed (non-critical): %s", se)
             return count, True
 
         return count, False
