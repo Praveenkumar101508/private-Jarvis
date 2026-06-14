@@ -197,10 +197,14 @@ async def require_auth(
 
     Checks (in order):
       1. DEV_MODE bypass (local only)
-      2. JWT signature + expiry
-      3. Token type (refresh tokens may not be used for API access)
-      4. jti revocation list (Redis)
-      5. Per-user token version (revoke-all)
+      2. P5.2: Canary token check (fires CRITICAL then rejects as 401)
+      3. JWT signature + expiry
+      4. Token type (refresh tokens may not be used for API access)
+      5. jti revocation list (Redis)
+      6. Per-user token version (revoke-all)
+
+    Note: IP blocklist check (P6.2) runs in the IPBlockMiddleware in main.py,
+    before this dependency fires, so blocked IPs never reach this function.
     """
     cfg = get_settings()
 

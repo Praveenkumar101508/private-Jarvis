@@ -208,6 +208,45 @@ async def _attempt_remediation(issue_type: str) -> str:
 # The function is intentionally absent — do not re-add.
 
 
+# ── P6.2: Bounded automated security playbooks ────────────────────────────────
+
+async def run_security_playbooks(events: list[dict]) -> None:
+    """Apply bounded automated responses to detected security events.
+
+    Only events from the fixed ALLOWED_ACTIONS allowlist in utils/playbooks
+    are executed. Every action is audit-logged to security_events. No action
+    here is destructive; all are reversible (token rotation, IP block with TTL,
+    log snapshot).
+
+    Mapping:
+      brute_force              → block source IP (1 h)
+      canary_tripwire_hit      → block source IP (24 h — honeypot = instant block)
+      canary_token_used        → block source IP (24 h)
+      canary_username_login    → block source IP (24 h)
+      account_locked           → block source IP if present (1 h)
+      disk_pressure            → snapshot security logs for forensics
+    """
+    from utils.playbooks import run_playbook
+
+    for ev in events:
+        ev_type = ev.get("event_type", "")
+        source_ip = ev.get("source_ip") or None
+
+        if ev_type == "brute_force" and source_ip:
+            await run_playbook("block_ip", ip_address=source_ip, ttl_seconds=3600)
+
+        elif ev_type in ("canary_tripwire_hit", "canary_token_used",
+                         "canary_username_login_attempt") and source_ip:
+            # Honeypot hits and credential attacks get a longer block
+            await run_playbook("block_ip", ip_address=source_ip, ttl_seconds=86400)
+
+        elif ev_type == "account_locked" and source_ip:
+            await run_playbook("block_ip", ip_address=source_ip, ttl_seconds=3600)
+
+        elif ev_type == "disk_pressure":
+            await run_playbook("snapshot_logs", label="disk_pressure_auto")
+
+
 # ── Main healing loop ─────────────────────────────────────────────────────────
 
 async def run_self_healing_check() -> None:

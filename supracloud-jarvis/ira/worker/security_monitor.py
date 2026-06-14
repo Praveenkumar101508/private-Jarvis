@@ -467,7 +467,15 @@ async def run_security_scan() -> None:
     # 4. Write events to DB  (Fix L7: was "3." — duplicate of the check-system-health step)
     new_highs = await _write_security_events(all_events)
 
-    # 5. Alert if significant threats found
+    # 5. P6.2: Apply bounded automated playbooks for critical events
+    if all_events:
+        try:
+            from worker.self_healing import run_security_playbooks
+            await run_security_playbooks(all_events)
+        except Exception as exc:
+            logger.warning("run_security_playbooks failed (non-critical): %s", exc)
+
+    # 6. Alert if significant threats found
     if new_highs > 0:
         threat_summary = "\n".join(
             f"• [{e['severity'].upper()}] {e['description']}"

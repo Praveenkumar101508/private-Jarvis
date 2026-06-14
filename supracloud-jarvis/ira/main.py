@@ -255,6 +255,24 @@ def create_app() -> FastAPI:
         allow_headers=["Authorization", "Content-Type"],
     )
 
+    # P6.2: IP blocklist middleware — runs before all routes; blocked IPs get 403
+    from starlette.middleware.base import BaseHTTPMiddleware
+    from starlette.responses import Response as _Response
+
+    class _IPBlockMiddleware(BaseHTTPMiddleware):
+        async def dispatch(self, request: Request, call_next):
+            if request.client:
+                from utils.playbooks import is_ip_blocked
+                if await is_ip_blocked(request.client.host):
+                    return _Response(
+                        content='{"detail":"Access denied"}',
+                        status_code=403,
+                        media_type="application/json",
+                    )
+            return await call_next(request)
+
+    app.add_middleware(_IPBlockMiddleware)
+
     # ── Auth endpoint (not a router — keeps it simple) ────────────────────────
     # OAuth2PasswordRequestForm is imported at MODULE scope (top of file). Under
     # `from __future__ import annotations` FastAPI resolves the `form:` annotation as a
