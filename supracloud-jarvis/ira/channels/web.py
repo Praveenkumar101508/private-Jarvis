@@ -1,10 +1,15 @@
 """Web reader channel — self-hosted Crawl4AI (clean text from a URL, no SaaS)."""
 from __future__ import annotations
 
+import logging
+
 import httpx
 
 from channels.base import ChannelStatus, ResearchChannel
 from config import get_settings
+from utils.prompt_safety import check_adversarial_content, wrap_external_content
+
+logger = logging.getLogger(__name__)
 
 
 def _extract_text(data) -> str:
@@ -46,9 +51,17 @@ class WebChannel(ResearchChannel):
             async with httpx.AsyncClient(timeout=25) as c:
                 r = await c.post(f"{base}/crawl", json={"urls": [url]})
                 r.raise_for_status()
-                return _extract_text(r.json())
+                raw = _extract_text(r.json())
         except Exception as exc:  # noqa: BLE001 — fail soft
             return f"Web read failed (Crawl4AI): {str(exc)[:120]}"
+
+        # P3.1: audit for injection attempts (log only — wrapping is the real guard)
+        patterns = check_adversarial_content(raw)
+        if patterns:
+            logger.warning("Prompt-injection patterns detected in web content from %s: %s", url, patterns)
+
+        # Wrap in untrusted-data delimiters so the model treats this as DATA
+        return wrap_external_content(raw, source=url)
 
 
 __all__ = ["WebChannel"]

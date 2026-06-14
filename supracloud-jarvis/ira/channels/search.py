@@ -1,10 +1,15 @@
 """SearXNG search channel — self-hosted metasearch (no external SaaS)."""
 from __future__ import annotations
 
+import logging
+
 import httpx
 
 from channels.base import ChannelStatus, ResearchChannel
 from config import get_settings
+from utils.prompt_safety import check_adversarial_content, wrap_external_content
+
+logger = logging.getLogger(__name__)
 
 
 class SearchChannel(ResearchChannel):
@@ -38,10 +43,18 @@ class SearchChannel(ResearchChannel):
             return f"Web search failed (SearXNG): {str(exc)[:120]}"
         if not results:
             return f"No web results found for {query!r}."
-        return "\n\n".join(
+
+        snippets = "\n\n".join(
             f"- {x.get('title', '').strip()}\n  {x.get('url', '')}\n  {x.get('content', '').strip()}"
             for x in results
         )
+
+        # P3.1: audit for injection attempts then wrap as untrusted data
+        patterns = check_adversarial_content(snippets)
+        if patterns:
+            logger.warning("Prompt-injection patterns in search results for %r: %s", query, patterns)
+
+        return wrap_external_content(snippets, source=f"web search: {query}")
 
 
 __all__ = ["SearchChannel"]
