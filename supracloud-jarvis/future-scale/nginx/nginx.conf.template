@@ -53,11 +53,21 @@ http {
 
     access_log /var/log/nginx/access.log json_access;
 
-    # ── Rate Limiting ─────────────────────────────────────────────────────────
+    # ── Slow-loris defense ────────────────────────────────────────────────────
+    # Drop clients that transmit request headers/body too slowly (slow-loris
+    # and slow-POST attacks hold workers open waiting for data that never comes).
+    client_body_timeout   12s;
+    client_header_timeout 12s;
+    # Abort a response if the client stops reading for this long.
+    send_timeout          10s;
+
+    # ── Rate & connection limiting ────────────────────────────────────────────
     # Global: 30 req/s per IP — prevents brute-force and DDoS
     limit_req_zone $binary_remote_addr zone=global:10m rate=30r/s;
     # API: stricter 10 req/s per IP
     limit_req_zone $binary_remote_addr zone=api:10m     rate=10r/s;
+    # Per-IP concurrent connection cap (global) — scanner/DoS protection
+    limit_conn_zone $binary_remote_addr zone=perip:10m;
     # Voice endpoint: 5 concurrent sessions per IP
     limit_conn_zone $binary_remote_addr zone=voice:10m;
 
@@ -144,11 +154,22 @@ http {
         ssl_certificate     /etc/nginx/certs/ira.crt;
         ssl_certificate_key /etc/nginx/certs/ira.key;
 
-        # HSTS — browsers will only use HTTPS for 1 year
-        add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+        # HSTS — browsers remember HTTPS for 1 year across all subdomains.
+        # preload submits this domain to browser HSTS preload lists (hard-codes
+        # HTTPS in the browser binary so the first request is already secure).
+        add_header Strict-Transport-Security "max-age=31536000; includeSubDomains; preload" always;
 
-        # ── Rate limiting on all routes ──────────────────────────────────────
+        # ── Rate & connection limiting ────────────────────────────────────────
+        # Cap concurrent connections per IP before rate-limiting kicks in.
+        limit_conn perip 20;
         limit_req zone=global burst=60 nodelay;
+
+        # ── HTTP method allowlist ─────────────────────────────────────────────
+        # Reject non-standard HTTP verbs (TRACE, CONNECT, arbitrary methods)
+        # with 405. Standard REST verbs and WebSocket upgrade (GET) are allowed.
+        if ($request_method !~ ^(GET|HEAD|POST|PUT|PATCH|DELETE|OPTIONS)$) {
+            return 405;
+        }
 
         # ── WebSocket: LiveKit WebRTC signalling ─────────────────────────────
         location /livekit/ {
@@ -189,6 +210,9 @@ http {
         # ── Auth endpoint ─────────────────────────────────────────────────────
         location /auth/ {
             limit_req zone=api burst=5 nodelay;
+            # Auth payloads are small (username+password+TOTP); reject anything
+            # larger to prevent request-smuggling and buffer-overflow attempts.
+            client_max_body_size 4k;
             proxy_pass http://ira_api;
             proxy_set_header Host              $host;
             proxy_set_header X-Real-IP         $remote_addr;
