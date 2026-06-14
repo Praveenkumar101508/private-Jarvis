@@ -60,7 +60,10 @@ class Settings(BaseSettings):
     ira_secret_key: str
     ira_admin_username: str = "admin"
     ira_admin_password: str
-    # JWT tokens expire after 24 hours
+    # P2.1: short-lived access tokens + long-lived refresh tokens
+    access_token_expire_minutes: int = 30   # 30 min — stolen token expires fast
+    refresh_token_expire_days: int = 7      # 7 day refresh window
+    # Legacy alias kept for backward compat (not used by auth.py since P2.1)
     token_expire_hours: int = 24
 
     # ── Database ──────────────────────────────────────────────────────────────

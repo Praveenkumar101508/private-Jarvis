@@ -51,7 +51,10 @@ from api.routes.audio_gen import router as audio_gen_router
 from api.routes.deep_research import router as deep_research_router
 from api.routes.multimodal import router as multimodal_router
 from api.routes.strategy import router as strategy_router
-from api.middleware.auth import authenticate_user, create_token
+from api.middleware.auth import (
+    authenticate_user, create_login_tokens, create_token,
+    decode_token, revoke_token, bump_token_version,
+)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -258,19 +261,19 @@ def create_app() -> FastAPI:
     # /auth/token route raises TypeError("ForwardRef(...) is not callable") at startup.
     from fastapi import Depends, Form
 
-    @app.post("/auth/token", tags=["auth"], summary="Get a JWT token")
-    @limiter.limit("5/minute")   # Fix P10: app-layer brute-force protection (nginx may be bypassed)
+    @app.post("/auth/token", tags=["auth"], summary="Get JWT access + refresh tokens")
+    @limiter.limit("5/minute")   # app-layer brute-force protection (nginx may be bypassed)
     async def login(
         request: Request,
         form: OAuth2PasswordRequestForm = Depends(OAuth2PasswordRequestForm),
-        totp_code: str | None = Form(None),  # Feat P26: optional TOTP field
+        totp_code: str | None = Form(None),  # optional TOTP field
     ):
         if not authenticate_user(form.username, form.password):
             return JSONResponse(
                 status_code=401,
                 content={"detail": "Invalid credentials"},
             )
-        # Fix P29: only enforce TOTP once it has been verified/enabled
+        # Only enforce TOTP once it has been enrolled and enabled
         from utils.db import acquire as _acquire
         async with _acquire() as conn:
             _totp_row = await conn.fetchrow(
@@ -283,7 +286,66 @@ def create_app() -> FastAPI:
                     status_code=401,
                     content={"detail": "TOTP code required or invalid"},
                 )
-        return create_token(form.username)
+        return await create_login_tokens(form.username)
+
+    from fastapi.security import HTTPBearer as _HTTPBearer, HTTPAuthorizationCredentials as _Creds
+
+    _bearer_dep = _HTTPBearer(auto_error=False)
+
+    @app.post("/auth/logout", tags=["auth"], summary="Revoke the current access token")
+    async def logout(
+        request: Request,
+        creds: _Creds | None = Depends(_bearer_dep),
+    ):
+        """Add the token's jti to the Redis revocation list so it can't be reused."""
+        from datetime import datetime, timezone
+        if creds is None:
+            return JSONResponse(status_code=401, content={"detail": "No token provided"})
+        try:
+            payload = decode_token(creds.credentials)
+            if payload.jti:
+                remaining = int((payload.exp - datetime.now(timezone.utc)).total_seconds())
+                await revoke_token(payload.jti, max(1, remaining))
+        except Exception:
+            pass  # always return success to avoid leaking token validity
+        return {"message": "Logged out"}
+
+    @app.post("/auth/logout/all", tags=["auth"], summary="Revoke ALL tokens for the current user")
+    async def logout_all(
+        request: Request,
+        creds: _Creds | None = Depends(_bearer_dep),
+    ):
+        """Bump the per-user token version, invalidating every existing access token."""
+        if creds is None:
+            return JSONResponse(status_code=401, content={"detail": "No token provided"})
+        payload = decode_token(creds.credentials)
+        await bump_token_version(payload.sub)
+        return {"message": f"All tokens for {payload.sub!r} have been invalidated"}
+
+    @app.post("/auth/refresh", tags=["auth"], summary="Exchange a refresh token for a new access token")
+    @limiter.limit("20/minute")
+    async def refresh_token_endpoint(
+        request: Request,
+        creds: _Creds | None = Depends(_bearer_dep),
+    ):
+        """Verify the refresh token and issue a fresh short-lived access token."""
+        from datetime import datetime, timezone
+        from api.middleware.auth import _is_revoked, _get_token_version, _make_access_token
+        if creds is None:
+            return JSONResponse(status_code=401, content={"detail": "No token provided"})
+        payload = decode_token(creds.credentials)
+        if payload.tok != "refresh":
+            return JSONResponse(status_code=400, content={"detail": "Not a refresh token"})
+        if payload.jti and await _is_revoked(payload.jti):
+            return JSONResponse(status_code=401, content={"detail": "Refresh token revoked"})
+        ver = await _get_token_version(payload.sub)
+        access_token, _, access_exp = _make_access_token(payload.sub, ver=ver)
+        now = datetime.now(timezone.utc)
+        from api.middleware.auth import TokenResponse as _TR
+        return _TR(
+            access_token=access_token,
+            expires_in=max(0, int((access_exp - now).total_seconds())),
+        )
 
     # ── Routers ───────────────────────────────────────────────────────────────
     app.include_router(health_router)
