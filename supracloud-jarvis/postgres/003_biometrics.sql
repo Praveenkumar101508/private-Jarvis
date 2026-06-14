@@ -11,7 +11,7 @@
 
 CREATE TABLE IF NOT EXISTS voice_profiles (
     id          UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    owner_name  TEXT NOT NULL UNIQUE,   -- e.g. 'Praveen Kumar Kamineti'
+    owner_name  TEXT NOT NULL UNIQUE,   -- e.g. 'Your Name Here'
     embedding   TEXT NOT NULL,          -- JSON array of 192 floats (L2-normalised)
     segments    INTEGER DEFAULT 1,      -- How many reference segments were averaged
     created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),

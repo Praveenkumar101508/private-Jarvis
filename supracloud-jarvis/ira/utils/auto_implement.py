@@ -5,7 +5,7 @@ Pipeline:
   1. Extract unified diffs from LLM output
   2. git apply --check   (dry-run — fail loudly if patch won't apply)
   3. git apply            (apply the patch)
-  4. git commit -m "..."  (commit with Praveenkumar as author)
+  4. git commit -m "..."  (commit with the configured git author)
   5. docker compose restart <services>  (only restart affected services)
   6. Return structured result dict
 

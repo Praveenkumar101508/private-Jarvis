@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Optional
 from urllib.parse import urlparse
 
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Fix P19: only load .env when the file is present; in Docker, config comes
@@ -188,7 +189,7 @@ class Settings(BaseSettings):
     hot_lead_budgets: str = "enterprise,250k+,100k-250k"
 
     # ── Owner / Biometric Gate ────────────────────────────────────────────────
-    owner_name: str = "Praveen Kumar Kamineti"
+    owner_name: str = "CHANGE_ME_your_name"
     biometric_threshold: float = 0.75   # Cosine similarity floor for voice auth
 
     # ── Career Tools ──────────────────────────────────────────────────────────
@@ -337,6 +338,20 @@ class Settings(BaseSettings):
     # Kept (not deleted) for backwards compatibility; no longer read by llm.py.
     # Legacy single-model name used by the old dev_mode-only Ollama path.
     dev_model: str = "qwen3:8b"
+
+    @model_validator(mode="after")
+    def _forbid_dev_mode_on_public_domain(self) -> "Settings":
+        """P0.2: DEV_MODE on a public domain is forbidden — it would expose
+        an unauthenticated admin endpoint on the internet.
+        """
+        if self.dev_mode and not self.is_local_domain:
+            raise RuntimeError(
+                f"DEV_MODE is forbidden on a non-local domain "
+                f"(IRA_DOMAIN={self.ira_domain!r}). "
+                "Set DEV_MODE=false or point IRA_DOMAIN at a local address "
+                "(jarvis.local, localhost, 127.0.0.1, ::1, or *.local)."
+            )
+        return self
 
 
 @lru_cache(maxsize=1)

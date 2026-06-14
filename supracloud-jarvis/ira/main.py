@@ -68,7 +68,7 @@ async def _validate_config(cfg) -> None:
     """Warn about common misconfiguration issues at startup."""
     warnings = []
 
-    if cfg.owner_name in ("Swetha Devisetty", "", "Change Me"):
+    if cfg.owner_name in ("CHANGE_ME_your_name", "", "Change Me", "Your Name Here"):
         warnings.append("OWNER_NAME is not set to your real name")
 
     if cfg.ira_admin_password in ("CHANGE_ME_strong_password_here", "admin", "password"):

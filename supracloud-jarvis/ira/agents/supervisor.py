@@ -42,7 +42,7 @@ def is_restricted_domain(query: str) -> bool:
     q = query.lower()
     if any(kw in q for kw in get_restricted_keywords()):
         return True
-    # Owner's first name (e.g. "Praveen") should gate personal data queries
+    # Owner's first name (read from config at call time) gates personal data queries
     owner_first = get_settings().owner_name.split()[0].lower()
     return bool(owner_first and owner_first in q)
 

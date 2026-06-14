@@ -329,7 +329,7 @@ services:
       # Webhooks
       WEBHOOK_SECRET: ${WEBHOOK_SECRET:-}
       # Owner identity (biometric gate)
-      OWNER_NAME: ${OWNER_NAME:-Praveen Kumar}
+      OWNER_NAME: ${OWNER_NAME:-CHANGE_ME_your_name}
       BIOMETRIC_THRESHOLD: ${BIOMETRIC_THRESHOLD:-0.75}
       # Embeddings — default cpu so VRAM is reserved for vLLM; set cuda on multi-GPU cloud nodes
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-BAAI/bge-large-en-v1.5}
@@ -447,7 +447,7 @@ services:
       IRA_SECRET_KEY: ${IRA_SECRET_KEY}
       IRA_ADMIN_PASSWORD: ${IRA_ADMIN_PASSWORD}
       # Owner identity (biometric gate)
-      OWNER_NAME: ${OWNER_NAME:-Praveen Kumar}
+      OWNER_NAME: ${OWNER_NAME:-CHANGE_ME_your_name}
       BIOMETRIC_THRESHOLD: ${BIOMETRIC_THRESHOLD:-0.75}
       # Scheduler config
       BRIEFING_HOUR_UTC: ${BRIEFING_HOUR_UTC:-8}
