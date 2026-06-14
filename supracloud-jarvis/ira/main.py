@@ -268,11 +268,27 @@ def create_app() -> FastAPI:
         form: OAuth2PasswordRequestForm = Depends(OAuth2PasswordRequestForm),
         totp_code: str | None = Form(None),  # optional TOTP field
     ):
+        from utils.account_lockout import is_locked, record_failure, clear_failures
+
+        # P2.3: check lockout BEFORE running bcrypt (avoid unnecessary CPU)
+        if await is_locked(form.username):
+            return JSONResponse(
+                status_code=429,
+                content={"detail": "Account temporarily locked due to too many failed attempts. Try again later."},
+            )
+
         if not authenticate_user(form.username, form.password):
+            _count, _locked = await record_failure(form.username)
+            if _locked:
+                return JSONResponse(
+                    status_code=429,
+                    content={"detail": "Account locked after too many failed attempts. Try again in 15 minutes."},
+                )
             return JSONResponse(
                 status_code=401,
                 content={"detail": "Invalid credentials"},
             )
+
         # Only enforce TOTP once it has been enrolled and enabled
         from utils.db import acquire as _acquire
         async with _acquire() as conn:
@@ -282,10 +298,14 @@ def create_app() -> FastAPI:
         if _totp_row:
             import pyotp as _pyotp
             if not totp_code or not _pyotp.TOTP(_totp_row["secret"]).verify(totp_code, valid_window=1):
+                await record_failure(form.username)
                 return JSONResponse(
                     status_code=401,
                     content={"detail": "TOTP code required or invalid"},
                 )
+
+        # Successful login — clear the failure counter
+        await clear_failures(form.username)
         return await create_login_tokens(form.username)
 
     from fastapi.security import HTTPBearer as _HTTPBearer, HTTPAuthorizationCredentials as _Creds
