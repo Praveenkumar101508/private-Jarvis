@@ -1,0 +1,45 @@
+# Lightweight test dependencies — no torch/speechbrain/playwright.
+# Used by CI instead of the full requirements.txt to keep install time under 3 minutes.
+
+# Test runner
+pytest==8.3.3
+pytest-asyncio==0.24.0
+
+# Web framework (needed for route tests + middleware imports)
+fastapi==0.115.5
+httpx==0.27.2
+python-multipart==0.0.12
+sse-starlette==2.1.3
+
+# Config + validation
+pydantic==2.9.2
+pydantic-settings==2.6.1
+
+# LLM/Agent framework — supervisor.py imports IRAState which requires langgraph
+# openai is imported at module level in utils/llm.py which supervisor imports
+openai==1.58.1                  # MUST match requirements.txt (langchain-openai 0.2.14 needs >=1.58.1); keeps `-r requirements.txt -r requirements-test.txt` conflict-free
+langgraph==0.2.73
+langchain-core==0.3.28
+
+# Numeric / cache deps imported by modules the tests load (e.g. test_cutover_flag.py)
+# Without these, pytest fails at COLLECTION before any test runs.
+numpy==1.26.4
+redis==5.2.0
+
+# YAML routing config
+pyyaml==6.0.2
+
+# OpenTelemetry (telemetry.py unit tests)
+opentelemetry-api==1.27.0
+opentelemetry-sdk==1.27.0
+opentelemetry-exporter-otlp-proto-http==1.27.0
+opentelemetry-instrumentation-fastapi==0.48b0
+
+# Auth (middleware imports)
+python-jose[cryptography]==3.4.0
+passlib[bcrypt]==1.7.4
+email-validator>=2.0,<3          # Required by pydantic.EmailStr (used in webhooks.py)
+
+# Utilities
+python-dateutil==2.9.0
+tenacity==9.0.0

@@ -1,0 +1,34 @@
+# ── PyTorch (CPU-only — GPU VRAM reserved for vLLM) ────────────────────────────
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.4.1+cpu
+
+# ── Biometric speaker verification ─────────────────────────────────────────────
+speechbrain==1.0.0                      # ECAPA-TDNN speaker embeddings
+
+# ── LiveKit Agents + Voice pipeline ────────────────────────────────────────────
+# LiveKit Agents 1.x. The invalid 0.11.7 pin did not exist on PyPI. In 1.x the 0.x
+# `[silero]` extra is gone — Silero VAD ships as a separate plugin package
+# (livekit-plugins-silero), pinned to the same minor as the core SDK.
+livekit-agents==1.5.17                   # Core agent SDK (1.x)
+livekit-plugins-silero==1.5.17           # Silero VAD plugin (replaces the 0.x [silero] extra)
+livekit==1.1.8                           # LiveKit Python SDK (pinned by livekit-agents 1.5.17)
+
+# ── STT ────────────────────────────────────────────────────────────────────────
+faster-whisper==1.0.3                   # Multilingual STT (Whisper large-v3)
+pyaudio==0.2.14                         # Audio I/O
+
+# ── TTS ────────────────────────────────────────────────────────────────────────
+kokoro-onnx==0.4.2                      # Kokoro-82M (ONNX, CPU-optimised)
+soundfile==0.12.1                       # Audio file I/O
+scipy==1.14.1                           # Resampling (24kHz → 48kHz)
+
+# ── Language detection ─────────────────────────────────────────────────────────
+langdetect==1.0.9                       # Fast language identification
+
+# ── Utilities ─────────────────────────────────────────────────────────────────
+numpy==1.26.4
+httpx==0.27.2                           # HTTP client to call ira-api
+python-dotenv==1.0.1
+
+# ── Phase 6: Browser Automation (used via career/digital tools in ira-api) ─────
+playwright==1.47.0

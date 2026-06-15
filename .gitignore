@@ -1,0 +1,42 @@
+# Environment — plaintext secrets NEVER committed
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# Encrypted secrets — safe to commit (.env.enc should NOT appear here)
+
+# TLS / credentials
+nginx/certs/
+*.key
+*.pem
+*.p12
+*.sqlite
+.cloudflared/
+
+# Fix P6/P11: generated & personal resume artifacts
+# Use **/ so these match under the nested supracloud-jarvis/ project root too
+# (a bare "ira/..." pattern is anchored to this .gitignore's dir and would miss it).
+**/tailored_resume.md
+**/tailored_resumes/
+**/base_resume.md
+
+# Dependencies
+node_modules/
+__pycache__/
+*.pyc
+*.tsbuildinfo
+
+# Build outputs
+dist/
+build/
+.next/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp

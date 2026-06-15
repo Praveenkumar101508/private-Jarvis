@@ -1,0 +1,648 @@
+# =============================================================================
+# SupraCloud IRA — docker-compose.yml  (v1.0.0 — Maximum Power 2026 Edition)
+#
+# ── CURRENT (Shadow PC / RTX A4500 20GB VRAM) ────────────────────────────────
+#   Fast Path      : Qwen3-8B AWQ    — gpu_memory_utilization=0.35 (~7GB)
+#   Deep Path      : Qwen3-14B AWQ   — gpu_memory_utilization=0.60 (~12GB)
+#   Combined       : 0.95 × 20GB = 19GB — leaves 1GB for OS/driver overhead
+#
+# ── CLOUD UPGRADE (8×H100 80GB — override with docker-compose.cloud.yml) ─────
+#   Fast Path      : Qwen3-30B-A3B   (MoE, 3B active params — blazing fast)
+#   Deep Path      : Qwen3-72B       (dense — beats GPT-4o on most benchmarks)
+#   Reasoning Path : DeepSeek-R1 671B or Qwen3-235B-A22B (world-class reasoning)
+#   Vision         : Qwen3-VL-72B    (beats Gemini 1.5 Pro on vision evals)
+#
+#   Run: docker compose -f docker-compose.yml -f docker-compose.cloud.yml up -d
+#
+# ── Network topology ──────────────────────────────────────────────────────────
+#   ira-external  → nginx, livekit (internet-facing)
+#   ira-internal  → all services (isolated, no external routing)
+#   ira-api       → both networks (proxied by nginx, calls internal services)
+# =============================================================================
+
+name: supracloud-ira
+
+# ── Reusable fragments ────────────────────────────────────────────────────────
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "20m"
+    max-file: "5"
+
+x-vllm-common: &vllm-common
+  # Fix P21: pin vLLM to a specific stable tag — :latest breaks when CLI flags change.
+  # v0.6.3 (chosen 2026-05-28) is the last stable release compatible with
+  # --quantization awq_marlin and --served-model-name flags used in this compose.
+  # To upgrade: test on a dev box first, then update this tag.
+  image: vllm/vllm-openai:v0.6.3
+  restart: unless-stopped
+  runtime: nvidia
+  # Fix #104: set ulimits for LLM workloads.
+  # memlock: -1 lets the process lock model weights into RAM/VRAM (prevents swapping).
+  # nofile: 65536 avoids "too many open files" under high concurrency.
+  # Without these, CUDA can fail to allocate memory or tokenizer workers hit fd limits.
+  ulimits:
+    memlock:
+      soft: -1
+      hard: -1
+    nofile:
+      soft: 65536
+      hard: 65536
+  environment:
+    NVIDIA_VISIBLE_DEVICES: "0"
+    CUDA_VISIBLE_DEVICES: "0"
+    # Spawn avoids CUDA fork issues with multiple workers
+    VLLM_WORKER_MULTIPROC_METHOD: spawn
+    # Marlin kernels are faster than standard AWQ on RTX/Ampere
+    VLLM_USE_MARLIN: "1"
+    HF_TOKEN: ${HF_TOKEN:-}
+    # Disable telemetry
+    DO_NOT_TRACK: "1"
+  volumes:
+    # Shared HF model cache — models download once, used by both instances
+    - hf_cache:/root/.cache/huggingface
+  deploy:
+    resources:
+      reservations:
+        devices:
+          # Fix #102: use device_ids instead of count so both vllm containers
+          # explicitly share GPU 0.  count: 1 can cause Docker to treat GPUs as
+          # exclusive allocations, preventing the second container from starting
+          # on a single-GPU machine.
+          - driver: nvidia
+            device_ids: ["0"]
+            capabilities: [gpu]
+  logging: *default-logging
+  networks:
+    - ira-internal
+
+# ─────────────────────────────────────────────────────────────────────────────
+services:
+
+  # ── PostgreSQL 16 + pgvector ─────────────────────────────────────────────
+  # Stores: conversation history, long-term memory, vector embeddings (RAG),
+  #         security events, business events, registered agents.
+  postgres:
+    image: pgvector/pgvector:0.7.4-pg16  # Fix P27: pin exact version — pg16 is a floating tag
+    container_name: ira-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-jarvis}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-jarvis_db}
+      # Tune for an AI workload: lots of reads, moderate writes
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=en_US.UTF-8"
+    command: >
+      postgres
+        -c shared_buffers=512MB
+        -c effective_cache_size=1GB
+        -c maintenance_work_mem=128MB
+        -c checkpoint_completion_target=0.9
+        -c wal_buffers=16MB
+        -c max_connections=100
+        -c work_mem=16MB
+        -c random_page_cost=1.1
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./postgres/init.sql:/docker-entrypoint-initdb.d/01_init.sql:ro
+      - ./postgres/002_phase4.sql:/docker-entrypoint-initdb.d/02_phase4.sql:ro
+      - ./postgres/003_biometrics.sql:/docker-entrypoint-initdb.d/03_biometrics.sql:ro
+      - ./postgres/004_memory_isolation_hnsw.sql:/docker-entrypoint-initdb.d/04_memory_hnsw.sql:ro  # Fix P1: wire migration 004 (user_id + HNSW) into postgres init
+    ports:
+      # Bind to localhost only — never expose DB directly to the internet
+      - "127.0.0.1:5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-jarvis} -d ${POSTGRES_DB:-jarvis_db}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    logging: *default-logging
+    networks:
+      - ira-internal
+
+  # ── Redis 7 ───────────────────────────────────────────────────────────────
+  # Stores: session cache, response cache, rate-limit counters,
+  #         pub/sub for proactive agent events, task queues.
+  redis:
+    image: redis:7.4-alpine
+    container_name: ira-redis
+    restart: unless-stopped
+    command: >
+      redis-server
+        --requirepass ${REDIS_PASSWORD:?Set REDIS_PASSWORD in .env}
+        --maxmemory 2gb
+        --maxmemory-policy allkeys-lru
+        --save 60 1000
+        --save 300 100
+        --appendonly yes
+        --appendfsync everysec
+        --tcp-backlog 511
+        --loglevel notice
+    volumes:
+      - redis_data:/data
+    ports:
+      - "127.0.0.1:6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "--no-auth-warning", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    logging: *default-logging
+    networks:
+      - ira-internal
+
+  # ── vLLM Fast Path ────────────────────────────────────────────────────────
+  # Model  : Qwen3-8B Instruct (AWQ-INT4, Marlin kernels)
+  #          Beats Llama 3.1 8B on every benchmark (coding, math, reasoning).
+  #          2026 best small model for conversational AI.
+  # Purpose: 90%+ of conversational queries, agent supervisor decisions
+  # Target : <2s TTFT for simple queries, <5s end-to-end
+  # VRAM   : ~7GB (gpu_memory_utilization=0.35 × 20GB)
+  # ──────────────────────────────────────────────────────────────────────────
+  # CLOUD UPGRADE (2×H100 80GB):
+  #   FAST_MODEL=Qwen/Qwen3-30B-A3B  (MoE — 30B params, only 3B active)
+  #   --gpu-memory-utilization 0.90 --tensor-parallel-size 2
+  vllm-fast:
+    <<: *vllm-common
+    container_name: ira-vllm-fast
+    volumes:
+      - hf_cache:/root/.cache/huggingface
+      - vllm_fast_cache:/tmp/vllm_fast
+    command:
+      - "--model"
+      - "${FAST_MODEL:-Qwen/Qwen3-8B-AWQ}"
+      - "--served-model-name"
+      - "qwen3-fast"
+      - "--quantization"
+      - "awq_marlin"
+      - "--gpu-memory-utilization"
+      - "0.35"
+      - "--max-model-len"
+      - "32768"            # Qwen3 native 32k context window
+      - "--max-num-seqs"
+      - "32"               # 32 concurrent requests
+      - "--max-num-batched-tokens"
+      - "8192"
+      - "--enable-prefix-caching" # Cache common system prompt prefixes
+      - "--disable-log-requests"
+      - "--port"
+      - "8001"
+      - "--host"
+      - "0.0.0.0"
+      - "--api-key"
+      - "${VLLM_API_KEY:?Set VLLM_API_KEY in .env}"
+      - "--dtype"
+      - "auto"
+      - "--tensor-parallel-size"
+      - "1"
+    ports:
+      - "127.0.0.1:8001:8001"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8001/health || exit 1"]
+      interval: 30s
+      timeout: 15s
+      retries: 15
+      start_period: 180s   # Model download + load on first run
+
+  # ── vLLM Deep Path ────────────────────────────────────────────────────────
+  # Model  : Qwen3-14B Instruct (AWQ-INT4, Marlin kernels)
+  #          Best open-source 14B model in 2026. Excellent at code, math,
+  #          security analysis, long document understanding.
+  # Purpose: Complex reasoning, code generation, multi-step planning,
+  #          Security Guardian, Meta Agent Creator, Engineer Mode
+  # Target : <8s end-to-end for complex tasks
+  # VRAM   : ~12GB (gpu_memory_utilization=0.60 × 20GB)
+  # Note   : Starts AFTER vllm-fast is healthy to avoid VRAM collision
+  # ──────────────────────────────────────────────────────────────────────────
+  # CLOUD UPGRADE (4×H100 80GB):
+  #   DEEP_MODEL=Qwen/Qwen3-72B  (dense 72B — beats GPT-4o on most tasks)
+  #   --gpu-memory-utilization 0.92 --tensor-parallel-size 4
+  # ALTERNATIVE (stronger reasoning):
+  #   DEEP_MODEL=deepseek-ai/DeepSeek-R1-Distill-Qwen-32B
+  vllm-deep:
+    <<: *vllm-common
+    container_name: ira-vllm-deep
+    volumes:
+      - hf_cache:/root/.cache/huggingface
+      - vllm_deep_cache:/tmp/vllm_deep
+    command:
+      - "--model"
+      - "${DEEP_MODEL:-Qwen/Qwen3-14B-AWQ}"
+      - "--served-model-name"
+      - "qwen3-deep"
+      - "--quantization"
+      - "awq_marlin"
+      - "--gpu-memory-utilization"
+      - "0.60"
+      - "--max-model-len"
+      - "32768"            # 32k context for deep reasoning and long docs
+      - "--max-num-seqs"
+      - "8"                # Fewer concurrent — deep tasks are heavyweight
+      - "--max-num-batched-tokens"
+      - "8192"
+      - "--enable-prefix-caching"
+      - "--disable-log-requests"
+      - "--port"
+      - "8002"
+      - "--host"
+      - "0.0.0.0"
+      - "--api-key"
+      - "${VLLM_API_KEY:?Set VLLM_API_KEY in .env}"
+      - "--dtype"
+      - "auto"
+      - "--tensor-parallel-size"
+      - "1"
+    ports:
+      - "127.0.0.1:8002:8002"
+    depends_on:
+      vllm-fast:
+        condition: service_healthy  # Wait for fast model to finish loading
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8002/health || exit 1"]
+      interval: 30s
+      timeout: 15s
+      retries: 20
+      start_period: 240s   # Loads after fast model — allow extra time
+
+  # ── LiveKit Server (Voice / WebRTC) ───────────────────────────────────────
+  # Handles: Real-time audio streaming for voice interface
+  # Works with: Faster-Whisper (STT) + Kokoro TTS (Phase 3)
+  livekit:
+    image: livekit/livekit-server:v1.7
+    container_name: ira-livekit
+    restart: unless-stopped
+    command: --config /etc/livekit/livekit.yaml
+    volumes:
+      - ./livekit/livekit.yaml:/etc/livekit/livekit.yaml:ro
+    environment:
+      LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:?Set LIVEKIT_API_KEY in .env}
+      LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:?Set LIVEKIT_API_SECRET in .env}
+      LIVEKIT_KEYS: "${LIVEKIT_API_KEY}: ${LIVEKIT_API_SECRET}"
+    ports:
+      - "7880:7880"       # HTTP/WebSocket (API + signalling)
+      - "7881:7881"       # RTC over TCP (fallback for UDP-blocked networks)
+      - "7882:7882/udp"   # RTC over UDP (primary, lowest latency)
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:7880/ || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 15s
+    logging: *default-logging
+    networks:
+      - ira-internal
+      - ira-external
+
+  # ── IRA API (FastAPI + LangGraph) ────────────────────────────────────────
+  # The intelligence layer — routes requests through the multi-agent graph.
+  # Runs on CPU for API/orchestration; LLM inference is offloaded to vLLM.
+  ira-api:
+    build:
+      context: ./ira
+      dockerfile: Dockerfile
+    container_name: ira-api
+    restart: unless-stopped
+    environment:
+      # Database
+      POSTGRES_USER: ${POSTGRES_USER:-jarvis}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-jarvis_db}
+      POSTGRES_HOST: postgres
+      # Redis
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      REDIS_HOST: redis
+      # vLLM
+      VLLM_API_KEY: ${VLLM_API_KEY}
+      VLLM_FAST_URL: http://vllm-fast:8001/v1
+      VLLM_DEEP_URL: http://vllm-deep:8002/v1
+      # Auth
+      IRA_SECRET_KEY: ${IRA_SECRET_KEY}
+      IRA_ADMIN_USERNAME: ${IRA_ADMIN_USERNAME:-admin}
+      IRA_ADMIN_PASSWORD: ${IRA_ADMIN_PASSWORD}
+      IRA_DOMAIN: ${IRA_DOMAIN:-ira.local}
+      # LiveKit (for voice token generation)
+      LIVEKIT_API_KEY: ${LIVEKIT_API_KEY}
+      LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET}
+      LIVEKIT_ROOM_NAME: ${LIVEKIT_ROOM_NAME:-ira-voice}
+      # Webhooks
+      WEBHOOK_SECRET: ${WEBHOOK_SECRET:-}
+      # Owner identity (biometric gate)
+      OWNER_NAME: ${OWNER_NAME:-CHANGE_ME_your_name}
+      BIOMETRIC_THRESHOLD: ${BIOMETRIC_THRESHOLD:-0.75}
+      # Embeddings — default cpu so VRAM is reserved for vLLM; set cuda on multi-GPU cloud nodes
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-BAAI/bge-large-en-v1.5}
+      EMBEDDING_DEVICE: ${EMBEDDING_DEVICE:-cpu}
+      # Image generation
+      IMAGE_GEN_URL: ${IMAGE_GEN_URL:-}
+      IMAGE_GEN_PROVIDER: ${IMAGE_GEN_PROVIDER:-replicate}
+      REPLICATE_API_TOKEN: ${REPLICATE_API_TOKEN:-}
+      # Real-time search
+      TWITTER_BEARER_TOKEN: ${TWITTER_BEARER_TOKEN:-}
+      X_FALLBACK_API_URL: ${X_FALLBACK_API_URL:-https://api.twitterapi.io}
+      X_FALLBACK_API_KEY: ${X_FALLBACK_API_KEY:-}
+      # Fix #103: use VLLM_FAST_MODEL / VLLM_DEEP_MODEL to match the env var
+      # names read by config.py (pydantic fields vllm_fast_model / vllm_deep_model).
+      # The old FAST_MODEL_NAME / DEEP_MODEL_NAME vars were undefined in .env.example.
+      VLLM_FAST_MODEL: ${VLLM_FAST_MODEL:-qwen3-fast}
+      VLLM_DEEP_MODEL: ${VLLM_DEEP_MODEL:-qwen3-deep}
+      # Optional reasoning tier (Think Mode / DeepSearch — falls back to deep)
+      VLLM_REASONING_URL: ${VLLM_REASONING_URL:-}
+      VLLM_REASONING_MODEL: ${VLLM_REASONING_MODEL:-qwen3-reasoning}
+      # Optional vision model (image analysis — falls back to fast text model)
+      VLLM_VISION_URL: ${VLLM_VISION_URL:-}
+      VLLM_VISION_MODEL: ${VLLM_VISION_MODEL:-qwen3-vl}
+      # Dev mode (Shadow PC / local Ollama) — NEVER set in production
+      DEV_MODE: ${DEV_MODE:-false}
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434/v1}
+      DEV_MODEL: ${DEV_MODEL:-qwen3:8b}
+      # Career / code tools
+      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+      IRA_GIT_AUTHOR_EMAIL: ${IRA_GIT_AUTHOR_EMAIL:-}
+      APIFY_API_TOKEN: ${APIFY_API_TOKEN:-}
+      APIFY_LINKEDIN_ACTOR: ${APIFY_LINKEDIN_ACTOR:-BHzefUZlZRKWxkTck}
+      APIFY_INDEED_ACTOR: ${APIFY_INDEED_ACTOR:-misceres/indeed-scraper}
+      APIFY_FALLBACK_ACTOR: ${APIFY_FALLBACK_ACTOR:-apify/web-scraper}
+      # Notifications
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_TO: ${SMTP_TO:-}
+      # Calendar integrations
+      CALCOM_API_KEY: ${CALCOM_API_KEY:-}
+      CALCOM_API_URL: ${CALCOM_API_URL:-https://api.cal.com}
+      GOOGLE_CALENDAR_ID: ${GOOGLE_CALENDAR_ID:-}
+      GOOGLE_SERVICE_ACCOUNT_JSON: ${GOOGLE_SERVICE_ACCOUNT_JSON:-}
+      # Scheduler / briefing
+      BRIEFING_HOUR_UTC: ${BRIEFING_HOUR_UTC:-8}
+      BRIEFING_TIMEZONE: ${BRIEFING_TIMEZONE:-UTC}
+      # Backup (API endpoint reads from volume, config.py needs the path)
+      BACKUP_DIR: /backups
+      BACKUP_KEEP: ${BACKUP_KEEP:-7}
+      # OpenTelemetry (leave blank to disable)
+      OTLP_ENDPOINT: ${OTLP_ENDPOINT:-}
+      OTLP_HEADERS: ${OTLP_HEADERS:-}
+    volumes:
+      # HF cache shared with vLLM — BGE model downloads here
+      - hf_cache:/home/jarvis/.cache/huggingface
+      # Backup volume — API serves backup downloads from here
+      - backup_data:/backups:ro
+      # Feat P25: persistent user-uploaded files (read-write)
+      - files_data:/data/files
+    ports:
+      - "127.0.0.1:8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      vllm-fast:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8000/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      # Fix #105: 60s was too tight — BGE model warm-up + LangGraph checkpointer
+      # init can take 90s+ on first run or slow disks. 120s gives safe headroom.
+      start_period: 120s
+    logging: *default-logging
+    networks:
+      - ira-internal
+      - ira-external
+
+  # ── IRA Worker (Proactive Intelligence — APScheduler) ────────────────────
+  # Phase 4: Background intelligence — briefings, monitors, reminders, alerts
+  #
+  # Jobs:
+  #   08:00 UTC daily  — Morning briefing (business + security + calendar + tasks)
+  #   20:00 UTC daily  — Evening summary
+  #   Every 60s        — Security scan (nginx logs + system health)
+  #   Every 5 min      — Business scan (new leads, bookings)
+  #   Every 15 min     — Reminder delivery check
+  ira-worker:
+    build:
+      context: ./ira
+      dockerfile: Dockerfile.worker
+    container_name: ira-worker
+    restart: unless-stopped
+    environment:
+      # Database
+      POSTGRES_USER: ${POSTGRES_USER:-jarvis}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-jarvis_db}
+      POSTGRES_HOST: postgres
+      # Redis
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      REDIS_HOST: redis
+      # vLLM (for briefing generation)
+      VLLM_API_KEY: ${VLLM_API_KEY}
+      VLLM_FAST_URL: http://vllm-fast:8001/v1
+      VLLM_DEEP_URL: http://vllm-deep:8002/v1
+      # Auth
+      IRA_SECRET_KEY: ${IRA_SECRET_KEY}
+      IRA_ADMIN_PASSWORD: ${IRA_ADMIN_PASSWORD}
+      # Owner identity (biometric gate)
+      OWNER_NAME: ${OWNER_NAME:-CHANGE_ME_your_name}
+      BIOMETRIC_THRESHOLD: ${BIOMETRIC_THRESHOLD:-0.75}
+      # Scheduler config
+      BRIEFING_HOUR_UTC: ${BRIEFING_HOUR_UTC:-8}
+      # Notifications
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_TO: ${SMTP_TO:-}
+      # Calendar
+      CALCOM_API_KEY: ${CALCOM_API_KEY:-}
+      CALCOM_API_URL: ${CALCOM_API_URL:-https://api.cal.com}
+      # Security monitor
+      NGINX_LOG_PATH: /var/log/nginx/access.log
+      # Backup configuration
+      BACKUP_DIR: /backups
+      BACKUP_KEEP: ${BACKUP_KEEP:-7}
+      # Image generation
+      IMAGE_GEN_URL: ${IMAGE_GEN_URL:-}
+      IMAGE_GEN_PROVIDER: ${IMAGE_GEN_PROVIDER:-replicate}
+      REPLICATE_API_TOKEN: ${REPLICATE_API_TOKEN:-}
+      # Real-time search
+      TWITTER_BEARER_TOKEN: ${TWITTER_BEARER_TOKEN:-}
+      X_FALLBACK_API_URL: ${X_FALLBACK_API_URL:-https://api.twitterapi.io}
+      X_FALLBACK_API_KEY: ${X_FALLBACK_API_KEY:-}
+    volumes:
+      # Read nginx logs for security analysis
+      - nginx_logs:/var/log/nginx:ro
+      # SSH auth log for intrusion detection (read-only bind mount from host)
+      - /var/log/auth.log:/var/log/auth.log:ro
+      # Backup storage (pg_dump writes here; API serves downloads from here)
+      - backup_data:/backups
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      ira-api:
+        condition: service_healthy
+    healthcheck:
+      # Verifies the APScheduler loop is alive: the self-healing job (every 60 s) touches
+      # /tmp/ira_worker_tick.  If that file is missing or >120 s old, the scheduler is dead.
+      test: ["CMD-SHELL", "python3 -c \"import os,sys,time; p='/tmp/ira_worker_tick'; sys.exit(0 if os.path.exists(p) and time.time()-os.path.getmtime(p)<120 else 1)\""]
+      interval: 60s
+      timeout: 15s
+      retries: 5
+      start_period: 90s
+    logging: *default-logging
+    networks:
+      - ira-internal
+      - ira-external  # Fix #43: worker needs internet for Telegram, Apify, GitHub push notifications
+
+  # ── IRA Voice Agent (LiveKit + Faster-Whisper STT + Kokoro TTS) ──────────
+  # Phase 3: Full voice pipeline — multilingual, warm Indian female voice
+  #
+  # STT: Faster-Whisper large-v3 on CPU (~0.8–1.5s latency for short utterances)
+  # TTS: Kokoro af_bella (24kHz → 48kHz, ~200–400ms synthesis latency)
+  # VAD: Silero (real-time voice activity detection)
+  # Languages: English + Hindi + Tamil + Telugu + Kannada + Malayalam + DE/FR/IT + more
+  ira-voice:
+    build:
+      context: ./ira
+      dockerfile: voice/Dockerfile
+    container_name: ira-voice
+    restart: unless-stopped
+    environment:
+      # LiveKit connection
+      LIVEKIT_URL: ws://livekit:7880
+      LIVEKIT_API_KEY: ${LIVEKIT_API_KEY}
+      LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET}
+      # IRA API — voice agent calls ira-api to process transcripts
+      IRA_API_URL: http://ira-api:8000
+      IRA_API_TOKEN: ${IRA_VOICE_API_TOKEN:-}
+      # Model selection
+      WHISPER_MODEL: ${WHISPER_MODEL:-large-v3}
+      # HuggingFace cache (shared)
+      HF_HOME: /home/ira/.cache/huggingface
+    volumes:
+      - hf_cache:/home/ira/.cache/huggingface
+      - kokoro_cache:/home/ira/.cache/kokoro
+      - whisper_cache:/home/ira/.cache/whisper
+    depends_on:
+      livekit:
+        condition: service_healthy
+      ira-api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "python -c 'import faster_whisper, kokoro_onnx; print(\"ok\")' || exit 1"]
+      interval: 60s
+      timeout: 30s
+      retries: 5
+      start_period: 120s
+    logging: *default-logging
+    networks:
+      - ira-internal
+      - ira-external  # Fix #43: voice needs internet for Whisper/Kokoro model downloads and LiveKit STUN
+
+  # ── IRA Frontend (Next.js) ────────────────────────────────────────────────
+  # Chat UI, voice button, notification feed, system status bar.
+  # Available at https://<IRA_DOMAIN>/ once nginx + frontend are healthy.
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: ira-frontend
+    restart: unless-stopped
+    environment:
+      NEXT_PUBLIC_API_URL: https://${IRA_DOMAIN:-ira.local}
+      NEXT_PUBLIC_WS_URL: wss://${IRA_DOMAIN:-ira.local}
+      # If LIVEKIT_PUBLIC_URL is not set, default to the nginx-proxied LiveKit path.
+      # ws://localhost:7880 would resolve to the USER's machine in production browsers.
+      NEXT_PUBLIC_LIVEKIT_URL: ${LIVEKIT_PUBLIC_URL:-wss://${IRA_DOMAIN:-ira.local}/livekit}
+      IRA_API_INTERNAL_URL: http://ira-api:8000
+    depends_on:
+      ira-api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/ || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    logging: *default-logging
+    networks:
+      - ira-internal
+      - ira-external
+
+  # ── Nginx (TLS Termination + Reverse Proxy) ───────────────────────────────
+  # Routes: HTTPS → ira-api
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: ira-nginx
+    restart: unless-stopped
+    entrypoint: ["/bin/sh", "/etc/nginx/docker-entrypoint.sh"]
+    environment:
+      IRA_DOMAIN: ${IRA_DOMAIN:-ira.local}
+    volumes:
+      - ./nginx/nginx.conf.template:/etc/nginx/nginx.conf.template:ro
+      - ./nginx/docker-entrypoint.sh:/etc/nginx/docker-entrypoint.sh:ro
+      - ./nginx/certs:/etc/nginx/certs:ro
+      - nginx_logs:/var/log/nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    depends_on:
+      - livekit
+      - ira-api
+      - frontend
+    healthcheck:
+      test: ["CMD-SHELL", "nginx -t && wget -qO- http://localhost/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 10s
+    logging: *default-logging
+    networks:
+      - ira-internal
+      - ira-external
+
+# ── Named Volumes ─────────────────────────────────────────────────────────────
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  hf_cache:           # Shared HuggingFace model cache (models download once)
+    driver: local
+  vllm_fast_cache:
+    driver: local
+  kokoro_cache:
+    driver: local
+  whisper_cache:
+    driver: local
+  vllm_deep_cache:
+    driver: local
+  nginx_logs:
+    driver: local
+  backup_data:          # Database backups (pg_dump → .sql.gz, kept 7 days)
+    driver: local
+  files_data:           # Feat P25: persistent user-uploaded files across sessions
+    driver: local
+
+# ── Networks ──────────────────────────────────────────────────────────────────
+networks:
+  ira-internal:
+    driver: bridge
+    internal: true    # Strictly isolated — cannot reach internet directly
+    ipam:
+      config:
+        - subnet: 172.20.0.0/24
+
+  ira-external:
+    driver: bridge    # Internet-facing (nginx, livekit only)
+    ipam:
+      config:
+        - subnet: 172.21.0.0/24

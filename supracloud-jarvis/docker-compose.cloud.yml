@@ -1,0 +1,238 @@
+# =============================================================================
+# SupraCloud IRA — docker-compose.cloud.yml
+#
+# Cloud deployment override for 8×H100 80GB (or equivalent high-VRAM server).
+# Use alongside the base compose file:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.cloud.yml up -d
+#
+# This file only overrides the fields that differ from the base config —
+# everything not listed here inherits from docker-compose.yml.
+#
+# ── Recommended cloud providers ───────────────────────────────────────────────
+#   Lambda Labs  — H100 80GB SXM5 × 8   ($28/hr)
+#   Vast.ai      — H100 80GB × 8         ($18-22/hr spot)
+#   RunPod       — H100 SXM × 8          ($24/hr)
+#   CoreWeave    — H100 80GB × 8 (K8s)
+#   AWS p5.48xlarge — 8×H100 96GB        ($98/hr — overkill unless needed)
+#
+# ── Model selection (2026 maximum power) ──────────────────────────────────────
+#   Fast      : Qwen/Qwen3-30B-A3B     (MoE, 3B active — 2×H100)
+#   Deep      : Qwen/Qwen3-72B         (dense 72B       — 4×H100)
+#   Reasoning : deepseek-ai/DeepSeek-R1 (671B MoE       — 8×H100, or use Qwen3-235B-A22B)
+#   Vision    : Qwen/Qwen3-VL-72B      (multimodal 72B  — 4×H100)
+# =============================================================================
+
+name: supracloud-ira
+
+services:
+
+  # ── Fast Path: Qwen3-30B-A3B (MoE) — 2×H100 80GB ─────────────────────────
+  # Despite 30B total parameters only 3B are active per forward pass (MoE).
+  # This gives GPT-4o-level quality at sub-2s latency.
+  vllm-fast:
+    environment:
+      NVIDIA_VISIBLE_DEVICES: "0,1"
+      CUDA_VISIBLE_DEVICES: "0,1"
+    command:
+      - "--model"
+      - "${FAST_MODEL:-Qwen/Qwen3-30B-A3B}"
+      - "--served-model-name"
+      - "qwen3-fast"
+      - "--gpu-memory-utilization"
+      - "0.92"
+      - "--max-model-len"
+      - "131072"           # 128k context — Qwen3's full window
+      - "--max-num-seqs"
+      - "64"
+      - "--max-num-batched-tokens"
+      - "32768"
+      - "--enable-prefix-caching"
+      - "--enable-chunked-prefill"
+      - "--disable-log-requests"
+      - "--port"
+      - "8001"
+      - "--host"
+      - "0.0.0.0"
+      - "--api-key"
+      - "${VLLM_API_KEY}"
+      - "--dtype"
+      - "bfloat16"          # BF16 — H100 native, no quantization needed at this VRAM
+      - "--tensor-parallel-size"
+      - "2"
+
+  # ── Deep Path: Qwen3-72B — 4×H100 80GB ────────────────────────────────────
+  # Dense 72B model. Outperforms GPT-4o on coding (LiveCodeBench), math,
+  # and multilingual tasks. Full 128k context for large document analysis.
+  vllm-deep:
+    environment:
+      NVIDIA_VISIBLE_DEVICES: "2,3,4,5"
+      CUDA_VISIBLE_DEVICES: "2,3,4,5"
+    command:
+      - "--model"
+      - "${DEEP_MODEL:-Qwen/Qwen3-72B}"
+      - "--served-model-name"
+      - "qwen3-deep"
+      - "--gpu-memory-utilization"
+      - "0.92"
+      - "--max-model-len"
+      - "131072"           # 128k context
+      - "--max-num-seqs"
+      - "16"
+      - "--max-num-batched-tokens"
+      - "16384"
+      - "--enable-prefix-caching"
+      - "--enable-chunked-prefill"
+      - "--disable-log-requests"
+      - "--port"
+      - "8002"
+      - "--host"
+      - "0.0.0.0"
+      - "--api-key"
+      - "${VLLM_API_KEY}"
+      - "--dtype"
+      - "bfloat16"
+      - "--tensor-parallel-size"
+      - "4"
+
+  # ── Reasoning Path: DeepSeek-R1 671B — 8×H100 80GB ────────────────────────
+  # World's best open-source reasoning model (May 2026).
+  # Matches or beats o1/o3 on AIME, MATH-500, GPQA.
+  # Powers Think Mode and DeepSearch in IRA.
+  # ──────────────────────────────────────────────────────────────────────────
+  # Alternative (slightly less powerful, fits in 4×H100 with FP8):
+  #   REASONING_MODEL=Qwen/Qwen3-235B-A22B (MoE, 22B active)
+  #   --tensor-parallel-size 4
+  vllm-reasoning:
+    image: vllm/vllm-openai:latest
+    container_name: ira-vllm-reasoning
+    restart: unless-stopped
+    runtime: nvidia
+    environment:
+      NVIDIA_VISIBLE_DEVICES: "0,1,2,3,4,5,6,7"  # All 8 H100s for 671B model
+      CUDA_VISIBLE_DEVICES: "0,1,2,3,4,5,6,7"
+      VLLM_WORKER_MULTIPROC_METHOD: spawn
+      HF_TOKEN: ${HF_TOKEN:-}
+      DO_NOT_TRACK: "1"
+    volumes:
+      - hf_cache:/root/.cache/huggingface
+    command:
+      - "--model"
+      - "${REASONING_MODEL:-deepseek-ai/DeepSeek-R1}"
+      - "--served-model-name"
+      - "qwen3-reasoning"
+      - "--gpu-memory-utilization"
+      - "0.92"
+      - "--max-model-len"
+      - "131072"
+      - "--max-num-seqs"
+      - "4"                # R1 671B is expensive per request
+      - "--max-num-batched-tokens"
+      - "8192"
+      - "--enable-prefix-caching"
+      - "--disable-log-requests"
+      - "--port"
+      - "8003"
+      - "--host"
+      - "0.0.0.0"
+      - "--api-key"
+      - "${VLLM_API_KEY}"
+      - "--dtype"
+      - "bfloat16"
+      - "--tensor-parallel-size"
+      - "8"
+    ports:
+      - "127.0.0.1:8003:8003"
+    depends_on:
+      vllm-deep:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8003/health || exit 1"]
+      interval: 60s
+      timeout: 30s
+      retries: 20
+      start_period: 600s   # 671B model takes ~5-8 min to load across 8×H100
+    networks:
+      - ira-internal
+
+  # ── Vision Path: Qwen3-VL-72B — 4×H100 80GB ───────────────────────────────
+  # Best open-source vision-language model (May 2026).
+  # Outperforms Gemini 1.5 Pro on DocVQA, ChartQA, OCRBench.
+  # Handles images, charts, documents, screenshots.
+  vllm-vision:
+    image: vllm/vllm-openai:latest
+    container_name: ira-vllm-vision
+    restart: unless-stopped
+    runtime: nvidia
+    environment:
+      NVIDIA_VISIBLE_DEVICES: "4,5,6,7"  # Share H100 pool with reasoning when not active
+      CUDA_VISIBLE_DEVICES: "4,5,6,7"
+      VLLM_WORKER_MULTIPROC_METHOD: spawn
+      HF_TOKEN: ${HF_TOKEN:-}
+      DO_NOT_TRACK: "1"
+    volumes:
+      - hf_cache:/root/.cache/huggingface
+    command:
+      - "--model"
+      - "${VISION_MODEL:-Qwen/Qwen3-VL-72B-Instruct-AWQ}"
+      - "--served-model-name"
+      - "qwen3-vl"
+      - "--gpu-memory-utilization"
+      - "0.88"
+      - "--max-model-len"
+      - "32768"
+      - "--max-num-seqs"
+      - "8"
+      - "--disable-log-requests"
+      - "--port"
+      - "8004"
+      - "--host"
+      - "0.0.0.0"
+      - "--api-key"
+      - "${VLLM_API_KEY}"
+      - "--dtype"
+      - "bfloat16"
+      - "--tensor-parallel-size"
+      - "4"
+      - "--limit-mm-per-prompt"
+      - "image=5"          # Allow up to 5 images per prompt
+    ports:
+      - "127.0.0.1:8004:8004"
+    depends_on:
+      vllm-deep:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8004/health || exit 1"]
+      interval: 60s
+      timeout: 30s
+      retries: 15
+      start_period: 420s
+    networks:
+      - ira-internal
+
+  # ── IRA API: cloud-optimised build ─────────────────────────────────────────
+  ira-api:
+    build:
+      context: ./ira
+      dockerfile: Dockerfile
+      args:
+        EMBEDDING_DEVICE: cuda    # Use GPU for embeddings on cloud (faster RAG)
+        WORKERS: "4"              # 4 uvicorn workers for high concurrency
+    environment:
+      VLLM_FAST_URL: http://vllm-fast:8001/v1
+      VLLM_DEEP_URL: http://vllm-deep:8002/v1
+      VLLM_REASONING_URL: http://vllm-reasoning:8003/v1
+      VLLM_REASONING_MODEL: qwen3-reasoning
+      VLLM_VISION_URL: http://vllm-vision:8004/v1
+      VLLM_VISION_MODEL: qwen3-vl
+      EMBEDDING_DEVICE: cuda
+    depends_on:
+      vllm-reasoning:
+        condition: service_healthy
+      vllm-vision:
+        condition: service_healthy
+
+# ── Additional volumes for cloud ──────────────────────────────────────────────
+volumes:
+  hf_cache:
+    driver: local

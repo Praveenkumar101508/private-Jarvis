@@ -1,0 +1,37 @@
+# =============================================================================
+# IRA Worker — Dockerfile
+# Runs: APScheduler + Security Monitor + Business Monitor + Briefing Engine
+# Same codebase as ira-api, different entry point.
+# =============================================================================
+
+FROM python:3.12-slim AS builder
+
+WORKDIR /build
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential libpq-dev curl \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
+
+# ── Runtime ───────────────────────────────────────────────────────────────────
+FROM python:3.12-slim AS runtime
+
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libpq5 curl git postgresql-client \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN useradd --create-home --shell /bin/bash ira
+USER ira
+ENV PATH="/home/ira/.local/bin:${PATH}"
+
+COPY --from=builder --chown=ira:ira /install /usr/local
+COPY --chown=ira:ira . /app
+
+HEALTHCHECK --interval=60s --timeout=15s --retries=5 --start-period=30s \
+    CMD python -c "import apscheduler; print('ok')" || exit 1
+
+CMD ["python", "-m", "worker.main"]

@@ -1,0 +1,37 @@
+# Place at the TRUE git root: ./.github/workflows/ci.yml
+# (top level, beside supracloud-jarvis/ — GitHub reads .github only at the repo root)
+# Code + requirements live in supracloud-jarvis/ira/, so every step runs there.
+name: CI
+on: [push, pull_request]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: supracloud-jarvis/ira   # requirements.txt + tests live HERE
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install deps — full prod set (the upgrade gate) + test runner
+        # requirements-test.txt adds pytest + pytest-asyncio (NOT in the prod set);
+        # openai is aligned to 1.58.1 in both so the two files resolve together.
+        run: pip install -r requirements.txt -r requirements-test.txt
+      - name: Run Cortex-overlay tests (gateway-dependent tests skip without a live gateway)
+        run: >
+          python -m pytest -q
+          tests/test_smoke.py
+          tests/test_router.py
+          tests/test_business_data.py
+          tests/test_cortex_bridge.py
+          tests/test_security_skill.py
+          tests/test_tutor_skill.py
+          tests/test_skill_ports.py
+          tests/test_conversational_skill.py
+          tests/test_engineer_skill.py
+          tests/test_deliberation.py
+          tests/test_architect.py
+          tests/test_security_invariants.py
+          tests/test_voice_imports.py
