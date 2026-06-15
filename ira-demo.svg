@@ -1,0 +1,121 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 600" width="1000" height="600" role="img" aria-label="IRA live demo — answering a query on your own machine">
+  <defs>
+    <linearGradient id="dOrb" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#5ee0f0"/><stop offset="100%" stop-color="#6c7bff"/>
+    </linearGradient>
+    <linearGradient id="dBar" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#5ee0f0"/><stop offset="100%" stop-color="#7c8bff"/>
+    </linearGradient>
+    <style>
+      text{font-family:'SF Mono','JetBrains Mono','Fira Code',ui-monospace,monospace}
+      .q{transform-box:fill-box;transform-origin:left center;animation:type 14s infinite}
+      @keyframes type{0%,4%{transform:scaleX(0)}17%,92%{transform:scaleX(1)}100%{transform:scaleX(0)}}
+      .caret{animation:cMove 14s infinite, cBlink 1s steps(1) infinite}
+      @keyframes cMove{0%,4%{transform:translateX(0)}17%,100%{transform:translateX(398px)}}
+      @keyframes cBlink{0%,50%{opacity:1}51%,100%{opacity:0}}
+      .think{opacity:0;animation:think 14s infinite}
+      @keyframes think{0%,25%{opacity:0}29%{opacity:1}39%,100%{opacity:0}}
+      .route{opacity:0;animation:route 14s infinite}
+      @keyframes route{0%,21%{opacity:0;transform:translateY(6px)}25%,93%{opacity:1;transform:translateY(0)}100%{opacity:0}}
+      .av{opacity:0;animation:av 14s infinite}
+      @keyframes av{0%,30%{opacity:0}34%,93%{opacity:1}100%{opacity:0}}
+      .l1{opacity:0;animation:l1 14s infinite}.l2{opacity:0;animation:l2 14s infinite}
+      .l3{opacity:0;animation:l3 14s infinite}.l4{opacity:0;animation:l4 14s infinite}
+      .l5{opacity:0;animation:l5 14s infinite}
+      @keyframes l1{0%,34%{opacity:0;transform:translateY(8px)}39%,93%{opacity:1;transform:translateY(0)}100%{opacity:0}}
+      @keyframes l2{0%,41%{opacity:0;transform:translateY(8px)}46%,93%{opacity:1;transform:translateY(0)}100%{opacity:0}}
+      @keyframes l3{0%,48%{opacity:0;transform:translateY(8px)}53%,93%{opacity:1;transform:translateY(0)}100%{opacity:0}}
+      @keyframes l4{0%,55%{opacity:0;transform:translateY(8px)}60%,93%{opacity:1;transform:translateY(0)}100%{opacity:0}}
+      @keyframes l5{0%,62%{opacity:0;transform:translateY(8px)}67%,93%{opacity:1;transform:translateY(0)}100%{opacity:0}}
+      .live{transform-box:fill-box;transform-origin:center;animation:live 2.2s ease-in-out infinite}
+      @keyframes live{0%,100%{opacity:.4}50%{opacity:1}}
+      .core{transform-box:fill-box;transform-origin:center;animation:breathe 4s ease-in-out infinite}
+      @keyframes breathe{0%,100%{transform:scale(1)}50%{transform:scale(1.08)}}
+      .bar{transform-box:fill-box;transform-origin:center bottom;animation:wave 1.1s ease-in-out infinite}
+      @keyframes wave{0%,100%{transform:scaleY(.22)}50%{transform:scaleY(1)}}
+    </style>
+    <clipPath id="qclip"><rect class="q" x="536" y="102" width="400" height="32"/></clipPath>
+  </defs>
+
+  <!-- window -->
+  <rect x="10" y="10" width="980" height="580" rx="18" fill="#0d1220" stroke="#20304f" stroke-width="1.5"/>
+  <!-- header -->
+  <circle cx="46" cy="40" r="6" fill="#ff5f57"/><circle cx="68" cy="40" r="6" fill="#febc2e"/><circle cx="90" cy="40" r="6" fill="#28c840"/>
+  <circle cx="128" cy="40" r="7" fill="url(#dOrb)"/>
+  <text x="144" y="45" font-size="15" font-weight="700" fill="#cdd9ee">IRA</text>
+  <text x="178" y="45" font-size="14" fill="#5d6b86">sovereign assistant</text>
+  <circle class="live" cx="742" cy="40" r="5" fill="#28c840"/>
+  <text x="754" y="45" font-size="13" fill="#7e8ea8">online</text>
+  <text x="824" y="45" font-size="13" fill="#5d6b86">Cortex · 127.0.0.1:8642</text>
+  <line x1="10" y1="72" x2="990" y2="72" stroke="#1a2740" stroke-width="1.5"/>
+
+  <!-- user query bubble -->
+  <text x="966" y="92" text-anchor="end" font-size="12" fill="#5d6b86">you</text>
+  <rect x="516" y="98" width="456" height="44" rx="13" fill="#18233f" stroke="#2c3c66" stroke-width="1.2"/>
+  <g clip-path="url(#qclip)">
+    <text x="536" y="126" font-size="16" fill="#e3ecfb">prep my 9 a.m. brief — flag what's urgent</text>
+  </g>
+  <rect class="caret" x="536" y="106" width="2" height="28" fill="#5ee0f0"/>
+
+  <!-- routing chip -->
+  <g class="route">
+    <rect x="40" y="160" width="312" height="30" rx="15" fill="#121a2e" stroke="#26344f" stroke-width="1.2"/>
+    <text x="56" y="180" font-size="13" fill="#5ee0f0">⟲</text>
+    <text x="74" y="180" font-size="13" fill="#8ea0c0">router → briefing · researcher</text>
+  </g>
+
+  <!-- IRA avatar + name -->
+  <g class="av">
+    <circle class="core" cx="58" cy="220" r="14" fill="url(#dOrb)"/>
+    <circle cx="54" cy="216" r="3" fill="#0b1020" opacity="0.5"/>
+    <text x="80" y="216" font-size="14" font-weight="700" fill="#5ee0f0">IRA</text>
+    <text x="116" y="216" font-size="12" fill="#5d6b86">· answered in 0.4s · fully local</text>
+  </g>
+
+  <!-- thinking dots (brief) -->
+  <g class="think"><circle cx="84" cy="250" r="3.2" fill="#7c8bff"/><circle cx="98" cy="250" r="3.2" fill="#7c8bff"/><circle cx="112" cy="250" r="3.2" fill="#7c8bff"/></g>
+
+  <!-- IRA response lines -->
+  <text class="l1" x="60" y="256" font-size="17" fill="#dfe8f7">Morning, Praveen. Your 9 a.m. brief is ready:</text>
+  <text class="l2" x="60" y="292" font-size="16" fill="#c7d3ea">•  3 unread from investors — <tspan fill="#f0c674" font-weight="700">1 urgent</tspan> (Panafrica).</text>
+  <text class="l3" x="60" y="324" font-size="16" fill="#c7d3ea">•  Standup moved to 9:30; your deck is prepared.</text>
+  <text class="l4" x="60" y="356" font-size="16" fill="#c7d3ea">•  Forecast 14°C, light rain — leave ~10 min early.</text>
+  <text class="l5" x="60" y="396" font-size="16" font-weight="600" fill="#aef0fb">↳ Want me to draft the Panafrica reply?</text>
+
+  <!-- footer divider -->
+  <line x1="10" y1="470" x2="990" y2="470" stroke="#161f33" stroke-width="1.2"/>
+
+  <!-- voice waveform -->
+  <circle class="live" cx="300" cy="512" r="5" fill="#5ee0f0"/>
+  <text x="314" y="517" font-size="13" fill="#7e8ea8">voice ready</text>
+  <g>
+    <rect class="bar" x="420" y="492" width="4" height="40" rx="2" fill="url(#dBar)" style="animation-delay:-0.0s"/>
+    <rect class="bar" x="430" y="492" width="4" height="40" rx="2" fill="url(#dBar)" style="animation-delay:-0.09s"/>
+    <rect class="bar" x="440" y="492" width="4" height="40" rx="2" fill="url(#dBar)" style="animation-delay:-0.18s"/>
+    <rect class="bar" x="450" y="492" width="4" height="40" rx="2" fill="url(#dBar)" style="animation-delay:-0.27s"/>
+    <rect class="bar" x="460" y="492" width="4" height="40" rx="2" fill="url(#dBar)" style="animation-delay:-0.40s"/>
+    <rect class="bar" x="470" y="492" width="4" height="40" rx="2" fill="url(#dBar)" style="animation-delay:-0.53s"/>
+    <rect class="bar" x="480" y="492" width="4" height="40" rx="2" fill="url(#dBar)" style="animation-delay:-0.31s"/>
+    <rect class="bar" x="490" y="492" width="4" height="40" rx="2" fill="url(#dBar)" style="animation-delay:-0.20s"/>
+    <rect class="bar" x="500" y="492" width="4" height="40" rx="2" fill="url(#dBar)" style="animation-delay:-0.62s"/>
+    <rect class="bar" x="510" y="492" width="4" height="40" rx="2" fill="url(#dBar)" style="animation-delay:-0.12s"/>
+    <rect class="bar" x="520" y="492" width="4" height="40" rx="2" fill="url(#dBar)" style="animation-delay:-0.48s"/>
+    <rect class="bar" x="530" y="492" width="4" height="40" rx="2" fill="url(#dBar)" style="animation-delay:-0.25s"/>
+    <rect class="bar" x="540" y="492" width="4" height="40" rx="2" fill="url(#dBar)" style="animation-delay:-0.55s"/>
+    <rect class="bar" x="550" y="492" width="4" height="40" rx="2" fill="url(#dBar)" style="animation-delay:-0.34s"/>
+    <rect class="bar" x="560" y="492" width="4" height="40" rx="2" fill="url(#dBar)" style="animation-delay:-0.16s"/>
+    <rect class="bar" x="570" y="492" width="4" height="40" rx="2" fill="url(#dBar)" style="animation-delay:-0.44s"/>
+    <rect class="bar" x="580" y="492" width="4" height="40" rx="2" fill="url(#dBar)" style="animation-delay:-0.07s"/>
+    <rect class="bar" x="590" y="492" width="4" height="40" rx="2" fill="url(#dBar)" style="animation-delay:-0.50s"/>
+  </g>
+  <text x="640" y="517" font-size="12" fill="#5d6b86">Whisper STT · Supertonic TTS · voiceprint gate</text>
+
+  <!-- sovereignty footer -->
+  <g transform="translate(40,545)">
+    <path d="M2 8 a6 6 0 0 1 12 0 v2 h-2 v-2 a4 4 0 0 0 -8 0 v2 h-2 z" fill="#5d6b86"/>
+    <rect x="0" y="10" width="16" height="11" rx="2" fill="#5d6b86"/>
+    <circle cx="8" cy="15" r="1.6" fill="#0d1220"/>
+  </g>
+  <text x="64" y="560" font-size="13" fill="#7e8ea8">100% on-device — nothing leaves your machine.</text>
+  <text x="966" y="560" text-anchor="end" font-size="12" fill="#46536f">SUPRACLOUD&#160;IRA</text>
+</svg>

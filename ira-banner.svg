@@ -1,0 +1,70 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 300" width="1200" height="300" role="img" aria-label="SupraCloud IRA — your own sovereign AI">
+  <defs>
+    <radialGradient id="bgGlow" cx="16%" cy="50%" r="75%">
+      <stop offset="0%" stop-color="#15233f"/>
+      <stop offset="55%" stop-color="#0c1322"/>
+      <stop offset="100%" stop-color="#080c16"/>
+    </radialGradient>
+    <linearGradient id="ink" x1="0" y1="0" x2="1" y2="0.3">
+      <stop offset="0%" stop-color="#5ee0f0"/>
+      <stop offset="55%" stop-color="#7c8bff"/>
+      <stop offset="100%" stop-color="#a98bff"/>
+    </linearGradient>
+    <linearGradient id="orbFill" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#5ee0f0"/>
+      <stop offset="100%" stop-color="#6c7bff"/>
+    </linearGradient>
+    <linearGradient id="rule" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#5ee0f0" stop-opacity="0"/>
+      <stop offset="20%" stop-color="#5ee0f0"/>
+      <stop offset="80%" stop-color="#7c8bff"/>
+      <stop offset="100%" stop-color="#7c8bff" stop-opacity="0"/>
+    </linearGradient>
+    <filter id="soft" x="-60%" y="-60%" width="220%" height="220%">
+      <feGaussianBlur stdDeviation="9"/>
+    </filter>
+    <style>
+      .pulse{transform-box:fill-box;transform-origin:center;animation:pulse 3.4s ease-out infinite}
+      .pulse2{transform-box:fill-box;transform-origin:center;animation:pulse 3.4s ease-out infinite;animation-delay:1.7s}
+      @keyframes pulse{0%{transform:scale(.65);opacity:.7}80%{opacity:0}100%{transform:scale(1.6);opacity:0}}
+      .core{transform-box:fill-box;transform-origin:center;animation:breathe 4s ease-in-out infinite}
+      @keyframes breathe{0%,100%{transform:scale(1)}50%{transform:scale(1.06)}}
+      .scan{animation:scan 5s ease-in-out infinite}
+      @keyframes scan{0%,100%{opacity:.25}50%{opacity:1}}
+      .blip{transform-box:fill-box;transform-origin:center;animation:blip 2.2s ease-in-out infinite}
+      @keyframes blip{0%,100%{opacity:.35}50%{opacity:1}}
+    </style>
+  </defs>
+
+  <rect width="1200" height="300" fill="url(#bgGlow)"/>
+  <rect width="1200" height="300" fill="none" stroke="#1d2b46" stroke-width="2"/>
+
+  <!-- presence orb -->
+  <g transform="translate(150,150)">
+    <circle class="pulse"  r="46" fill="none" stroke="#5ee0f0" stroke-width="1.5" opacity="0"/>
+    <circle class="pulse2" r="46" fill="none" stroke="#7c8bff" stroke-width="1.5" opacity="0"/>
+    <circle r="52" fill="url(#orbFill)" opacity="0.18" filter="url(#soft)"/>
+    <circle class="core" r="34" fill="url(#orbFill)"/>
+    <circle class="core" r="34" fill="none" stroke="#aef0fb" stroke-width="1" opacity="0.7"/>
+    <circle r="6" cx="-9" cy="-9" fill="#0b1020" opacity="0.55"/>
+    <g>
+      <circle r="3.5" cx="0" cy="-66" fill="#e8b964" class="blip"/>
+      <circle r="2.6" cx="58" cy="34" fill="#5ee0f0" class="blip"/>
+      <circle r="2.6" cx="-58" cy="34" fill="#7c8bff" class="blip"/>
+      <animateTransform attributeName="transform" type="rotate" from="0 0 0" to="360 0 0" dur="16s" repeatCount="indefinite"/>
+    </g>
+  </g>
+
+  <!-- wordmark -->
+  <text x="262" y="138" font-family="'SF Mono','JetBrains Mono','Fira Code',ui-monospace,monospace" font-size="62" font-weight="800" letter-spacing="2" fill="url(#ink)">SUPRACLOUD&#160;IRA</text>
+  <rect class="scan" x="264" y="156" width="560" height="3" rx="1.5" fill="url(#rule)"/>
+  <text x="266" y="196" font-family="'Inter','Segoe UI',system-ui,sans-serif" font-size="23" fill="#9fb0cc">Intelligent Responsive Assistant — a private, sovereign AI that runs on your own hardware.</text>
+
+  <!-- status chips -->
+  <g font-family="'SF Mono','JetBrains Mono',ui-monospace,monospace" font-size="15" fill="#7e8ea8">
+    <circle cx="272" cy="234" r="4" fill="#5ee0f0"/><text x="284" y="239">local-first</text>
+    <circle cx="404" cy="234" r="4" fill="#7c8bff"/><text x="416" y="239">zero data egress</text>
+    <circle cx="580" cy="234" r="4" fill="#e8b964"/><text x="592" y="239">voice-native</text>
+    <circle cx="720" cy="234" r="4" fill="#5ee0f0"/><text x="732" y="239">12 agents</text>
+  </g>
+</svg>
