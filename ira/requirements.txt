@@ -1,0 +1,48 @@
+# ── Web framework ──────────────────────────────────────────────────────────────
+fastapi==0.115.5
+uvicorn[standard]==0.32.1
+python-multipart==0.0.12
+
+# ── LLM / Agent framework ──────────────────────────────────────────────────────
+openai==1.54.4
+langgraph==0.2.53
+langchain==0.3.7
+langchain-openai==0.2.9
+langchain-core==0.3.19
+
+# ── Data layer ─────────────────────────────────────────────────────────────────
+asyncpg==0.30.0
+redis[asyncio]==5.2.0
+
+# ── Embeddings / RAG ──────────────────────────────────────────────────────────
+sentence-transformers==3.3.0
+numpy
+torch
+--extra-index-url https://download.pytorch.org/whl/cpu
+
+# ── Auth & Security ────────────────────────────────────────────────────────────
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+slowapi==0.1.9
+
+# ── Streaming ─────────────────────────────────────────────────────────────────
+sse-starlette==2.1.3
+
+# ── Proactive Intelligence (Phase 4) ──────────────────────────────────────────
+apscheduler==3.10.4
+SQLAlchemy==2.0.36
+psycopg2-binary==2.9.10
+
+# ── Utilities ─────────────────────────────────────────────────────────────────
+pydantic==2.9.2
+pydantic-settings==2.6.1
+httpx==0.27.2
+psutil==6.1.0
+python-dateutil==2.9.0
+tenacity==9.0.0
+
+# ── Voice token generation ─────────────────────────────────────────────────────
+livekit-api==0.7.1
+
+# ── Biometric voice verification ──────────────────────────────────────────────
+speechbrain==1.0.0
