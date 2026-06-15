@@ -1,0 +1,20 @@
+# LiveKit Agents 1.5.x voice pipeline
+livekit-agents==1.5.11
+livekit-plugins-silero
+
+# STT — Faster-Whisper (small model = ~400ms latency on CPU)
+faster-whisper>=1.1.0
+
+# TTS — Kokoro ONNX 0.4.7 (Python 3.14 compatible)
+kokoro-onnx==0.4.7
+soundfile
+scipy
+
+# Language detection
+langdetect
+
+# Utilities
+numpy
+httpx==0.27.2
+python-dotenv==1.0.1
+huggingface_hub

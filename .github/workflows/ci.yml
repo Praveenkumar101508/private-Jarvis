@@ -1,0 +1,65 @@
+name: IRA Core CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["**"]
+
+jobs:
+  syntax-check:
+    name: Python Syntax & Structure
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Verify module syntax (py_compile)
+        run: |
+          python -m py_compile jarvis_core/app/database.py
+          python -m py_compile jarvis_core/app/tools/daemons.py
+          python -m py_compile jarvis_core/app/tools/actions.py
+          python -m py_compile jarvis_core/app/agents/swarm.py
+          python -m py_compile jarvis_core/app/agents/sandbox.py
+          python -m py_compile jarvis_core/app/main.py
+          python -m py_compile backend/db/connection.py
+          python -m py_compile backend/agents/tools/reminders.py
+          python -m py_compile backend/startup_check.py
+          python -m py_compile backend/config.py
+          python -m py_compile backend/main.py
+          python -m py_compile backend/workers/proactive.py
+          python -m py_compile backend/agents/nodes.py
+          python -m py_compile backend/agents/graph.py
+          python -m py_compile backend/routers/auth.py
+          echo "All source files passed syntax check."
+
+      - name: Verify monorepo structure
+        run: |
+          required=(
+            "jarvis_core/requirements.txt"
+            "jarvis_core/app/__init__.py"
+            "jarvis_core/app/main.py"
+            "jarvis_core/app/database.py"
+            "jarvis_core/app/tools/__init__.py"
+            "jarvis_core/app/tools/actions.py"
+            "jarvis_core/app/tools/daemons.py"
+            "jarvis_core/app/agents/__init__.py"
+            "jarvis_core/app/agents/swarm.py"
+            "jarvis_core/app/agents/sandbox.py"
+          )
+          for f in "${required[@]}"; do
+            [ -f "$f" ] || { echo "MISSING: $f"; exit 1; }
+          done
+          echo "Monorepo structure verified."
+
+      - name: Confirm .env is not tracked
+        run: |
+          if git ls-files --error-unmatch jarvis_core/.env 2>/dev/null; then
+            echo "ERROR: jarvis_core/.env must not be committed."
+            exit 1
+          fi
+          echo ".env correctly excluded from version control."

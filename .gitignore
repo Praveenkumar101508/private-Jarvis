@@ -1,0 +1,56 @@
+# Environment — never commit real secrets
+.env
+.env.local
+.env.*.local
+
+# Sandbox-generated agent scripts (runtime output, not source)
+jarvis_core/app/agents/generated/deliverables/*.py
+jarvis_core/app/agents/generated/deliverables/*.sh
+
+# Python
+# Dependencies
+node_modules/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+dist/
+build/
+*.egg
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Node / Next.js
+node_modules/
+.next/
+out/
+npm-debug.log*
+
+# Docker local volumes
+postgres-data/
+redis-data/
+chroma-data/
+ollama-data/
+uploads/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Certs
+nginx/certs/
+*.pem
+*.key
+*.crt
+
+# Logs
+*.log
+logs/

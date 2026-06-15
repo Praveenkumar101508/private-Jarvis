@@ -1,0 +1,35 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --ira-saffron: #FF9933;
+  --ira-green: #138808;
+  --ira-navy: #000080;
+  --ira-warm: #FFF5E6;
+}
+
+body {
+  background: var(--ira-warm);
+}
+
+.ira-gradient {
+  background: linear-gradient(135deg, #FF9933 0%, #FFFFFF 50%, #138808 100%);
+}
+
+.chat-bubble-user {
+  @apply bg-ira-saffron text-white rounded-2xl rounded-br-sm px-4 py-3 max-w-xs ml-auto;
+}
+
+.chat-bubble-ira {
+  @apply bg-white border border-orange-100 rounded-2xl rounded-bl-sm px-4 py-3 max-w-sm shadow-sm;
+}
+
+.voice-pulse {
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.7; transform: scale(1.05); }
+}

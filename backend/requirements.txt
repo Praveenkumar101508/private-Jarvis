@@ -1,0 +1,77 @@
+# ── Core ─────────────────────────────────────────────────────
+fastapi==0.115.5
+uvicorn[standard]==0.32.0
+python-multipart==0.0.12
+python-dotenv==1.0.1
+pydantic==2.10.3
+pydantic-settings==2.6.1
+httpx==0.28.1
+
+# ── Database ─────────────────────────────────────────────────
+sqlalchemy==2.0.36
+asyncpg==0.30.0
+alembic==1.14.0
+
+# ── Redis / Cache ────────────────────────────────────────────
+redis[asyncio]==5.2.1
+hiredis==3.1.0
+
+# ── LangGraph / LangChain (Phase 2) ─────────────────────────
+langchain==0.3.13
+langchain-openai==0.2.14
+langchain-anthropic==0.3.3
+langchain-groq==0.2.3
+langchain-ollama==0.2.2
+langchain-community==0.3.13
+langgraph==0.2.59
+langchain-chroma==0.1.4
+
+# ── Vector / Memory ───────────────────────────────────────────
+chromadb==0.5.23
+sentence-transformers==3.3.1
+
+# ── Voice — LiveKit (Phase 3) ────────────────────────────────
+livekit==0.18.1
+livekit-agents==0.12.5
+livekit-plugins-deepgram==0.7.3
+livekit-plugins-elevenlabs==0.7.3
+livekit-plugins-openai==0.10.7
+livekit-plugins-silero==0.7.3
+
+# ── STT / TTS ────────────────────────────────────────────────
+deepgram-sdk==3.7.7
+elevenlabs==1.12.0
+openai==1.57.4
+azure-cognitiveservices-speech==1.43.0
+
+# ── Sovereign / Local AI (faster-whisper STT + kokoro ONNX TTS) ──
+faster-whisper==1.1.1
+kokoro-onnx==0.4.9
+onnxruntime==1.17.1
+numpy>=1.24.0,<2.0
+
+# ── Web Search ───────────────────────────────────────────────
+tavily-python==0.5.0
+google-search-results==2.4.2
+
+# ── Calendar / Google ────────────────────────────────────────
+google-auth==2.37.0
+google-auth-oauthlib==1.2.1
+google-api-python-client==2.154.0
+
+# ── Scheduling / Workers (Phase 4) ───────────────────────────
+apscheduler==3.10.4
+celery==5.4.0
+
+# ── Multilingual ─────────────────────────────────────────────
+langdetect==1.0.9
+deep-translator==1.11.4
+dateparser==1.2.0
+
+# ── Notifications ────────────────────────────────────────────
+python-telegram-bot==21.10
+aiohttp==3.11.10
+
+# ── Monitoring ───────────────────────────────────────────────
+sentry-sdk[fastapi]==2.19.2
+structlog==24.4.0
