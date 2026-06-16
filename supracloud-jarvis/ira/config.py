@@ -168,9 +168,37 @@ class Settings(BaseSettings):
     smtp_password: str = ""
     smtp_to: str = ""          # Recipient — defaults to smtp_user if blank
 
+    # ── Email triage: IMAP (read-only inbox, local-first) ─────────────────────
+    imap_host: str = ""
+    imap_port: int = 993
+    imap_user: str = ""
+    imap_password: str = ""
+    imap_mailbox: str = "INBOX"
+    imap_use_ssl: bool = True
+
+    # ── Notes (local-first, on-disk markdown) ─────────────────────────────────
+    notes_dir: str = "data/notes"
+
     # ── Calendar: Cal.com ─────────────────────────────────────────────────────
     calcom_api_key: str = ""
     calcom_api_url: str = "https://api.cal.com"
+
+    # ── Calendar: CalDAV (local-first, self-hosted) ───────────────────────────
+    caldav_url: str = ""
+    caldav_username: str = ""
+    caldav_password: str = ""
+    caldav_calendar: str = ""   # calendar name; first calendar is used if blank
+
+    # ── Experimental: Android actuator (droidclaw-derived; OFF by default) ─────
+    # Sandboxed, fully local (adb + Ollama). CVE-2026-10216 mitigation: pairing is
+    # loopback-only + rate-limited (see actions/android_pairing.py) — never on LAN.
+    android_actuator_enabled: bool = False
+    android_adb_path: str = "adb"
+    android_pairing_host: str = "127.0.0.1"   # MUST stay loopback
+    android_pairing_max_attempts: int = 5
+    android_pairing_window_s: int = 60
+    android_screen_max_elements: int = 40
+    android_recovery_repeat_limit: int = 3
 
     # ── Calendar: Google ──────────────────────────────────────────────────────
     google_calendar_id: str = ""
