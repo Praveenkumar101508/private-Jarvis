@@ -53,18 +53,34 @@ _INSTRUCTION_NOTE = (
 )
 
 
+def _neutralize_delimiters(text: str) -> str:
+    """Defang any literal occurrence of our isolation delimiters inside payload text.
+
+    The delimiter strings are fixed and publicly known, so a malicious page could
+    embed a fake close-delimiter followed by injected "instructions" to break out
+    of the untrusted block. Mangling any literal occurrence before wrapping means
+    the only real delimiters in the final string are the ones we add ourselves.
+    """
+    text = text.replace(_DELIM_OPEN, "[EXTERNAL DATA DELIMITER REMOVED]")
+    text = text.replace(_DELIM_CLOSE, "[EXTERNAL DATA DELIMITER REMOVED]")
+    return text
+
+
 def wrap_external_content(text: str, source: str = "") -> str:
     """Wrap external/web content in isolation delimiters.
 
     The model sees the delimiters and is instructed (in the surrounding prompt)
     to treat enclosed content as data only. Source URL/label is included for
-    citation and auditing.
+    citation and auditing. Any literal delimiter token already present in the
+    payload is neutralised first, so the content cannot forge a fake close-tag
+    and break out of the untrusted block.
     """
     source_line = f"[Source: {source}]\n" if source else ""
+    safe_text = _neutralize_delimiters(text.strip())
     return (
         f"{_DELIM_OPEN}\n"
         f"{source_line}"
-        f"{text.strip()}\n"
+        f"{safe_text}\n"
         f"{_DELIM_CLOSE}\n"
         f"{_INSTRUCTION_NOTE}"
     )
