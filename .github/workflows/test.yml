@@ -2,9 +2,9 @@ name: IRA Tests
 
 on:
   push:
-    branches: [main, master, "claude/*"]
+    branches: [main, master, "claude/*", supracloud_ira]
   pull_request:
-    branches: [main, master]
+    branches: [main, master, supracloud_ira]
 
 jobs:
   test:
