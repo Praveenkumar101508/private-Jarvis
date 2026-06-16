@@ -97,6 +97,11 @@ openpyxl==3.1.5                 # Fix #120: pinned (was >=3.1.0)
 # Uses Replicate API (httpx) + ffmpeg system binary
 # ffmpeg install: apt-get install ffmpeg  (Docker) or brew install ffmpeg (macOS)
 
+# ── Calendar: CalDAV (local-first, self-hosted Radicale/Nextcloud/Baïkal) ─────
+# Used under its Apache-2.0 option (dual-licensed GPL-3.0-or-later OR Apache-2.0);
+# see third_party/caldav/NOTICE.md. Imported lazily by actions/calendar_dav.py.
+caldav==3.2.1
+
 # ── Observability ─────────────────────────────────────────────────────────────
 opentelemetry-api==1.27.0
 opentelemetry-sdk==1.27.0

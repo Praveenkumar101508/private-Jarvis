@@ -37,6 +37,8 @@ _ACTIONS: dict[str, ActionSpec] = {
     "notes":     ActionSpec("notes", "", _always),       # local disk (markdown)
     "calendar":  ActionSpec("calendar", "CALCOM_API_KEY (Cal.com)",
                             lambda c: bool(getattr(c, "calcom_api_key", ""))),
+    "calendar_dav": ActionSpec("calendar_dav", "CALDAV_URL (CalDAV)",
+                               lambda c: bool(getattr(c, "caldav_url", ""))),
     "email":     ActionSpec("email", "SMTP_HOST (SMTP)",
                             lambda c: bool(getattr(c, "smtp_host", ""))),
     "email_triage": ActionSpec("email_triage", "IMAP_HOST (IMAP, read-only)",

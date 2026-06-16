@@ -183,6 +183,12 @@ class Settings(BaseSettings):
     calcom_api_key: str = ""
     calcom_api_url: str = "https://api.cal.com"
 
+    # ── Calendar: CalDAV (local-first, self-hosted) ───────────────────────────
+    caldav_url: str = ""
+    caldav_username: str = ""
+    caldav_password: str = ""
+    caldav_calendar: str = ""   # calendar name; first calendar is used if blank
+
     # ── Calendar: Google ──────────────────────────────────────────────────────
     google_calendar_id: str = ""
     google_service_account_json: str = ""  # Path to service account JSON file

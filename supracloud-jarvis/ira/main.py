@@ -438,6 +438,9 @@ def create_app() -> FastAPI:
     from api.routes.notes import router as notes_router
     app.include_router(notes_router, prefix="/api/v1")           # Phase 3: /notes (local-first markdown, delete gated)
 
+    from api.routes.calendar_dav import router as calendar_dav_router
+    app.include_router(calendar_dav_router, prefix="/api/v1")    # Phase 3: /calendar/dav (local-first CalDAV, create/delete gated)
+
     # ── Global error handler ──────────────────────────────────────────────────
     @app.exception_handler(Exception)
     async def global_exception_handler(request: Request, exc: Exception):
