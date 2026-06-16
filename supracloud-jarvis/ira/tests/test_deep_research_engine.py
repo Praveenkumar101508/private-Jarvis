@@ -50,7 +50,7 @@ def test_grounded_happy_path():
     res = asyncio.run(run_deep_research(
         "quantum batteries",
         search_fn=search_fn, read_fn=read_fn,
-        guard_fn=lambda u: guard_outbound(url=u),
+        guard_fn=lambda u: guard_outbound(url=u, resolve_fn=lambda h: ["93.184.216.34"]),
         llm_fn=make_llm(llm_calls),
     ))
 
@@ -155,7 +155,7 @@ def test_injection_payload_is_neutralised():
     res = asyncio.run(run_deep_research(
         "harmless topic",
         search_fn=search_fn, read_fn=read_fn,
-        guard_fn=lambda u: guard_outbound(url=u),   # the REAL egress guard
+        guard_fn=lambda u: guard_outbound(url=u, resolve_fn=lambda h: ["93.184.216.34"]),   # the REAL egress guard
         llm_fn=make_llm(llm_calls),
     ))
 
