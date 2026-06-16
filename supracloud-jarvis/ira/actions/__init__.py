@@ -43,6 +43,8 @@ _ACTIONS: dict[str, ActionSpec] = {
                             lambda c: bool(getattr(c, "smtp_host", ""))),
     "email_triage": ActionSpec("email_triage", "IMAP_HOST (IMAP, read-only)",
                                lambda c: bool(getattr(c, "imap_host", ""))),
+    "android":   ActionSpec("android", "ANDROID_ACTUATOR_ENABLED (experimental, OFF)",
+                            lambda c: bool(getattr(c, "android_actuator_enabled", False))),
 }
 
 # The canonical v1 action set.

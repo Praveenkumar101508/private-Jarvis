@@ -189,6 +189,17 @@ class Settings(BaseSettings):
     caldav_password: str = ""
     caldav_calendar: str = ""   # calendar name; first calendar is used if blank
 
+    # ── Experimental: Android actuator (droidclaw-derived; OFF by default) ─────
+    # Sandboxed, fully local (adb + Ollama). CVE-2026-10216 mitigation: pairing is
+    # loopback-only + rate-limited (see actions/android_pairing.py) — never on LAN.
+    android_actuator_enabled: bool = False
+    android_adb_path: str = "adb"
+    android_pairing_host: str = "127.0.0.1"   # MUST stay loopback
+    android_pairing_max_attempts: int = 5
+    android_pairing_window_s: int = 60
+    android_screen_max_elements: int = 40
+    android_recovery_repeat_limit: int = 3
+
     # ── Calendar: Google ──────────────────────────────────────────────────────
     google_calendar_id: str = ""
     google_service_account_json: str = ""  # Path to service account JSON file

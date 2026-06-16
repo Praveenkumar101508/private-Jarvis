@@ -27,6 +27,7 @@ class _NoKeys:
     smtp_password = ""
     imap_host = ""
     caldav_url = ""
+    android_actuator_enabled = False
 
 
 class _WithKeys:
@@ -38,6 +39,7 @@ class _WithKeys:
     smtp_password = "pw"
     imap_host = "imap.example.com"
     caldav_url = "https://dav.example.com"
+    android_actuator_enabled = True
 
 
 # ── registry: a status per action, never throwing ────────────────────────────
@@ -45,7 +47,7 @@ class _WithKeys:
 def test_v1_action_set_is_defined():
     assert set(V1_ACTIONS) == {
         "tasks", "reminders", "briefings", "files", "notes",
-        "calendar", "calendar_dav", "email", "email_triage",
+        "calendar", "calendar_dav", "email", "email_triage", "android",
     }
 
 
@@ -54,8 +56,8 @@ def test_status_failsoft_when_no_keys():
     # Local actions need no external key -> always configured.
     for local in ("tasks", "reminders", "briefings", "files", "notes"):
         assert st[local]["configured"] is True
-    # External-dep actions report a clear "not configured" message.
-    for ext in ("calendar", "calendar_dav", "email", "email_triage"):
+    # External-dep / experimental actions report a clear "not configured" message.
+    for ext in ("calendar", "calendar_dav", "email", "email_triage", "android"):
         assert st[ext]["configured"] is False
         assert "not configured" in st[ext]["message"]
 
