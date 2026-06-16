@@ -6,12 +6,22 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ---
 
 ## [Unreleased]
+
+### Added — Security hardening
+- TOTP 2FA enforcement: enrol at `POST /auth/totp/enroll`; once a secret is enrolled and enabled, login at `/auth/token` refuses the token without a valid TOTP code; TOTP failures count toward account lockout
+- jti-based token revocation on logout; per-user revoke-all by incrementing a Redis token version counter (all outstanding access tokens invalidated instantly)
+- Short-lived access tokens (30 min) + refresh tokens (7 days), replacing the previous 24-hour single-token model
+- Per-account progressive lockout: 5 consecutive failures trigger a 15-minute lock, escalating exponentially to a 24-hour cap
+- SSRF / DNS-rebinding URL guard: blocks RFC-1918 ranges, loopback, link-local (169.254.x), metadata endpoints, and hostnames that resolve to private addresses
+- Egress / exfiltration guard: blocks outbound research queries that contain secrets, PEM keys, or local filesystem paths
+- Canary tripwires: honeypot HTTP paths, canary JWT token, and ghost username — each fires a CRITICAL security event on any access
+- CI security-invariant tests (`test_security_invariants.py`): assertions that self-modifying paths cannot `git push` or shell out
+
 ### Planned
 - Multi-user support with per-user memory isolation
 - Calendar write-back (Google Calendar + Cal.com)
 - Persistent file storage (MinIO/S3)
 - Mobile push notifications (beyond Telegram)
-- TOTP two-factor authentication for admin login
 
 ---
 

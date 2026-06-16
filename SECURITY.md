@@ -14,7 +14,9 @@ SupraCloud IRA is a **single-owner personal AI assistant**. The threat model is:
 
 ## Authentication
 
-- **Primary**: JWT Bearer token (HS256, 24-hour expiry), issued at `POST /auth/token`
+- **Primary**: JWT Bearer tokens (HS256); short-lived access token (30 min) + refresh token (7 days), both issued at `POST /auth/token`; jti-based per-token revocation on logout; per-user revoke-all by bumping a Redis token version counter (invalidates all outstanding access tokens instantly)
+- **Two-factor**: TOTP (time-based one-time password); enrol at `POST /auth/totp/enroll`; once a secret is enrolled and enabled, login at `/auth/token` refuses the token if a valid TOTP code is not supplied; TOTP failures count toward account lockout
+- **Brute-force**: per-account progressive lockout — 5 consecutive failures trigger a 15-minute lock, escalating to a 24-hour cap; per-IP rate limit (5 req/min) enforced at the login endpoint
 - **Voice**: ECAPA-TDNN biometric speaker verification (cosine similarity ≥ 0.75)
 - **Service-to-service**: Long-lived JWT with `sub=ira-voice` for voice pipeline
 - **Dev mode**: All auth bypassed — NEVER enable `DEV_MODE=true` in production
@@ -40,7 +42,6 @@ The biometric gate blocks non-owner access to:
 
 ## Known Limitations
 
-- Single-factor text login (bcrypt password only) — TOTP planned for Phase 2
 - Biometric voice gate requires enrolment — new installations have no voice owner profile
 - Replicate, Apify, and Telegram integrations send data to third-party services when configured
 - Computer use (Playwright) runs in a container with `--no-sandbox` — isolate from sensitive data
@@ -59,4 +60,5 @@ This is a personal project. If you find a security issue, please open a private 
 - [ ] `IRA_DOMAIN` set to your actual domain
 - [ ] Telegram or email notifications configured for alerts
 - [ ] Voice profile enrolled at `POST /api/v1/voice/enroll`
+- [ ] TOTP enrolled for admin login (`POST /auth/totp/enroll`, then verify with `POST /auth/totp/verify`)
 - [ ] `.env` file not committed to git (verify: `git ls-files .env`)

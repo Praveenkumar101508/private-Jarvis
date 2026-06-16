@@ -144,8 +144,8 @@ IRA is built to be exposed to the internet without flinching. The model isn't "o
 
 ```bash
 # 1. clone
-git clone https://github.com/Praveenkumar101508/Supracloud_ira.git
-cd Supracloud_ira/supracloud-jarvis
+git clone https://github.com/Praveenkumar101508/private-Jarvis.git
+cd private-Jarvis/supracloud-jarvis
 
 # 2. configure (copy the template, fill in your values — nothing here phones home)
 cp .env.example .env
