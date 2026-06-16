@@ -41,6 +41,12 @@ _BOUNDS_RE = re.compile(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]")
 _HIERARCHY_RE = re.compile(r"<hierarchy[\s\S]*?</hierarchy>", re.I)
 # adb input text uses %s for spaces; reject control chars defensively.
 _TEXT_SAFE_RE = re.compile(r"[\x00-\x1f]")
+# `adb shell` runs the argv through the DEVICE's shell, so even though we
+# invoke adb with shell=False on the host, characters like ; & | ` $ ( ) <
+# > in the "type" text would still be interpreted by the on-device shell.
+# Whitelist a safe character set instead of trying to enumerate every
+# dangerous metacharacter.
+_TEXT_ALLOWED_RE = re.compile(r"^[A-Za-z0-9 .,!?@#%_+=:/'\"-]*$")
 
 
 @dataclass
@@ -225,6 +231,8 @@ def build_action_command(action: str, **params) -> list:
         text = str(params.get("text", ""))
         if _TEXT_SAFE_RE.search(text):
             raise ValueError("text contains control characters")
+        if not _TEXT_ALLOWED_RE.match(text):
+            raise ValueError("text contains characters not allowed for device input (shell metacharacters)")
         return ["shell", "input", "text", text.replace(" ", "%s")]
     raise ValueError(f"unsupported action {action!r}")
 

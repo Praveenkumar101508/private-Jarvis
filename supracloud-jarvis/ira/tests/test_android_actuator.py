@@ -65,6 +65,16 @@ def test_build_action_command():
     assert aa.build_action_command("type", text="hi there")[-1] == "hi%sthere"
 
 
+def test_type_rejects_device_shell_metacharacters():
+    """`adb shell input text` runs through the DEVICE's shell, so even though
+    the host-side subprocess call uses argv (no host shell), text containing
+    shell metacharacters could execute on-device. These must be rejected."""
+    import pytest
+    for payload in ("a;reboot", "a && rm -rf /sdcard", "$(whoami)", "`id`", "a|cat", "a>x"):
+        with pytest.raises(ValueError):
+            aa.build_action_command("type", text=payload)
+
+
 # ── disabled by default ──────────────────────────────────────────────────────
 
 def test_read_and_act_disabled_by_default():
