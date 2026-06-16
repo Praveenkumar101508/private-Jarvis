@@ -25,7 +25,7 @@ import ipaddress
 from dataclasses import dataclass, field
 from typing import Callable
 
-_LOOPBACK_NAMES = {"localhost", ""}
+_LOOPBACK_NAMES = {"localhost"}
 
 
 class LoopbackOnlyError(ValueError):

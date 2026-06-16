@@ -15,10 +15,19 @@ from actions.android_pairing import (
 # ── loopback-only guard (removes the remote attack vector) ───────────────────
 
 def test_loopback_detection():
-    for ok in ("127.0.0.1", "::1", "localhost", ""):
+    for ok in ("127.0.0.1", "::1", "localhost"):
         assert is_loopback(ok) is True
-    for bad in ("192.168.1.10", "10.0.0.5", "0.0.0.0", "8.8.8.8", "tunnel.droidclaw.ai"):
+    for bad in ("192.168.1.10", "10.0.0.5", "0.0.0.0", "8.8.8.8", "tunnel.droidclaw.ai", ""):
         assert is_loopback(bad) is False
+
+
+def test_empty_host_is_not_loopback():
+    """An empty host string must NOT be treated as loopback: if this guard is
+    ever reused to validate a *bind* address, bind("") means INADDR_ANY (all
+    interfaces), not loopback — silently re-opening CVE-2026-10216's exposure."""
+    assert is_loopback("") is False
+    with pytest.raises(LoopbackOnlyError):
+        assert_loopback("")
 
 
 def test_assert_loopback_refuses_non_loopback():
