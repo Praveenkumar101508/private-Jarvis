@@ -435,6 +435,9 @@ def create_app() -> FastAPI:
     from api.routes.research import router as research_router
     app.include_router(research_router, prefix="/api/v1")        # v1 3B.2: /research (web search/read) + doctor
 
+    from api.routes.notes import router as notes_router
+    app.include_router(notes_router, prefix="/api/v1")           # Phase 3: /notes (local-first markdown, delete gated)
+
     # ── Global error handler ──────────────────────────────────────────────────
     @app.exception_handler(Exception)
     async def global_exception_handler(request: Request, exc: Exception):

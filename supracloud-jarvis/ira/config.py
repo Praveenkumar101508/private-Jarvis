@@ -168,6 +168,17 @@ class Settings(BaseSettings):
     smtp_password: str = ""
     smtp_to: str = ""          # Recipient — defaults to smtp_user if blank
 
+    # ── Email triage: IMAP (read-only inbox, local-first) ─────────────────────
+    imap_host: str = ""
+    imap_port: int = 993
+    imap_user: str = ""
+    imap_password: str = ""
+    imap_mailbox: str = "INBOX"
+    imap_use_ssl: bool = True
+
+    # ── Notes (local-first, on-disk markdown) ─────────────────────────────────
+    notes_dir: str = "data/notes"
+
     # ── Calendar: Cal.com ─────────────────────────────────────────────────────
     calcom_api_key: str = ""
     calcom_api_url: str = "https://api.cal.com"
