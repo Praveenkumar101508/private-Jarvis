@@ -21,6 +21,9 @@ nginx/certs/
 **/tailored_resumes/
 **/base_resume.md
 
+# Security scans — machine-specific dev inventory (run on the real box, not CI)
+security/dev-baseline.ndjson
+
 # Dependencies
 node_modules/
 __pycache__/
