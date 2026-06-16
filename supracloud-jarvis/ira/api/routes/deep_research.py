@@ -29,7 +29,8 @@ from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
 
 from api.middleware.auth import require_auth
-from utils.llm import chat_complete, stream_tokens
+from research.deep_research_engine import run_deep_research
+from utils.llm import stream_tokens
 
 router = APIRouter(prefix="/research", tags=["research"])
 logger = logging.getLogger("ira.deep_research")
@@ -80,33 +81,6 @@ class ArticleRequest(BaseModel):
 
 # ── Research agent prompts ────────────────────────────────────────────────────
 
-_QUERY_GEN_SYSTEM = """\
-You are a research strategist. Given a topic, generate 5 focused research sub-questions
-that together would cover the topic comprehensively.
-Output ONLY a JSON array of strings — no explanation:
-["question 1", "question 2", ...]
-"""
-
-_RESEARCHER_SYSTEM = """\
-You are an expert researcher and analyst with access to broad knowledge.
-Answer the given research question comprehensively, citing key facts, statistics,
-expert opinions, and current developments (up to your knowledge cutoff).
-Structure your answer with clear sections. Be thorough but avoid padding.
-"""
-
-_SYNTHESISER_SYSTEM = """\
-You are a world-class analyst and writer. You have received multiple research findings
-on different aspects of a topic. Synthesise them into a cohesive, comprehensive output.
-
-Requirements:
-- Professional, authoritative tone
-- Well-structured with clear headings
-- Include key insights, data points, and conclusions
-- Identify patterns and connections across different findings
-- End with actionable conclusions or future outlook
-- No filler content — every sentence must add value
-"""
-
 _ARTICLE_SYSTEM = """\
 You are a professional content creator and journalist. Write the requested article
 in the specified style and for the target audience.
@@ -122,56 +96,6 @@ Requirements:
 """
 
 
-async def _generate_research_queries(topic: str) -> list[str]:
-    """Generate 5 focused sub-questions for deep research."""
-    msgs = [
-        {"role": "system", "content": _QUERY_GEN_SYSTEM},
-        {"role": "user", "content": f"Topic: {topic}"},
-    ]
-    raw = await chat_complete(msgs, use_deep=False, max_tokens=512, temperature=0.3)
-    json_match = re.search(r"\[[\s\S]*\]", raw)
-    if not json_match:
-        # Fallback: split by lines
-        return [topic]
-    try:
-        queries = _json.loads(json_match.group(0))
-        return queries[:5] if queries else [topic]
-    except Exception:
-        return [topic]
-
-
-async def _research_sub_question(question: str, topic: str) -> str:
-    """Research a single sub-question."""
-    msgs = [
-        {"role": "system", "content": _RESEARCHER_SYSTEM},
-        {"role": "user", "content": f"Main topic: {topic}\n\nResearch question: {question}"},
-    ]
-    return await chat_complete(msgs, use_deep=True, max_tokens=2048, temperature=0.3)
-
-
-async def _synthesise_research(topic: str, findings: list[tuple[str, str]], output_format: str) -> str:
-    """Synthesise all research findings into a final output."""
-    findings_text = "\n\n".join(
-        f"**Sub-question {i+1}: {q}**\n{answer}"
-        for i, (q, answer) in enumerate(findings)
-    )
-    format_hints = {
-        "report": "Create a formal research report with Executive Summary, Key Findings, Analysis, and Conclusions sections.",
-        "article": "Create a well-structured long-form article with engaging prose.",
-        "summary": "Create a concise executive summary (300-500 words) with bullet point key findings.",
-        "bullets": "Create a structured bullet-point summary organised by theme.",
-    }
-    msgs = [
-        {"role": "system", "content": _SYNTHESISER_SYSTEM},
-        {"role": "user", "content": (
-            f"Topic: **{topic}**\n\n"
-            f"Output format: {format_hints.get(output_format, format_hints['report'])}\n\n"
-            f"Research findings:\n\n{findings_text}"
-        )},
-    ]
-    return await chat_complete(msgs, use_deep=True, max_tokens=4096, temperature=0.4)
-
-
 # ── SSE deep research endpoint ────────────────────────────────────────────────
 
 @router.post("/deep")
@@ -179,65 +103,78 @@ async def deep_research(
     req: DeepResearchRequest,
     _user: str = Depends(require_auth),
 ):
-    """Run 5-round deep research on any topic with synthesis (SSE)."""
+    """Run web-grounded multi-step deep research on any topic with synthesis (SSE).
+
+    Sources are searched, guarded, fetched, and sanitised by the research channels;
+    the engine handles dead/contradictory sources and bounds the fetch loop. We
+    stream the engine's progress events in real time, then stream the synthesised
+    report, and finish with a citation list.
+    """
 
     async def gen():
         t0 = time.monotonic()
-        yield {"data": _json.dumps({"token": f"🔬 **Deep Research**: *{req.topic[:80]}*\n\nGenerating research strategy…\n\n"})}
+        yield {"data": _json.dumps({"token": f"🔬 **Deep Research**: *{req.topic[:80]}*\n\nPlanning & gathering sources…\n\n"})}
+
+        # Bridge the engine's synchronous progress callback into the SSE stream
+        # via a queue, so we can yield events while the engine runs.
+        events: asyncio.Queue[str] = asyncio.Queue()
+        task = asyncio.create_task(
+            run_deep_research(
+                req.topic,
+                num_subquestions=req.rounds,
+                on_event=lambda m: events.put_nowait(m),
+            )
+        )
 
         try:
-            # Round 1: Generate research sub-questions
-            queries = await _generate_research_queries(req.topic)
-            yield {"data": _json.dumps({"token": f"📋 **Research plan** ({len(queries)} sub-questions):\n" +
-                                        "".join(f"  {i+1}. {q}\n" for i, q in enumerate(queries)) + "\n"})}
+            while True:
+                drain = asyncio.ensure_future(events.get())
+                done, _ = await asyncio.wait({task, drain}, return_when=asyncio.FIRST_COMPLETED)
+                if drain in done:
+                    yield {"data": _json.dumps({"token": f"  · {drain.result()}\n"})}
+                    continue
+                drain.cancel()  # task finished first
+                # Flush any progress events queued before completion.
+                while not events.empty():
+                    yield {"data": _json.dumps({"token": f"  · {events.get_nowait()}\n"})}
+                break
 
-            # Rounds 2-N: Research each sub-question in parallel batches
-            findings: list[tuple[str, str]] = []
-            batch_size = 2  # Research 2 sub-questions at a time
+            result = await task  # re-raises engine errors here
 
-            for batch_start in range(0, len(queries), batch_size):
-                batch = queries[batch_start:batch_start + batch_size]
-                yield {"data": _json.dumps({"token": f"\n🔍 Researching: {', '.join(f'Q{batch_start+i+1}' for i in range(len(batch)))}…\n"})}
+            yield {"data": _json.dumps({"token": "\n" + "─" * 50 + "\n\n"})}
+            if not result.grounded:
+                yield {"data": _json.dumps({"token": "⚠️ No live sources retrieved — answering from model knowledge only.\n\n"})}
 
-                batch_results = await asyncio.gather(
-                    *[_research_sub_question(q, req.topic) for q in batch],
-                    return_exceptions=True,
-                )
-
-                for q, result in zip(batch, batch_results):
-                    if isinstance(result, Exception):
-                        findings.append((q, f"Research failed: {result}"))
-                    else:
-                        findings.append((q, result))
-                        yield {"data": _json.dumps({"token": f"  ✓ Completed: {q[:60]}\n"})}
-
-            # Final synthesis
-            yield {"data": _json.dumps({"token": f"\n📝 Synthesising {len(findings)} research findings…\n\n"})}
-            yield {"data": _json.dumps({"token": "─" * 50 + "\n\n"})}
-
-            synthesis = await _synthesise_research(req.topic, findings, req.output_format)
-
-            # Stream synthesis word by word (simulate streaming for large output)
-            words = synthesis.split(" ")
+            # Stream the synthesised report word by word.
+            words = result.report.split(" ")
             chunk_size = 10
             for i in range(0, len(words), chunk_size):
                 chunk = " ".join(words[i:i + chunk_size])
                 if i + chunk_size < len(words):
                     chunk += " "
                 yield {"data": _json.dumps({"token": chunk})}
-                await asyncio.sleep(0.01)  # slight delay for streaming effect
+                await asyncio.sleep(0.01)
 
-            latency = int((time.monotonic() - t0) * 1000)
+            if result.citations:
+                cites = "\n".join(f"  {i+1}. {u}" for i, u in enumerate(result.citations))
+                yield {"data": _json.dumps({"token": f"\n\n**Sources ({len(result.citations)}):**\n{cites}\n"})}
+
             yield {"data": _json.dumps({
                 "research_complete": True,
                 "topic": req.topic,
-                "rounds": len(findings),
-                "word_count": len(synthesis.split()),
-                "latency_ms": latency,
+                "subquestions": result.subquestions,
+                "citations": result.citations,
+                "dead_sources": result.dead_sources,
+                "fetches_used": result.fetches_used,
+                "grounded": result.grounded,
+                "word_count": len(result.report.split()),
+                "latency_ms": int((time.monotonic() - t0) * 1000),
             })}
 
         except Exception as e:
             logger.error(f"Deep research error: {e}", exc_info=True)
+            if not task.done():
+                task.cancel()
             yield {"data": _json.dumps({"token": f"\n❌ Research error: {str(e)[:300]}"})}
 
         yield {"data": _json.dumps({
