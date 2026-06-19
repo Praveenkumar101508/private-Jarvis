@@ -174,7 +174,10 @@ class WakeWordListener:
         self.verify_frames = verify_frames
         self.command_frames = command_frames
         self.running = False
-        self._last_fire = 0.0
+        # -inf (not 0.0): time.monotonic()'s reference point is arbitrary, so a
+        # freshly-booted box could have monotonic() < cooldown and wrongly suppress
+        # the very first activation. -inf guarantees the first wake always fires.
+        self._last_fire = float("-inf")
 
     def stop(self) -> None:
         self.running = False
