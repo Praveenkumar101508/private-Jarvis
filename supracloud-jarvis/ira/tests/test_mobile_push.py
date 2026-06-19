@@ -110,6 +110,7 @@ async def test_send_push_failsoft_on_post_error(monkeypatch):
 def _app(monkeypatch):
     fake_auth = types.ModuleType("api.middleware.auth")
     fake_auth.require_auth = lambda: "owner"
+    fake_auth.is_owner = lambda _u=None: True
     monkeypatch.setitem(sys.modules, "api.middleware.auth", fake_auth)
 
     from fastapi import FastAPI
@@ -160,3 +161,28 @@ def test_route_list_devices_returns_count_only(monkeypatch):
     r = client.get("/mobile/devices")
     assert r.status_code == 200
     assert r.json() == {"count": 2}          # count only — no token leakage
+
+
+# ── Task routes (execute-ASAP + approval gate) ───────────────────────────────
+
+def test_route_submit_unknown_task_404(monkeypatch):
+    from fastapi.testclient import TestClient
+
+    app = _app(monkeypatch)
+    client = TestClient(app)
+    r = client.post("/mobile/tasks", json={"type": "does-not-exist", "params": {}})
+    assert r.status_code == 404
+
+
+def test_route_submit_email_task_requires_confirmation(monkeypatch):
+    from fastapi.testclient import TestClient
+
+    app = _app(monkeypatch)
+    client = TestClient(app)
+    r = client.post("/mobile/tasks",
+                    json={"type": "email", "params": {"to": "a@b.com", "subject": "hi", "body": "yo"}})
+    assert r.status_code == 200
+    data = r.json()
+    assert data["status"] == "confirmation_required"   # a tap can't silently send
+    assert "Send email to a@b.com" in data["preview"]
+    assert data["token"]
