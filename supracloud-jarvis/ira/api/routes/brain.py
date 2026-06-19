@@ -92,6 +92,7 @@ async def start_brain(app) -> None:
             affect=_build_affect(),
         )
         app.state.brain = brain
+        brain.attn.load_weights(os.getenv("IRA_BRAIN_SALIENCE_PATH", ""))  # restore learned triage
         task = asyncio.create_task(brain.run())
         task.add_done_callback(
             lambda t: t.cancelled() or (t.exception() and logger.warning(
@@ -147,6 +148,7 @@ async def _consolidation_loop(brain, secs: float) -> None:
             await brain.consolidate()
             if getattr(brain, "affect", None) is not None:
                 brain.affect.save()   # opportunistic mood persistence
+            brain.attn.save_weights(os.getenv("IRA_BRAIN_SALIENCE_PATH", ""))  # + learned triage
         except Exception as exc:  # noqa: BLE001 - never let consolidation crash the task
             logger.warning("Realtime brain consolidation failed: %s", exc)
 
@@ -158,6 +160,7 @@ async def stop_brain(app) -> None:
         brain.stop()
         if getattr(brain, "affect", None) is not None:
             brain.affect.save()   # persist mood across restarts
+        brain.attn.save_weights(os.getenv("IRA_BRAIN_SALIENCE_PATH", ""))  # persist learned triage
     for attr in ("brain_task", "brain_consolidate_task"):
         task = getattr(app.state, attr, None)
         if task is not None:

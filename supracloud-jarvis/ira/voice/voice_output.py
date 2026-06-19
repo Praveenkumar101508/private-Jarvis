@@ -145,10 +145,38 @@ async def start_voice_output(app, brain) -> None:
             lambda t: t.cancelled() or (t.exception() and logger.warning(
                 "Voice output worker ended: %s", t.exception())))
         app.state.voice_output_task = task
+        await _setup_omnivoice_vram(app)
         logger.info("Voice output online (local playback)")
     except Exception as exc:  # noqa: BLE001 - never block startup
         logger.warning("Voice output failed to start (non-fatal): %s", exc)
         app.state.voice_output = None
+
+
+async def _setup_omnivoice_vram(app) -> None:
+    """OmniVoice-only: optional model pre-warm (snappy first word) + idle VRAM unload.
+    No-op for other engines. Fully fail-soft."""
+    if os.getenv("IRA_VOICE_ENGINE", "").strip().lower() != "omnivoice":
+        return
+    try:
+        from voice import tts_omnivoice
+        if os.getenv("IRA_OMNIVOICE_PREWARM", "false").strip().lower() in ("1", "true", "yes", "on"):
+            await asyncio.to_thread(tts_omnivoice.prewarm)
+        idle = float(os.getenv("IRA_OMNIVOICE_IDLE_UNLOAD", "0"))
+        if idle > 0:
+            app.state.omnivoice_idle_task = asyncio.create_task(_omnivoice_idle_loop(idle))
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("OmniVoice VRAM setup failed (non-fatal): %s", exc)
+
+
+async def _omnivoice_idle_loop(idle_secs: float) -> None:
+    from voice import tts_omnivoice
+
+    while True:
+        await asyncio.sleep(max(5.0, idle_secs / 2))
+        try:
+            await asyncio.to_thread(tts_omnivoice.maybe_unload, idle_secs)
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("OmniVoice idle-unload check failed (non-fatal): %s", exc)
 
 
 async def stop_voice_output(app) -> None:
@@ -159,12 +187,13 @@ async def stop_voice_output(app) -> None:
             with contextlib.suppress(Exception):
                 brain.off_speak(vo.handler)
         vo.stop()
-    task = getattr(app.state, "voice_output_task", None)
-    if task is not None:
-        task.cancel()
-        with contextlib.suppress(asyncio.CancelledError, Exception):
-            await task
-        app.state.voice_output_task = None
+    for attr in ("voice_output_task", "omnivoice_idle_task"):
+        task = getattr(app.state, attr, None)
+        if task is not None:
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await task
+            setattr(app.state, attr, None)
     app.state.voice_output = None
 
 

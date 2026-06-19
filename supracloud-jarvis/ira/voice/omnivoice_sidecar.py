@@ -72,10 +72,28 @@ def _synthesize(req: dict) -> bytes:
     return np.asarray(samples, dtype="<f4").tobytes()
 
 
+def _unload_model() -> None:
+    """Drop the model and free VRAM (between bursts of use)."""
+    global _model
+    _model = None
+    try:
+        import torch
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def _handle(req: dict):
     op = req.get("op")
     if op == "ping":
         return {"ok": True, "pong": True}, b""
+    if op == "warm":
+        _load_model()                       # pay the model-load cost up front
+        return {"ok": True, "warm": True}, b""
+    if op == "unload":
+        _unload_model()                     # free VRAM until next synth
+        return {"ok": True, "unloaded": True}, b""
     if op == "synth":
         pcm = _synthesize(req)
         return {"ok": True, "sr": 24000, "samples": len(pcm) // 4, "format": "f32le"}, pcm

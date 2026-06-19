@@ -326,6 +326,31 @@ class Attention:
             loss.backward()
             self.opt.step()
 
+    def save_weights(self, path: str) -> bool:
+        """Persist the learned SalienceNet (atomic write). No-op without torch/net."""
+        if not _TORCH or self.net is None or not path:
+            return False
+        try:  # pragma: no cover - torch only
+            tmp = f"{path}.tmp"
+            torch.save(self.net.state_dict(), tmp)
+            os.replace(tmp, path)
+            return True
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("salience save failed (non-fatal): %s", exc)
+            return False
+
+    def load_weights(self, path: str) -> bool:
+        """Load SalienceNet weights if present. No-op without torch/net/file; a stale
+        or corrupt file is logged and ignored so it never breaks startup."""
+        if not _TORCH or self.net is None or not path or not os.path.isfile(path):
+            return False
+        try:  # pragma: no cover - torch only
+            self.net.load_state_dict(torch.load(path, map_location="cpu"))
+            return True
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("salience load failed (ignored): %s", exc)
+            return False
+
 
 # ── System 2 prompts (the system prompt is the ONLY trusted instruction) ────
 SCHEMA = ('{"thought": "<private reasoning, 1-3 sentences>", '

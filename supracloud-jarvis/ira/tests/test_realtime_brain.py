@@ -332,6 +332,38 @@ async def test_affect_absent_leaves_prompt_unchanged():
     assert sys_prompt.startswith("You are IRA's inner mind")
 
 
+# ── SalienceNet weight persistence ───────────────────────────────────────────
+
+def test_salience_persistence_noop_without_torch(tmp_path):
+    import agents.cortex_realtime_brain as brain_mod
+
+    a = Attention()
+    p = str(tmp_path / "sal.pt")
+    if not brain_mod._TORCH:
+        # heuristic-only env: save/load are clean no-ops, never raise
+        assert a.save_weights(p) is False
+        assert a.load_weights(p) is False
+
+
+def test_salience_load_missing_file_is_false(tmp_path):
+    assert Attention().load_weights(str(tmp_path / "nope.pt")) is False
+
+
+def test_salience_roundtrip_with_torch(tmp_path):
+    torch = pytest.importorskip("torch")
+    import agents.cortex_realtime_brain as brain_mod
+
+    if not brain_mod._TORCH:
+        pytest.skip("torch present but not active in brain module")
+    a = Attention()
+    p = str(tmp_path / "sal.pt")
+    assert a.save_weights(p) is True
+    b = Attention()
+    assert b.load_weights(p) is True
+    for v1, v2 in zip(a.net.state_dict().values(), b.net.state_dict().values()):
+        assert torch.equal(v1, v2)
+
+
 # ── Defensive JSON parsing ───────────────────────────────────────────────────
 
 def test_safe_json_recovers_from_noisy_output():

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import io
 import sys
+import time
 import types
 
 import pytest
@@ -130,6 +131,53 @@ def test_synth_dead_process_fails_soft(monkeypatch):
 def test_ping_ok():
     proc = _FakeProc(_framed({"ok": True, "pong": True}))
     assert _client_with(proc).ping() is True
+
+
+# ── Pre-warm + idle VRAM unload ──────────────────────────────────────────────
+
+def test_warm_sets_state():
+    client = _client_with(_FakeProc(_framed({"ok": True, "warm": True})))
+    assert client.warm() is True
+    assert client._warm is True
+
+
+def test_unload_clears_state():
+    client = _client_with(_FakeProc(_framed({"ok": True, "unloaded": True})))
+    client._warm = True
+    assert client.unload() is True
+    assert client._warm is False
+
+
+def test_maybe_unload_when_idle():
+    client = _client_with(_FakeProc(_framed({"ok": True, "unloaded": True})))
+    client._warm = True
+    client._last_used = time.monotonic() - 100
+    assert client.maybe_unload(10) is True
+    assert client._warm is False
+
+
+def test_maybe_unload_skips_when_recent():
+    client = _client_with(_FakeProc(_framed({"ok": True, "unloaded": True})))
+    client._warm = True
+    client._last_used = time.monotonic()
+    assert client.maybe_unload(10) is False
+    assert client._warm is True
+
+
+def test_maybe_unload_noop_when_cold():
+    client = _client_with(_FakeProc(b""))
+    client._warm = False
+    assert client.maybe_unload(0) is False
+
+
+def test_module_prewarm_noop_without_sidecar(monkeypatch):
+    monkeypatch.setattr(ov, "_get_sidecar", lambda: None)
+    assert ov.prewarm() is False
+
+
+def test_module_maybe_unload_noop_without_sidecar(monkeypatch):
+    monkeypatch.setattr(ov, "_sidecar", None)
+    assert ov.maybe_unload(0) is False
 
 
 # ── _get_sidecar + synthesize_wav_omnivoice fail-soft ────────────────────────

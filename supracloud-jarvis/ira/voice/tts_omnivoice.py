@@ -31,6 +31,7 @@ import logging
 import os
 import subprocess
 import threading
+import time
 from math import gcd
 from typing import Optional, Tuple
 
@@ -102,6 +103,8 @@ class OmniVoiceSidecar:
         self._cwd = cwd
         self._proc: Optional[subprocess.Popen] = None
         self._lock = threading.Lock()
+        self._last_used = 0.0
+        self._warm = False
 
     def _spawn(self) -> None:
         cmd = [self._python, "-m", "voice.omnivoice_sidecar",
@@ -148,6 +151,7 @@ class OmniVoiceSidecar:
                          ("language", language), ("num_step", num_step), ("speed", speed)):
             if val is not None:
                 header[key] = val
+        self._last_used = time.monotonic()
         resp = self._request(header)
         if resp is None:
             return b""
@@ -155,11 +159,35 @@ class OmniVoiceSidecar:
         if not hdr.get("ok"):
             logger.warning("OmniVoice synth error: %s", hdr.get("error"))
             return b""
+        self._warm = True
         return pcm
 
     def ping(self) -> bool:
         resp = self._request({"op": "ping"})
         return bool(resp and resp[0].get("ok"))
+
+    def warm(self) -> bool:
+        """Pre-load the model so the first real utterance isn't cold."""
+        resp = self._request({"op": "warm"})
+        ok = bool(resp and resp[0].get("ok"))
+        if ok:
+            self._warm = True
+            self._last_used = time.monotonic()
+        return ok
+
+    def unload(self) -> bool:
+        """Drop the model to free VRAM until the next synth."""
+        resp = self._request({"op": "unload"})
+        ok = bool(resp and resp[0].get("ok"))
+        if ok:
+            self._warm = False
+        return ok
+
+    def maybe_unload(self, idle_secs: float) -> bool:
+        """Unload if the model is warm but has been idle past idle_secs."""
+        if self._warm and (time.monotonic() - self._last_used) >= idle_secs:
+            return self.unload()
+        return False
 
     def close(self) -> None:
         with self._lock:
@@ -196,6 +224,17 @@ def _get_sidecar() -> Optional[OmniVoiceSidecar]:
                 cwd=_default_cwd(),
             )
     return _sidecar
+
+
+def prewarm() -> bool:
+    """Best-effort: spawn + pre-load the OmniVoice model. No-op if unavailable."""
+    client = _get_sidecar()
+    return client.warm() if client is not None else False
+
+
+def maybe_unload(idle_secs: float) -> bool:
+    """Unload the (existing) sidecar's model if idle past idle_secs. Never spawns."""
+    return _sidecar.maybe_unload(idle_secs) if _sidecar is not None else False
 
 
 # ── Audio adaptation (lazy numpy/scipy — kept out of import for the test env) ──
