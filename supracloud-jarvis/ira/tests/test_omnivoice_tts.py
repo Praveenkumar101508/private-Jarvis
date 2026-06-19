@@ -168,7 +168,7 @@ def test_synthesize_say_uses_omnivoice_when_selected(monkeypatch):
     monkeypatch.setenv("IRA_VOICE_ENGINE", "omnivoice")
     monkeypatch.setattr(
         "voice.tts_omnivoice.synthesize_wav_omnivoice",
-        lambda text, lang="en", voice=None, steps=None: b"OMNIWAV",
+        lambda text, lang="en", voice=None, steps=None, instruct=None, speed=None: b"OMNIWAV",
     )
     assert tts_factory.synthesize_say("hello", lang="en") == b"OMNIWAV"
 

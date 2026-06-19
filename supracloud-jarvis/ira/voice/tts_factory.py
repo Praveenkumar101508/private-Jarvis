@@ -69,16 +69,19 @@ def _say_engine() -> str:
 
 
 def synthesize_say(text: str, *, lang: str = "en", voice: str | None = None,
-                   steps: int | None = None) -> bytes:
+                   steps: int | None = None, instruct: str | None = None,
+                   speed: float | None = None) -> bytes:
     """Pick the TTS engine by language and return a 44.1 kHz WAV (the HTTP /voice/say
-    path). When IRA_VOICE_ENGINE=omnivoice, OmniVoice (600+ langs) handles everything,
-    failing soft to the logic below. Otherwise: Tamil/Telugu/Kannada/Malayalam route to
+    path, and the local voice-output path). When IRA_VOICE_ENGINE=omnivoice, OmniVoice
+    (600+ langs) handles everything — carrying optional affect `instruct`/`speed` — and
+    fails soft to the logic below. Otherwise: Tamil/Telugu/Kannada/Malayalam route to
     the native Indic engine (fail soft to Supertonic's 'na'); everything else — incl.
     Hindi and Supertonic's other 30 languages — uses Supertonic."""
     if _say_engine() == "omnivoice":
         try:
             from voice.tts_omnivoice import synthesize_wav_omnivoice
-            wav = synthesize_wav_omnivoice(text, lang=lang, voice=voice, steps=steps)
+            wav = synthesize_wav_omnivoice(text, lang=lang, voice=voice, steps=steps,
+                                           instruct=instruct, speed=speed)
             if wav:
                 return wav
             logger.warning("OmniVoice produced no audio; falling back to Supertonic/Indic.")

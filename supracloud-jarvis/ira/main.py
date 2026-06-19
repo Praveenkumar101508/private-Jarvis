@@ -171,6 +171,10 @@ async def lifespan(app: FastAPI):
     from api.routes.brain import start_brain, stop_brain
     await start_brain(app)
 
+    # Local voice output — speak brain replies aloud (OFF by default). After the brain.
+    from voice.voice_output import start_voice_output, stop_voice_output
+    await start_voice_output(app, getattr(app.state, "brain", None))
+
     # Always-on, owner-gated wake-word listener (OFF by default).
     from voice.wakeword import start_wakeword, stop_wakeword
     await start_wakeword(app)
@@ -180,6 +184,7 @@ async def lifespan(app: FastAPI):
 
     # Graceful shutdown
     await stop_wakeword(app)
+    await stop_voice_output(app)
     await stop_brain(app)
     await close_checkpointer()
     await close_pool()

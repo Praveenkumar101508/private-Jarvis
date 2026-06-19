@@ -247,12 +247,14 @@ def _pcm_to_wav(pcm_f32le: bytes, src_sr: int, dst_sr: int) -> bytes:
 # ── HTTP /voice/say path ──────────────────────────────────────────────────────
 
 def synthesize_wav_omnivoice(text: str, lang: str = "en", voice: Optional[str] = None,
-                             steps: Optional[int] = None) -> bytes:
+                             steps: Optional[int] = None, instruct: Optional[str] = None,
+                             speed: Optional[float] = None) -> bytes:
     """Synthesize `text` to a 44.1 kHz mono 16-bit WAV via OmniVoice. Returns b"" on
     any failure so the caller (synthesize_say) can fall back to Supertonic/Indic.
 
     `voice` is accepted for signature parity with the Supertonic path; OmniVoice picks
     its voice from the configured reference clip (cloning) or instruct (design) instead.
+    `instruct`/`speed` (e.g. from the affect layer) override the env defaults when given.
     """
     client = _get_sidecar()
     if client is None:
@@ -261,9 +263,10 @@ def synthesize_wav_omnivoice(text: str, lang: str = "en", voice: Optional[str] =
         text,
         ref_audio=os.getenv("IRA_OMNIVOICE_REF_AUDIO") or None,
         ref_text=os.getenv("IRA_OMNIVOICE_REF_TEXT") or None,
-        instruct=os.getenv("IRA_OMNIVOICE_INSTRUCT") or None,
+        instruct=instruct or os.getenv("IRA_OMNIVOICE_INSTRUCT") or None,
         language=_omni_lang(lang),
         num_step=int(steps) if steps else _DEFAULT_STEPS,
+        speed=speed,
     )
     if not pcm:
         return b""
