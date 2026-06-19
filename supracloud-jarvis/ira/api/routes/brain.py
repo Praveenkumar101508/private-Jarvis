@@ -49,6 +49,28 @@ def _safe_source(raw: object) -> str:
     return s if s in _CLIENT_SOURCES else "user"
 
 
+async def feed_percept(app, source: str, text: str) -> bool:
+    """Feed a percept to the running brain from another subsystem (voice, vision).
+
+    The seam other IRA modules use to push perceptions in — e.g. an owner-gated
+    voice transcript, or a vision caption. Returns True if delivered, False if the
+    brain isn't running. The source is clamped to the untrusted external set and
+    the call never raises, so callers can fire-and-forget safely.
+    """
+    brain = getattr(getattr(app, "state", None), "brain", None)
+    if brain is None:
+        return False
+    text = (text or "").strip()
+    if not text:
+        return False
+    try:
+        await brain.perceive(_safe_source(source), text)
+        return True
+    except Exception as exc:  # noqa: BLE001 - never let a percept feed break a caller
+        logger.debug("feed_percept failed (non-fatal): %s", exc)
+        return False
+
+
 # ── Lifecycle (called from main.lifespan) ────────────────────────────────────
 
 async def start_brain(app) -> None:

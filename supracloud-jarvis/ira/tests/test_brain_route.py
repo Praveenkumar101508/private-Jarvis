@@ -63,6 +63,36 @@ async def test_start_and_stop_brain_when_enabled(monkeypatch):
     assert app.state.brain is None
 
 
+# ── feed_percept seam (voice / vision sources) ───────────────────────────────
+
+async def test_feed_percept_noop_when_no_brain():
+    from api.routes.brain import feed_percept
+
+    app = types.SimpleNamespace(state=types.SimpleNamespace(brain=None))
+    assert await feed_percept(app, "voice", "hello") is False
+
+
+async def test_feed_percept_delivers_and_clamps_source():
+    from api.routes.brain import feed_percept
+
+    brain = _FakeBrain()
+    app = types.SimpleNamespace(state=types.SimpleNamespace(brain=brain))
+    assert await feed_percept(app, "voice", "watch the gpu") is True
+    assert brain.perceived == [("voice", "watch the gpu")]
+    # a non-external source from a subsystem is still clamped
+    await feed_percept(app, "internal", "sneaky")
+    assert brain.perceived[-1] == ("user", "sneaky")
+
+
+async def test_feed_percept_ignores_empty_text():
+    from api.routes.brain import feed_percept
+
+    brain = _FakeBrain()
+    app = types.SimpleNamespace(state=types.SimpleNamespace(brain=brain))
+    assert await feed_percept(app, "voice", "   ") is False
+    assert brain.perceived == []
+
+
 # ── WebSocket ────────────────────────────────────────────────────────────────
 
 class _FakeBrain:

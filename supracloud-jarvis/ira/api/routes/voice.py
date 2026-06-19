@@ -13,7 +13,7 @@ import os
 import secrets
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Response
+from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File, Form, Response
 from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
 
@@ -153,6 +153,7 @@ class TranscribeResponse(BaseModel):
 
 @router.post("/transcribe", response_model=TranscribeResponse)
 async def transcribe(
+    request: Request,
     audio: UploadFile = File(..., description="Recorded utterance (webm/opus or WAV)."),
     _user: str = Depends(require_auth),
 ):
@@ -190,6 +191,13 @@ async def transcribe(
         from voice.gate import gate_from_audio
         decision = await gate_from_audio(pcm16, session_id="voice_transcribe")
         is_owner = bool(decision["is_owner"])
+
+    # Feed the owner's utterance to the continuous brain as a voice percept
+    # (no-op unless the brain is running). Only the owner drives the brain, and
+    # the percept still passes the brain's own sanitization. Fail-soft.
+    if is_owner and text:
+        from api.routes.brain import feed_percept
+        await feed_percept(request.app, "voice", text)
 
     return TranscribeResponse(text=text, is_owner=is_owner)
 
