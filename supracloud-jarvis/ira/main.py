@@ -462,6 +462,9 @@ def create_app() -> FastAPI:
     from api.routes.brain import router as brain_router
     app.include_router(brain_router)                             # /ws/brain (continuous brain, OFF by default)
 
+    from api.routes.mobile import router as mobile_router
+    app.include_router(mobile_router)                            # /mobile/* (mobile app support, push OFF by default)
+
     # ── Global error handler ──────────────────────────────────────────────────
     @app.exception_handler(Exception)
     async def global_exception_handler(request: Request, exc: Exception):

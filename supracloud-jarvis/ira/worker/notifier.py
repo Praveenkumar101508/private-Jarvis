@@ -86,6 +86,17 @@ async def notify(
         except Exception as e:
             logger.warning(f"Email delivery failed: {e}")
 
+    # Mobile push (Expo) — if enabled and devices are registered (#3 mobile app)
+    try:
+        from worker.push_mobile import mobile_push_enabled, send_push
+        if mobile_push_enabled():
+            sent = await send_push(title, body, priority=priority,
+                                   data={"category": category, "id": notif_id})
+            if sent:
+                channels_sent.append("mobile")
+    except Exception as e:
+        logger.warning(f"Mobile push delivery failed: {e}")
+
     # Persist to notifications table
     await _persist(notif_id, category, title, body, priority, channels_sent, metadata or {})
 
