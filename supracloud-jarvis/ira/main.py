@@ -171,10 +171,15 @@ async def lifespan(app: FastAPI):
     from api.routes.brain import start_brain, stop_brain
     await start_brain(app)
 
+    # Always-on, owner-gated wake-word listener (OFF by default).
+    from voice.wakeword import start_wakeword, stop_wakeword
+    await start_wakeword(app)
+
     logger.info("IRA is online. Good morning.")
     yield
 
     # Graceful shutdown
+    await stop_wakeword(app)
     await stop_brain(app)
     await close_checkpointer()
     await close_pool()
