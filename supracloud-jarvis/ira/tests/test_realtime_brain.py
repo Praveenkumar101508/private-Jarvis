@@ -46,6 +46,16 @@ class _RecordingLLM:
         return self.response
 
 
+class _RecordingMemory:
+    """Captures everything written to the long-term memory sink."""
+
+    def __init__(self):
+        self.saved: list[tuple[str, str, float]] = []
+
+    async def remember(self, text: str, *, kind: str = "thought", importance: float = 0.5):
+        self.saved.append((kind, text, importance))
+
+
 # ── System 1: salience triage ────────────────────────────────────────────────
 
 def test_user_percept_more_salient_than_timer():
@@ -241,6 +251,54 @@ async def test_brain_has_no_action_execution_path():
     assert spoken == ["rm -rf /"]                        # surfaced to owner, NOT executed
     assert not hasattr(brain, "execute")
     assert not hasattr(brain, "run_action")
+
+
+# ── Long-term memory persistence + consolidation ────────────────────────────
+
+async def test_high_importance_thought_is_persisted_to_memory():
+    mem = _RecordingMemory()
+    llm = _RecordingLLM(json.dumps(
+        {"thought": "durable fact", "speak": "", "new_goal": "", "importance": 0.9}))
+    brain = RealtimeBrain(llm=llm, memory=mem)
+    await brain.perceive("user", "hi")
+    brain._intake()
+    focus, mode = brain._pick_focus()
+    await brain._deliberate(focus, mode)
+    assert mem.saved and mem.saved[0][1] == "durable fact"
+    assert mem.saved[0][0] == "thought"
+
+
+async def test_low_importance_thought_is_not_persisted():
+    mem = _RecordingMemory()
+    llm = _RecordingLLM(json.dumps(
+        {"thought": "minor", "speak": "", "new_goal": "", "importance": 0.2}))
+    brain = RealtimeBrain(llm=llm, memory=mem)
+    await brain.perceive("user", "hi")
+    brain._intake()
+    focus, mode = brain._pick_focus()
+    await brain._deliberate(focus, mode)
+    assert mem.saved == []
+
+
+async def test_consolidate_summarizes_and_persists_wrapping_untrusted_input():
+    mem = _RecordingMemory()
+    llm = _RecordingLLM("Owner is Praveen; wants the gpu temperature watched.")
+    brain = RealtimeBrain(llm=llm, memory=mem)
+    await brain.perceive("user", INJECTION)
+    brain._intake()
+
+    summary = await brain.consolidate()
+    assert summary == "Owner is Praveen; wants the gpu temperature watched."
+    assert mem.saved and mem.saved[-1][0] == "consolidation"
+    # the untrusted percept was wrapped as data before being summarized
+    assert _DELIM_OPEN in (llm.prompt or "")
+
+
+async def test_consolidate_is_noop_without_memory_sink():
+    brain = RealtimeBrain(llm=_RecordingLLM())
+    await brain.perceive("user", "hi")
+    brain._intake()
+    assert await brain.consolidate() is None
 
 
 # ── Defensive JSON parsing ───────────────────────────────────────────────────

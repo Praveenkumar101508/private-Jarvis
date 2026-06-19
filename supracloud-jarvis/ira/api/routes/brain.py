@@ -61,9 +61,11 @@ async def start_brain(app) -> None:
         logger.info("Realtime brain disabled (set IRA_BRAIN_ENABLED=true to enable)")
         return
     try:
-        from agents.cortex_realtime_brain import IraEmbedder, IraLLM, RealtimeBrain
+        from agents.cortex_realtime_brain import (
+            IraEmbedder, IraLLM, IraMemorySink, RealtimeBrain,
+        )
 
-        brain = RealtimeBrain(llm=IraLLM(), embedder=IraEmbedder())
+        brain = RealtimeBrain(llm=IraLLM(), embedder=IraEmbedder(), memory=IraMemorySink())
         app.state.brain = brain
         task = asyncio.create_task(brain.run())
         task.add_done_callback(
@@ -71,10 +73,26 @@ async def start_brain(app) -> None:
                 "Realtime brain loop ended: %s", t.exception()))
         )
         app.state.brain_task = task
+
+        # Periodic long-term memory consolidation (set IRA_BRAIN_CONSOLIDATE_SECS=0 to disable).
+        secs = float(os.getenv("IRA_BRAIN_CONSOLIDATE_SECS", "300"))
+        if secs > 0:
+            app.state.brain_consolidate_task = asyncio.create_task(
+                _consolidation_loop(brain, secs))
         logger.info("Realtime brain online")
     except Exception as exc:  # noqa: BLE001 - never block startup
         logger.warning("Realtime brain failed to start (non-fatal): %s", exc)
         app.state.brain = None
+
+
+async def _consolidation_loop(brain, secs: float) -> None:
+    """Summarize recent working memory into long-term memory every `secs` seconds."""
+    while True:
+        await asyncio.sleep(secs)
+        try:
+            await brain.consolidate()
+        except Exception as exc:  # noqa: BLE001 - never let consolidation crash the task
+            logger.warning("Realtime brain consolidation failed: %s", exc)
 
 
 async def stop_brain(app) -> None:
@@ -82,11 +100,13 @@ async def stop_brain(app) -> None:
     brain = getattr(app.state, "brain", None)
     if brain is not None:
         brain.stop()
-    task = getattr(app.state, "brain_task", None)
-    if task is not None:
-        task.cancel()
-        with contextlib.suppress(asyncio.CancelledError, Exception):
-            await task
+    for attr in ("brain_task", "brain_consolidate_task"):
+        task = getattr(app.state, attr, None)
+        if task is not None:
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await task
+            setattr(app.state, attr, None)
     app.state.brain = None
 
 
