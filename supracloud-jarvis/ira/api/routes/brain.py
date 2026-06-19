@@ -87,7 +87,10 @@ async def start_brain(app) -> None:
             IraEmbedder, IraLLM, IraMemorySink, RealtimeBrain,
         )
 
-        brain = RealtimeBrain(llm=IraLLM(), embedder=IraEmbedder(), memory=IraMemorySink())
+        brain = RealtimeBrain(
+            llm=IraLLM(), embedder=IraEmbedder(), memory=IraMemorySink(),
+            affect=_build_affect(),
+        )
         app.state.brain = brain
         task = asyncio.create_task(brain.run())
         task.add_done_callback(
@@ -107,12 +110,43 @@ async def start_brain(app) -> None:
         app.state.brain = None
 
 
+def _build_affect():
+    """Construct the affective layer when IRA_BRAIN_AFFECT_ENABLED, else None.
+
+    Wires relational recall to IRA's vector memory and loads any persisted mood.
+    Fail-soft: any error → no affect layer (base behavior).
+    """
+    try:
+        from agents.affect import AffectLayer, affect_enabled
+
+        if not affect_enabled():
+            return None
+
+        async def _recall(query: str) -> list[str]:
+            try:
+                from memory.store import retrieve
+                rows = await retrieve(query, user_id="owner", top_k=3)
+                return [r["content"] for r in rows]
+            except Exception:  # noqa: BLE001 - recall is best-effort
+                return []
+
+        affect = AffectLayer(recall=_recall)
+        affect.load()
+        logger.info("Affective layer online")
+        return affect
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Affective layer failed to start (non-fatal): %s", exc)
+        return None
+
+
 async def _consolidation_loop(brain, secs: float) -> None:
     """Summarize recent working memory into long-term memory every `secs` seconds."""
     while True:
         await asyncio.sleep(secs)
         try:
             await brain.consolidate()
+            if getattr(brain, "affect", None) is not None:
+                brain.affect.save()   # opportunistic mood persistence
         except Exception as exc:  # noqa: BLE001 - never let consolidation crash the task
             logger.warning("Realtime brain consolidation failed: %s", exc)
 
@@ -122,6 +156,8 @@ async def stop_brain(app) -> None:
     brain = getattr(app.state, "brain", None)
     if brain is not None:
         brain.stop()
+        if getattr(brain, "affect", None) is not None:
+            brain.affect.save()   # persist mood across restarts
     for attr in ("brain_task", "brain_consolidate_task"):
         task = getattr(app.state, attr, None)
         if task is not None:

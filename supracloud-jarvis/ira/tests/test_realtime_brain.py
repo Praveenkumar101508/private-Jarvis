@@ -301,6 +301,37 @@ async def test_consolidate_is_noop_without_memory_sink():
     assert await brain.consolidate() is None
 
 
+# ── Affective layer conditioning (off by default) ────────────────────────────
+
+async def test_affect_conditions_deliberation_prompt_when_present():
+    from agents.affect import AffectLayer, Persona
+
+    llm = _RecordingLLM()
+    brain = RealtimeBrain(llm=llm, affect=AffectLayer(persona=Persona(owner="Praveen")))
+    await brain.perceive("user", "I'm exhausted and stuck on this")
+    brain._intake()
+    focus, mode = brain._pick_focus()
+    await brain._deliberate(focus, mode)
+
+    sys_prompt = llm.system or ""
+    assert "Praveen" in sys_prompt          # persona present
+    assert "mood=" in sys_prompt            # current affect injected
+    assert "IRA's inner mind" in sys_prompt  # base instruction still there (prepended, not replaced)
+
+
+async def test_affect_absent_leaves_prompt_unchanged():
+    llm = _RecordingLLM()
+    brain = RealtimeBrain(llm=llm)          # no affect layer
+    await brain.perceive("user", "hello")
+    brain._intake()
+    focus, mode = brain._pick_focus()
+    await brain._deliberate(focus, mode)
+
+    sys_prompt = llm.system or ""
+    assert "mood=" not in sys_prompt
+    assert sys_prompt.startswith("You are IRA's inner mind")
+
+
 # ── Defensive JSON parsing ───────────────────────────────────────────────────
 
 def test_safe_json_recovers_from_noisy_output():

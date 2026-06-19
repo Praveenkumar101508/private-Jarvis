@@ -374,10 +374,11 @@ def _safe_json(s: str) -> dict:
 # ── The brain ───────────────────────────────────────────────────────────────
 class RealtimeBrain:
     def __init__(self, llm: Optional[LLM] = None, embedder: Optional[Embedder] = None,
-                 memory: Optional[MemorySink] = None):
+                 memory: Optional[MemorySink] = None, affect=None):
         self.llm: LLM = llm or IraLLM()
         self.emb: Optional[Embedder] = embedder
         self.memory: Optional[MemorySink] = memory
+        self.affect = affect          # optional AffectLayer; None = base behavior unchanged
         self.wm = WorkingMemory()
         self.attn = Attention()
         self.q: "asyncio.Queue[Percept]" = asyncio.Queue()
@@ -471,10 +472,15 @@ class RealtimeBrain:
         return None, None
 
     # --- System 2 -----------------------------------------------------------
-    def _build_prompt(self, focus: Optional[Percept], mode: str) -> tuple[str, str]:
+    def _build_prompt(self, focus: Optional[Percept], mode: str,
+                      affect_preamble: str = "") -> tuple[str, str]:
         """Compose (system, user) prompts. ALL captured input is wrapped as
-        untrusted data; the system prompt is the only trusted instruction."""
+        untrusted data; the system prompt is the only trusted instruction. An
+        optional affect_preamble (persona + mood + relational memory) is prepended
+        to the trusted system prompt when the affective layer is active."""
         system = SYSTEM_REACT if mode == "react" else SYSTEM_IDLE
+        if affect_preamble:
+            system = f"{affect_preamble}\n\n{system}"
         goals = "; ".join(self.wm.goals[-3:]) or "(none yet)"
 
         blocks: list[str] = []
@@ -504,7 +510,19 @@ class RealtimeBrain:
 
     async def _deliberate(self, focus: Optional[Percept], mode: str) -> None:
         try:
-            system, user = self._build_prompt(focus, mode)
+            affect_preamble = ""
+            if self.affect is not None:
+                try:
+                    now = time.time()
+                    self.affect.decay(now)
+                    # learn affect only from untrusted external input, never our own thoughts
+                    if focus is not None and not focus.trusted:
+                        self.affect.observe(focus.content, now=now)
+                    query = focus.content if focus is not None else "quiet reflection"
+                    affect_preamble = await self.affect.preamble(query)
+                except Exception as exc:  # noqa: BLE001 - affect must never break a thought
+                    logger.debug("brain: affect preamble failed (non-fatal): %s", exc)
+            system, user = self._build_prompt(focus, mode, affect_preamble)
             raw = await self.llm.complete(system, user, json_mode=True)
             data = _safe_json(raw)
 
