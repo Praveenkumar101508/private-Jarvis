@@ -167,10 +167,15 @@ async def lifespan(app: FastAPI):
 
     await _validate_config(cfg)
 
+    # Continuous realtime brain — persistent background loop (OFF by default).
+    from api.routes.brain import start_brain, stop_brain
+    await start_brain(app)
+
     logger.info("IRA is online. Good morning.")
     yield
 
     # Graceful shutdown
+    await stop_brain(app)
     await close_checkpointer()
     await close_pool()
     await close_redis()
@@ -443,6 +448,9 @@ def create_app() -> FastAPI:
 
     from api.routes.android import router as android_router
     app.include_router(android_router, prefix="/api/v1")         # Phase 5: /android (experimental actuator, OFF by default)
+
+    from api.routes.brain import router as brain_router
+    app.include_router(brain_router)                             # /ws/brain (continuous brain, OFF by default)
 
     # ── Global error handler ──────────────────────────────────────────────────
     @app.exception_handler(Exception)

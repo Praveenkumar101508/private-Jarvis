@@ -388,6 +388,14 @@ class RealtimeBrain:
     def on_thought(self, cb: Callable[[str], Optional[Awaitable]]) -> None:
         self.thought_cbs.append(cb)
 
+    def off_speak(self, cb: Callable[[str], Optional[Awaitable]]) -> None:
+        if cb in self.speak_cbs:
+            self.speak_cbs.remove(cb)
+
+    def off_thought(self, cb: Callable[[str], Optional[Awaitable]]) -> None:
+        if cb in self.thought_cbs:
+            self.thought_cbs.remove(cb)
+
     async def _emit(self, cbs, text: str) -> None:
         for cb in cbs:
             r = cb(text)
