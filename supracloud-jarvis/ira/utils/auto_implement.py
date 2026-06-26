@@ -136,6 +136,45 @@ def extract_changed_files(diff_text: str) -> list[str]:
     return _FILE_HEADER_RE.findall(diff_text)
 
 
+# ── Protected-paths denylist ──────────────────────────────────────────────────
+# IRA's architect pipeline can git-apply any diff the LLM produced once a human
+# types "architect apply". It must never be allowed to rewrite its own security
+# and control surface (auth, approval gate, command/URL safety, biometric gate,
+# router, config) or its CI workflows. A patch touching any of these is refused
+# outright — before validation or apply — regardless of who triggered it.
+#
+# Entries are package-relative paths; matching is by path suffix on component
+# boundaries so it catches both repo-root-relative diff headers
+# (supracloud-jarvis/ira/utils/approval.py) and package-relative ones
+# (utils/approval.py). Anything under a .github/ directory is also protected.
+_PROTECTED_PATHS = (
+    "api/middleware/auth.py",
+    "utils/approval.py",
+    "utils/auto_implement.py",
+    "utils/cmd_safety.py",
+    "utils/net_safety.py",
+    "voice/biometrics.py",
+    "voice/gate.py",
+    "router.py",
+    "config.py",
+)
+
+
+def _is_protected_path(path: str) -> bool:
+    """True if a diff-changed path touches a protected security/control file."""
+    norm = path.strip().replace("\\", "/")
+    if norm.startswith("./"):
+        norm = norm[2:]
+    parts = [p for p in norm.split("/") if p and p != "."]
+    if ".github" in parts:
+        return True
+    for prot in _PROTECTED_PATHS:
+        prot_parts = prot.split("/")
+        if parts[-len(prot_parts):] == prot_parts:
+            return True
+    return False
+
+
 # ── Core apply pipeline ───────────────────────────────────────────────────────
 
 async def apply_implementation(
@@ -185,6 +224,19 @@ async def apply_implementation(
     for diff in diffs:
         files_changed.extend(extract_changed_files(diff))
     files_changed = list(dict.fromkeys(files_changed))  # deduplicate, preserve order
+
+    # Refuse outright if the patch touches a protected security/control path.
+    # Runs before validation/apply so even dry_run cannot probe a protected file.
+    for path in files_changed:
+        if _is_protected_path(path):
+            return ApplyResult(
+                success=False,
+                message="Refused — patch touches a protected path.",
+                files_changed=files_changed,
+                commit_hash="",
+                services_restarted=[],
+                error=f"refused: patch touches a protected path: {path}",
+            )
 
     commit_msg = extract_commit_message(implementation_text)
     services = extract_services(implementation_text)

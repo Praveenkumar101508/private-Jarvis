@@ -435,6 +435,33 @@ async def chat_stream(
     from api.routes._dispatch import dispatch as _feature_dispatch
     from api.routes.video_gen import is_video_understand_request
 
+    # ── Owner gate: architect self-modification is owner-only ──────────────────
+    # The architect/implement/apply triggers can generate and git-apply code against
+    # IRA's own source. Gate all three behind the verified-owner flag here so a
+    # non-owner can never reach stream_architect_proposal / stream_auto_implement /
+    # apply_implementation, independent of per-user state isolation. This holds even
+    # in dev_mode — self-modification always requires the owner.
+    if not owner and (
+        is_architect_trigger(req.message)
+        or is_implement_trigger(req.message)
+        or is_apply_trigger(req.message)
+    ):
+        async def architect_blocked_generator():
+            owner_name = cfg.owner_name
+            blocked_msg = (
+                f"I'm sorry — building, implementing, or applying changes to my own "
+                f"code is restricted to {owner_name}. I can't run the architect "
+                f"workflow for anyone else. Is there something else I can help with?"
+            )
+            for word in blocked_msg.split(" "):
+                yield {"data": json.dumps({"token": word + " "})}
+                await asyncio.sleep(0.02)
+            yield {"data": json.dumps({
+                "done": True, "agent": "security_gate",
+                "latency_ms": 0, "session_id": req.session_id,
+            })}
+        return EventSourceResponse(architect_blocked_generator())
+
     # ── Architect Agent: intercept before all other routing ───────────────────
     if is_architect_trigger(req.message):
         memories_raw = await retrieve(req.message, user_id=_user)
