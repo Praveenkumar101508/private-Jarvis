@@ -22,11 +22,13 @@ import shlex
 from pathlib import Path
 
 # ── Allow-roots: arguments resolved outside these directories are rejected ────
-_CWD = Path.cwd().resolve()
-_ALLOW_ROOTS: tuple[Path, ...] = (
-    _CWD,
-    Path("/tmp").resolve(),
-)
+def _allow_roots() -> tuple[Path, ...]:
+    """Allow-roots resolved at CALL time so a later os.chdir is respected.
+
+    (Previously these were computed once at import; if the process changed working
+    directory afterwards, the allow-root pointed at the stale original cwd.)
+    """
+    return (Path.cwd().resolve(), Path("/tmp").resolve())
 
 # Commands whose arguments should be path-checked (everything else is free-form)
 _PATH_ARG_COMMANDS: frozenset[str] = frozenset({
@@ -48,7 +50,7 @@ def _is_under_allow_root(path_str: str) -> bool:
         return False
     return any(
         resolved == root or root in resolved.parents
-        for root in _ALLOW_ROOTS
+        for root in _allow_roots()
     )
 
 
