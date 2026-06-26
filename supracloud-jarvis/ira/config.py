@@ -345,6 +345,21 @@ class Settings(BaseSettings):
     # NEVER enable in production.
     dev_mode: bool = False
 
+    # Phase 5(a): when true, a Redis error during a token revocation / version check
+    # DENIES access (fail CLOSED) instead of allowing it. Default false preserves the
+    # current availability behaviour (fail open). Enable for a hardened, security-over-
+    # availability posture. Env: AUTH_FAIL_CLOSED_ON_REDIS.
+    auth_fail_closed_on_redis: bool = False
+
+    # Phase 5(d): the interface the API server binds to. DEV_MODE bypasses auth, so the
+    # IRA_DOMAIN label alone is not trusted — a "local" domain with a non-loopback bind
+    # host can still be exposed. If DEV_MODE is on and this is non-loopback, startup is
+    # refused unless allow_dev_mode_exposed is explicitly set. Env: API_BIND_HOST.
+    api_bind_host: str = "127.0.0.1"
+    # Explicit opt-in acknowledging the risk of DEV_MODE on a non-loopback bind host.
+    # Env: ALLOW_DEV_MODE_EXPOSED.
+    allow_dev_mode_exposed: bool = False
+
     @property
     def is_local_domain(self) -> bool:
         """Fix P9: True when ira_domain resolves to a localhost/private address.
@@ -381,6 +396,20 @@ class Settings(BaseSettings):
                 f"(IRA_DOMAIN={self.ira_domain!r}). "
                 "Set DEV_MODE=false or point IRA_DOMAIN at a local address "
                 "(jarvis.local, localhost, 127.0.0.1, ::1, or *.local)."
+            )
+        # Phase 5(d): don't trust the domain label alone. DEV_MODE bypasses auth, so a
+        # non-loopback API bind host can expose an unauthenticated admin endpoint even
+        # when IRA_DOMAIN looks local. Require an explicit opt-in for that combination.
+        if (
+            self.dev_mode
+            and not _is_loopback_host(self.api_bind_host)
+            and not self.allow_dev_mode_exposed
+        ):
+            raise RuntimeError(
+                f"DEV_MODE with a non-loopback API bind host "
+                f"(API_BIND_HOST={self.api_bind_host!r}) is refused: it can expose an "
+                "unauthenticated admin endpoint. Bind to 127.0.0.1/::1, set DEV_MODE=false, "
+                "or set ALLOW_DEV_MODE_EXPOSED=true to explicitly accept the risk."
             )
         return self
 
@@ -423,6 +452,21 @@ def cortex_local_only_warning(
         f"IRA_USE_CORTEX=true but IRA_CORTEX_URL={cortex_url!r} is NOT local "
         f"(host={host!r}); prompts would leave the box via a remote gateway."
     )
+
+
+def _is_loopback_host(host: str) -> bool:
+    """True only for loopback (localhost / 127.x / ::1) — NOT RFC1918 or 0.0.0.0.
+
+    Used by the DEV_MODE bind-host guard: 0.0.0.0 (all interfaces) and LAN addresses
+    are exposed and must NOT count as safe.
+    """
+    host = (host or "").lower().strip()
+    if host in ("localhost", "127.0.0.1", "::1"):
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
 
 
 def _is_local_or_private_host(host: str) -> bool:
