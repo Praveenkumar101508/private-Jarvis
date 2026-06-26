@@ -15,7 +15,6 @@ from __future__ import annotations
 from typing import Optional
 
 from cortex_bridge import CortexBridge
-from skills._common import _REASONING_DIRECTIVE
 
 # Capability map the team reasons over (kept in sync with agents/architect_agent.py).
 IRA_CAPABILITY_MAP = {
@@ -115,16 +114,15 @@ def architect_proposal(
     bridge = bridge or CortexBridge()
     ctx = _capability_context() + (f"\n\nMemory context:\n{memory_context}" if memory_context else "")
     user = f"Perform a complete feature proposal cycle for {owner_name}'s IRA. Context: {trigger}"
-    D = "\n\n" + _REASONING_DIRECTIVE
 
     # Wave 1 — Researcher + Creator (capability-map context)
-    researcher = bridge.ask(user, system=_researcher(owner_name) + "\n\n" + ctx + D)
-    creator = bridge.ask(user, system=_creator(owner_name) + "\n\n" + ctx + D)
+    researcher = bridge.ask(user, system=_researcher(owner_name) + "\n\n" + ctx, reasoning_only=True)
+    creator = bridge.ask(user, system=_creator(owner_name) + "\n\n" + ctx, reasoning_only=True)
     wave1 = f"RESEARCHER OUTPUT:\n{researcher}\n\nCREATOR OUTPUT:\n{creator}"
 
     # Wave 2 — Critic + Executor (have wave-1 context)
-    critic = bridge.ask(user, system=_critic(owner_name) + "\n\nPrevious debate:\n" + wave1 + D)
-    executor = bridge.ask(user, system=_executor(owner_name) + "\n\nPrevious debate:\n" + wave1 + D)
+    critic = bridge.ask(user, system=_critic(owner_name) + "\n\nPrevious debate:\n" + wave1, reasoning_only=True)
+    executor = bridge.ask(user, system=_executor(owner_name) + "\n\nPrevious debate:\n" + wave1, reasoning_only=True)
 
     debate = (
         f"=== 🔬 RESEARCHER ===\n{researcher}\n\n=== ✨ CREATOR ===\n{creator}\n\n"
@@ -132,7 +130,7 @@ def architect_proposal(
     )
     proposal = bridge.ask(
         f"{user}\n\nFull team debate:\n{debate}\n\nSynthesise the final proposal.",
-        system=_supervisor(owner_name) + D,
+        system=_supervisor(owner_name), reasoning_only=True,
     )
     return f"# 🏛️ IRA Evolution Team — Feature Proposal\n\n{debate}\n\n---\n\n## 🧠 Supervisor Proposal\n\n{proposal}"
 
