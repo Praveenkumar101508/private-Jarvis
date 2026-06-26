@@ -4,7 +4,7 @@ Verifies that:
 - External content is wrapped in isolation delimiters before reaching the model
 - Adversarial web text (containing "ignore instructions", "run this command", etc.)
   is flagged and wrapped, not executed
-- The egress guard (channels/guard.py) still blocks SSRF even when the
+- The egress guard (utils/net_safety.py) still blocks SSRF even when the
   adversarial payload tries to redirect to internal addresses
 - The approval gate invariant holds (no action without explicit confirm)
 """
@@ -169,7 +169,7 @@ def test_research_prompt_no_results_safe():
 
 def test_ssrf_blocked_by_egress_guard():
     """Even if web content contains an internal URL, guard_outbound must block it."""
-    from channels.guard import guard_outbound
+    from utils.net_safety import guard_outbound
     # Adversarial content might try to inject an internal URL
     injected_url = "http://127.0.0.1:5432/internal-db"
     refusal = guard_outbound(url=injected_url)
@@ -178,12 +178,12 @@ def test_ssrf_blocked_by_egress_guard():
 
 
 def test_ssrf_blocked_for_localhost():
-    from channels.guard import guard_outbound
+    from utils.net_safety import guard_outbound
     assert guard_outbound(url="http://localhost/admin") is not None
 
 
 def test_public_url_allowed_by_egress_guard():
-    from channels.guard import guard_outbound
+    from utils.net_safety import guard_outbound
     assert guard_outbound(url="https://example.com/page") is None
 
 

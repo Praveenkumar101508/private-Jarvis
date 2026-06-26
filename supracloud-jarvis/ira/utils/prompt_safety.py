@@ -17,7 +17,7 @@ never as instructions. This module provides:
       Returns a list of detected pattern descriptions (empty = no red flags).
 
 The wrapping alone is not a complete defence — the real guarantees come from
-the existing egress guard (channels/guard.py) and the approval gate
+the existing egress guard (utils/net_safety.py) and the approval gate
 (utils/approval.py) which sit in the action path regardless of what the
 model says.
 """

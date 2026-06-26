@@ -12,7 +12,7 @@ for _k in ("IRA_SECRET_KEY", "IRA_ADMIN_PASSWORD", "POSTGRES_PASSWORD", "REDIS_P
 
 import asyncio
 
-from channels.guard import guard_outbound
+from utils.net_safety import guard_outbound
 from research.deep_research_engine import run_deep_research
 from utils.prompt_safety import _DELIM_OPEN, wrap_external_content
 

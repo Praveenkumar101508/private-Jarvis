@@ -36,7 +36,7 @@ from sse_starlette.sse import EventSourceResponse
 
 from api.middleware.auth import require_auth
 from utils.llm import chat_complete
-from utils.url_safety import is_safe_url
+from utils.net_safety import is_safe_url
 
 router = APIRouter(prefix="/computer", tags=["computer-use"])
 logger = logging.getLogger("ira.computer_use")

@@ -122,7 +122,7 @@ async def _default_read(url: str) -> str:
 
 
 def _default_guard(url: str) -> Optional[str]:
-    from channels.guard import guard_outbound
+    from utils.net_safety import guard_outbound
     return guard_outbound(url=url)
 
 
