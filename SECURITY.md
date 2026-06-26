@@ -2,12 +2,13 @@
 
 ## Threat Model
 
-SupraCloud IRA is a **single-owner personal AI assistant**. The threat model is:
+SupraCloud IRA is a **single-owner personal AI assistant** *by design* — there is no
+partial-trust tier. Any authenticated session is the owner; there is no supported mode
+for other authenticated users with a reduced trust level. The threat model is:
 
 | Actor | Trust Level | What they can do |
 |---|---|---|
 | Owner (Praveen) | Full trust | All features, all data, all system commands |
-| Authenticated users (future) | Partial trust | Chat, search, document analysis only |
 | Unauthenticated requests | Zero trust | Blocked at nginx + FastAPI |
 | LLM-generated content | Untrusted input | Sandboxed, no auto-deploy |
 | Webhooks (Cal.com, external) | Signed only | Verified via HMAC-SHA256 |

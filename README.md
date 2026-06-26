@@ -4,7 +4,7 @@
 
 <br/>
 
-[![Built by Praveen Kumar](https://img.shields.io/badge/built_by-Praveen_Kumar-7c8bff?style=for-the-badge&labelColor=0d1220)](https://github.com/Praveenkumar101508)
+[![Built by Praveen Kamineti](https://img.shields.io/badge/built_by-Praveen_Kamineti-7c8bff?style=for-the-badge&labelColor=0d1220)](https://github.com/Praveenkumar101508)
 [![Python](https://img.shields.io/badge/python-3.11-5ee0f0?style=for-the-badge&logo=python&logoColor=white&labelColor=0d1220)](#)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.115-5ee0f0?style=for-the-badge&logo=fastapi&logoColor=white&labelColor=0d1220)](#)
 [![LangGraph](https://img.shields.io/badge/LangGraph-0.2.73-7c8bff?style=for-the-badge&labelColor=0d1220)](#)
@@ -144,8 +144,8 @@ IRA is built to be exposed to the internet without flinching. The model isn't "o
 
 ```bash
 # 1. clone
-git clone https://github.com/Praveenkumar101508/private-Jarvis.git
-cd private-Jarvis/supracloud-jarvis
+git clone https://github.com/Praveenkumar101508/Supracloud_ira.git
+cd Supracloud_ira/supracloud-jarvis
 
 # 2. configure (copy the template, fill in your values — nothing here phones home)
 cp .env.example .env
@@ -193,7 +193,7 @@ supracloud-jarvis/
 ---
 
 <div align="center">
-<sub>Built and owned by <b>Praveen Kumar Kamineti</b> · part of the <b>SupraCloud</b> sovereign-AI vision.</sub>
+<sub>Built and owned by <b>Praveen Kamineti</b> · part of the <b>SupraCloud</b> sovereign-AI vision.</sub>
 <br/>
 <sub>Private repository — © all rights reserved.</sub>
 </div>
