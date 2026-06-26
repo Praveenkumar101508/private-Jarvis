@@ -135,8 +135,15 @@ def _list_sync(limit: int, cfg, factory: CalendarFactory) -> list[str]:
     return [_event_ical(e) for e in events[: max(1, limit)]]
 
 
-async def list_events(limit: int = 20, *, cfg=None, factory: Optional[CalendarFactory] = None) -> dict:
-    """List upcoming events (read-only, sanitised, fail-soft)."""
+async def list_events(limit: int = 20, *, is_owner: bool = False, cfg=None, factory: Optional[CalendarFactory] = None) -> dict:
+    """List upcoming events (read-only, sanitised, fail-soft).
+
+    Owner-only and FAIL-CLOSED (``is_owner`` defaults to False): calendar contents
+    are private, so the tool re-checks identity itself rather than trusting the caller.
+    """
+    if not is_owner:
+        return {"status": "forbidden",
+                "message": "Calendar access is restricted to the verified owner."}
     cfg = cfg or get_settings()
     if not is_configured("calendar_dav", cfg):
         return {"status": "not_configured", "message": not_configured_message("calendar_dav")}
@@ -159,10 +166,17 @@ def _create_sync(ical: str, cfg, factory: CalendarFactory) -> None:
 
 async def create_event(
     *, summary: str, start: str, end: Optional[str] = None,
-    description: str = "", location: str = "",
+    description: str = "", location: str = "", is_owner: bool = False,
     cfg=None, factory: Optional[CalendarFactory] = None,
 ) -> dict:
-    """Create an event. DESTRUCTIVE/outbound — callers must gate behind approval."""
+    """Create an event. DESTRUCTIVE/outbound — callers must gate behind approval.
+
+    Owner-only and FAIL-CLOSED (``is_owner`` defaults to False) as defense-in-depth
+    on top of the route's approval guardrail.
+    """
+    if not is_owner:
+        return {"status": "forbidden",
+                "message": "Calendar changes are restricted to the verified owner."}
     cfg = cfg or get_settings()
     if not is_configured("calendar_dav", cfg):
         return {"status": "not_configured", "message": not_configured_message("calendar_dav")}
@@ -190,8 +204,15 @@ def _delete_sync(uid: str, cfg, factory: CalendarFactory) -> bool:
     return False
 
 
-async def delete_event(uid: str, *, cfg=None, factory: Optional[CalendarFactory] = None) -> dict:
-    """Delete an event by UID. DESTRUCTIVE — callers must gate behind approval."""
+async def delete_event(uid: str, *, is_owner: bool = False, cfg=None, factory: Optional[CalendarFactory] = None) -> dict:
+    """Delete an event by UID. DESTRUCTIVE — callers must gate behind approval.
+
+    Owner-only and FAIL-CLOSED (``is_owner`` defaults to False) as defense-in-depth
+    on top of the route's approval guardrail.
+    """
+    if not is_owner:
+        return {"status": "forbidden",
+                "message": "Calendar changes are restricted to the verified owner."}
     cfg = cfg or get_settings()
     if not is_configured("calendar_dav", cfg):
         return {"status": "not_configured", "message": not_configured_message("calendar_dav")}

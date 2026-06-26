@@ -131,10 +131,20 @@ def _fetch_sync(limit: int, cfg, client_factory: ClientFactory) -> list[bytes]:
 async def fetch_recent(
     limit: int = 10,
     *,
+    is_owner: bool = False,
     cfg=None,
     client_factory: Optional[ClientFactory] = None,
 ) -> dict:
-    """Fetch and sanitise the most recent inbox messages. READ-ONLY, fails soft."""
+    """Fetch and sanitise the most recent inbox messages. READ-ONLY, fails soft.
+
+    Owner-only and FAIL-CLOSED (``is_owner`` defaults to False): inbox content is
+    sensitive personal data, so this tool re-checks identity independently of any
+    caller-side gate (defense-in-depth — a paraphrase that slips past the message
+    classifier still cannot read the inbox).
+    """
+    if not is_owner:
+        return {"status": "forbidden",
+                "message": "Inbox triage is restricted to the verified owner."}
     cfg = cfg or get_settings()
     if not is_configured("email_triage", cfg):
         return {"status": "not_configured", "message": not_configured_message("email_triage")}

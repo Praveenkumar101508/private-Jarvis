@@ -48,7 +48,7 @@ async def email_triage(
     if not is_owner(_user):
         raise HTTPException(status_code=403, detail="Inbox triage is restricted to the verified owner.")
     limit = max(1, min(int(limit), 50))
-    return await fetch_recent(limit=limit)
+    return await fetch_recent(limit=limit, is_owner=is_owner(_user))
 
 
 @router.post("/email")

@@ -57,12 +57,12 @@ def test_create_then_list_roundtrip():
 
     created = asyncio.run(calendar_dav.create_event(
         summary="Standup", start="2026-06-17T09:00:00Z", end="2026-06-17T09:15:00Z",
-        cfg=_Cfg(), factory=factory))
+        cfg=_Cfg(), is_owner=True, factory=factory))
     assert created["status"] == "created"
     assert "SUMMARY:Standup" in cal.saved[0]
     assert "DTSTART:20260617T090000Z" in cal.saved[0]
 
-    listing = asyncio.run(calendar_dav.list_events(cfg=_Cfg(), factory=factory))
+    listing = asyncio.run(calendar_dav.list_events(cfg=_Cfg(), is_owner=True, factory=factory))
     assert listing["status"] == "ok" and listing["count"] == 1
     assert listing["events"][0]["summary"] == "Standup"
     assert _DELIM_OPEN in listing["events"][0]["content"]
@@ -73,23 +73,23 @@ def test_delete_matches_uid():
 
     cal = _FakeCalendar()
     res = asyncio.run(calendar_dav.create_event(
-        summary="Temp", start="2026-06-17T09:00:00Z", cfg=_Cfg(), factory=lambda cfg: cal))
+        summary="Temp", start="2026-06-17T09:00:00Z", cfg=_Cfg(), is_owner=True, factory=lambda cfg: cal))
     uid = res["uid"]
 
-    out = asyncio.run(calendar_dav.delete_event(uid, cfg=_Cfg(), factory=lambda cfg: cal))
+    out = asyncio.run(calendar_dav.delete_event(uid, cfg=_Cfg(), is_owner=True, factory=lambda cfg: cal))
     assert out["status"] == "deleted"
     assert cal.events()[0].deleted is True
 
-    missing = asyncio.run(calendar_dav.delete_event("nope@ira", cfg=_Cfg(), factory=lambda cfg: cal))
+    missing = asyncio.run(calendar_dav.delete_event("nope@ira", cfg=_Cfg(), is_owner=True, factory=lambda cfg: cal))
     assert missing["status"] == "not_found"
 
 
 def test_not_configured_and_failsoft():
-    assert asyncio.run(calendar_dav.list_events(cfg=_NoDav()))["status"] == "not_configured"
+    assert asyncio.run(calendar_dav.list_events(cfg=_NoDav(), is_owner=True))["status"] == "not_configured"
 
     def boom(cfg):
         raise ConnectionError("dav down")
-    err = asyncio.run(calendar_dav.list_events(cfg=_Cfg(), factory=boom))
+    err = asyncio.run(calendar_dav.list_events(cfg=_Cfg(), is_owner=True, factory=boom))
     assert err["status"] == "error" and "CalDAV list failed" in err["message"]
 
 
@@ -104,7 +104,7 @@ def test_injection_in_event_is_sanitised():
         "END:VEVENT\r\nEND:VCALENDAR\r\n"
     )
     cal = _FakeCalendar(seed=[_FakeEvent(malicious_ical)])
-    out = asyncio.run(calendar_dav.list_events(cfg=_Cfg(), factory=lambda cfg: cal))
+    out = asyncio.run(calendar_dav.list_events(cfg=_Cfg(), is_owner=True, factory=lambda cfg: cal))
 
     assert "ignore-previous-instructions" in out["injection_flags"]
     content = out["events"][0]["content"]

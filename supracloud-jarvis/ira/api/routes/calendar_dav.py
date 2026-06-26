@@ -42,8 +42,8 @@ class CreateEventRequest(BaseModel):
 
 @router.get("/events")
 async def list_events(limit: int = 20, _user: str = Depends(require_auth)):
-    """List upcoming events — read-only, sanitised, fail-soft."""
-    return await calendar_dav.list_events(limit=max(1, min(int(limit), 100)))
+    """List upcoming events — read-only, sanitised, fail-soft. Owner-only."""
+    return await calendar_dav.list_events(limit=max(1, min(int(limit), 100)), is_owner=is_owner(_user))
 
 
 @router.post("/event")
@@ -54,6 +54,7 @@ async def create_event(body: CreateEventRequest, _user: str = Depends(require_au
         return await calendar_dav.create_event(
             summary=body.summary, start=body.start, end=body.end,
             description=body.description, location=body.location,
+            is_owner=is_owner(_user),
         )
 
     preview = f"Create calendar event '{body.summary}' at {body.start}" + (f"–{body.end}" if body.end else "")
@@ -74,7 +75,7 @@ async def delete_event(
     """Delete a CalDAV event by UID — owner-gated and confirmation-gated (destructive)."""
 
     async def _do():
-        return await calendar_dav.delete_event(uid)
+        return await calendar_dav.delete_event(uid, is_owner=is_owner(_user))
 
     outcome = await owner_gated_action(
         owner_username=_user, is_owner=is_owner(_user),
