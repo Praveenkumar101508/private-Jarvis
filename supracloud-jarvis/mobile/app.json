@@ -1,0 +1,16 @@
+{
+  "expo": {
+    "name": "IRA",
+    "slug": "ira-mobile",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "scheme": "ira",
+    "userInterfaceStyle": "automatic",
+    "ios": { "supportsTablet": true, "bundleIdentifier": "com.supracloud.ira" },
+    "android": { "package": "com.supracloud.ira" },
+    "plugins": ["expo-notifications", "expo-secure-store"],
+    "extra": {
+      "iraApiBase": "https://shadow.your-tailnet.ts.net"
+    }
+  }
+}

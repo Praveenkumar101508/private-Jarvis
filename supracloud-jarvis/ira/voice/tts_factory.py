@@ -33,6 +33,17 @@ def make_tts(voice: str, speed: float = 1.05) -> tts.TTS:
     so a missing Supertonic install can never take the voice agent down."""
     engine = os.getenv("IRA_VOICE_ENGINE", "kokoro").strip().lower()
 
+    if engine == "omnivoice":
+        try:
+            from voice.tts_omnivoice import IRAOmniVoiceTTS, is_available
+            ok, reason = is_available()
+            if not ok:
+                raise RuntimeError(reason)
+            logger.info("TTS engine: OmniVoice (sidecar)")
+            return IRAOmniVoiceTTS(voice=voice, speed=speed)
+        except Exception as e:
+            logger.error(f"OmniVoice engine unavailable ({e}); falling back to Supertonic/Kokoro.")
+
     if engine == "supertonic":
         try:
             from voice.tts_supertonic import IRASupertonicTTS, DEFAULT_VOICE
@@ -52,12 +63,31 @@ def make_tts(voice: str, speed: float = 1.05) -> tts.TTS:
 _INDIC_LANGS = frozenset({"ta", "te", "kn", "ml"})
 
 
+def _say_engine() -> str:
+    """Selected engine for the HTTP /voice/say path (mirrors IRA_VOICE_ENGINE)."""
+    return os.getenv("IRA_VOICE_ENGINE", "kokoro").strip().lower()
+
+
 def synthesize_say(text: str, *, lang: str = "en", voice: str | None = None,
-                   steps: int | None = None) -> bytes:
+                   steps: int | None = None, instruct: str | None = None,
+                   speed: float | None = None) -> bytes:
     """Pick the TTS engine by language and return a 44.1 kHz WAV (the HTTP /voice/say
-    path). Tamil/Telugu/Kannada/Malayalam route to the native Indic engine; if it's
-    unavailable they fail soft to Supertonic's 'na'. Everything else — including Hindi
-    and Supertonic's other 30 languages — uses Supertonic."""
+    path, and the local voice-output path). When IRA_VOICE_ENGINE=omnivoice, OmniVoice
+    (600+ langs) handles everything — carrying optional affect `instruct`/`speed` — and
+    fails soft to the logic below. Otherwise: Tamil/Telugu/Kannada/Malayalam route to
+    the native Indic engine (fail soft to Supertonic's 'na'); everything else — incl.
+    Hindi and Supertonic's other 30 languages — uses Supertonic."""
+    if _say_engine() == "omnivoice":
+        try:
+            from voice.tts_omnivoice import synthesize_wav_omnivoice
+            wav = synthesize_wav_omnivoice(text, lang=lang, voice=voice, steps=steps,
+                                           instruct=instruct, speed=speed)
+            if wav:
+                return wav
+            logger.warning("OmniVoice produced no audio; falling back to Supertonic/Indic.")
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"OmniVoice TTS error ({e}); falling back to Supertonic/Indic.")
+
     code = (lang or "en").lower().split("-")[0]
     if code in _INDIC_LANGS:
         try:

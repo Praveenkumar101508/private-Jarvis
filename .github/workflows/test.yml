@@ -2,9 +2,9 @@ name: IRA Tests
 
 on:
   push:
-    branches: [main, master, "claude/*"]
+    branches: [main, master, "claude/*", supracloud_ira]
   pull_request:
-    branches: [main, master]
+    branches: [main, master, supracloud_ira]
 
 jobs:
   test:
@@ -45,13 +45,27 @@ jobs:
         run: |
           python -m pytest tests/ -v --tb=short
 
-      - name: Check no auto-push in auto_implement.py
+      - name: Run auth/security tests WITHOUT DEV_MODE (exercise the real auth path)
+        working-directory: supracloud-jarvis/ira
+        # DEV_MODE=true bypasses auth globally and can mask auth-path regressions, so
+        # these files run with DEV_MODE unset to exercise the real revocation/gate path.
+        env:
+          IRA_SECRET_KEY: "ci-test-secret-key"
+          IRA_ADMIN_PASSWORD: "ci-test-password"
+          POSTGRES_PASSWORD: "ci-test"
+          REDIS_PASSWORD: "ci-test"
+          VLLM_API_KEY: "ci-test"
         run: |
-          if grep -q "git push" supracloud-jarvis/ira/utils/auto_implement.py; then
-            echo "❌ CRITICAL: auto_implement.py contains git push!"
-            exit 1
-          fi
-          echo "✅ No auto-push found"
+          python -m pytest -v --tb=short \
+            tests/test_token_revocation.py \
+            tests/test_phase5_guards.py
+
+      - name: Check no auto-push (AST — catches the arg-vector form, not just "git push")
+        working-directory: supracloud-jarvis/ira
+        # The old literal grep could not see ["git", "push"]; this AST check can, and
+        # its self-test runs in the suite above. See scripts/check_no_push.py.
+        run: |
+          python scripts/check_no_push.py
 
       - name: Check no hardcoded secrets
         run: |

@@ -16,15 +16,10 @@ from cortex_bridge import CortexBridge
 _SKILLS_DIR = Path(__file__).resolve().parent
 
 # IRA skills are reasoning-only (Option A: IRA runs the tools/DB and passes results in
-# as context). The Cortex gateway agent has its own large toolset and an 8B model will
-# sometimes over-reach into a tool call (e.g. write_file) instead of answering. This
-# directive keeps it to pure reasoning over the provided context.
-_REASONING_DIRECTIVE = (
-    "Operate strictly as a reasoning module. Respond directly with your answer based "
-    "only on the context above. Do NOT call tools, write or read files, browse, run "
-    "commands, or ask for additional parameters — everything you need is already "
-    "provided. Produce the final response now."
-)
+# as context). The no-tools constraint is ENFORCED by the bridge: run_skill calls it in
+# reasoning_only mode, which omits --accept-hooks (so Cortex can't auto-accept a tool/
+# hook call) and prepends a hardened no-tools directive (see cortex_bridge.CortexBridge.
+# ask). This replaced the prior soft, prompt-only directive that an 8B model could ignore.
 
 
 def load_persona(skill_name: str, **subs: object) -> str:
@@ -62,9 +57,8 @@ def run_skill(
     blocks = [b for b in (context_blocks or []) if b]
     if blocks:
         system += "\n\n" + "\n\n".join(blocks)
-    system += "\n\n" + _REASONING_DIRECTIVE
     return bridge.ask(
-        query, system=system,
+        query, system=system, reasoning_only=True,
         session_id=session_id, user_key=user_key, session_key=session_key,
     )
 

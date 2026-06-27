@@ -424,7 +424,12 @@ export default function ChatInterface({ sessionId, token, mode = "assistant" }: 
         const form = new FormData();
         form.append("message", content);
         form.append("session_id", sessionId);
-        form.append("file", new Blob([file.rawBytes!], { type: file.mimeType }), file.name);
+        // Copy into a fresh ArrayBuffer-backed buffer so the Blob part is a valid
+        // BlobPart under modern TS lib types (Uint8Array is generic over ArrayBufferLike).
+        const rawBytes = file.rawBytes!;
+        const fileBuffer = new ArrayBuffer(rawBytes.byteLength);
+        new Uint8Array(fileBuffer).set(rawBytes);
+        form.append("file", new Blob([fileBuffer], { type: file.mimeType }), file.name);
 
         const res = await fetch("/api/v1/chat/document/upload", {
           method: "POST",

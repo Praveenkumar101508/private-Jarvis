@@ -1,5 +1,5 @@
 .PHONY: secrets-encrypt secrets-decrypt secrets-edit secrets-view \
-        up down logs up-secure test test-unit test-coverage
+        up down logs up-secure test test-unit test-coverage security
 
 # ── Secrets management (sops + age) ──────────────────────────────────────────
 
@@ -44,6 +44,31 @@ logs:
 # Start with decrypted secrets piped directly to docker compose
 up-secure:
 	sops -d .env.enc | docker compose --env-file /dev/stdin up -d
+
+# ── Security: supply-chain scan (Perplexity Bumblebee, read-only) ─────────────
+
+# Bumblebee inventories on-disk package metadata and flags exact matches against
+# the vendored compromise catalogs. It is READ-ONLY: it never runs install
+# scripts and never invokes package managers — keep it that way.
+# Install once: go install github.com/perplexityai/bumblebee/cmd/bumblebee@latest
+REPO_ROOT := $(CURDIR)/..
+CATALOGS  := $(REPO_ROOT)/third_party/bumblebee/threat_intel
+BUMBLEBEE ?= bumblebee
+
+security:
+	@command -v $(BUMBLEBEE) >/dev/null 2>&1 || { \
+	  echo "bumblebee not found. Install: go install github.com/perplexityai/bumblebee/cmd/bumblebee@latest"; \
+	  echo "(then ensure $$(go env GOPATH)/bin is on PATH, or run: make security BUMBLEBEE=\$$(go env GOPATH)/bin/bumblebee)"; \
+	  exit 1; }
+	@mkdir -p $(REPO_ROOT)/security
+	@echo "→ Bumblebee project inventory scan…"
+	$(BUMBLEBEE) scan --profile project --root $(REPO_ROOT) > $(REPO_ROOT)/security/ira-project-scan.ndjson
+	@echo "→ Bumblebee exposure check vs vendored compromise catalogs…"
+	$(BUMBLEBEE) scan --profile deep --root $(REPO_ROOT) --exposure-catalog $(CATALOGS) --findings-only > $(REPO_ROOT)/security/ira-exposure.ndjson
+	@findings=$$(grep -c '"record_type":"finding"' $(REPO_ROOT)/security/ira-exposure.ndjson 2>/dev/null || true); \
+	 echo "exposure findings: $$findings"; \
+	 if [ "$$findings" != "0" ]; then echo "⚠️  exposure findings — review security/ira-exposure.ndjson"; exit 1; fi
+	@echo "✅ security scan complete (read-only) — NDJSON written under security/"
 
 # ── Tests ─────────────────────────────────────────────────────────────────────
 

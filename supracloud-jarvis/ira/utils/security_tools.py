@@ -115,8 +115,15 @@ async def _set_lockdown_db(active: bool) -> None:
 
 # ── Tool 1: Scan Threats ──────────────────────────────────────────────────────
 
-async def scan_threats() -> dict:
-    """Scan all active TCP/UDP connections for unusual external IPs."""
+async def scan_threats(*, is_owner: bool = False) -> dict:
+    """Scan all active TCP/UDP connections for unusual external IPs.
+
+    Owner-only and FAIL-CLOSED: exposes host/network telemetry, so the tool
+    re-checks identity itself (defense-in-depth, independent of the caller's gate).
+    """
+    if not is_owner:
+        return {"status": "forbidden",
+                "message": "Security operations are restricted to the verified owner."}
     loop = asyncio.get_running_loop()  # Fix L3: get_event_loop() deprecated in Python 3.10+
     raw_connections = await loop.run_in_executor(None, psutil.net_connections, "inet")
 
@@ -176,13 +183,19 @@ async def scan_threats() -> dict:
 
 # ── Tool 2: Initiate Lockdown ─────────────────────────────────────────────────
 
-async def initiate_lockdown(reason: str = "voice command") -> dict:
+async def initiate_lockdown(reason: str = "voice command", *, is_owner: bool = False) -> dict:
     """
     Engage lockdown mode:
       1. Persists LOCKDOWN=1 to monitor_state (survives restarts)
       2. Writes a CRITICAL event to security_events
       3. Sends Telegram alert to owner
+
+    Owner-only and FAIL-CLOSED: this is a destructive control action, so the tool
+    re-checks identity itself (defense-in-depth, independent of the caller's gate).
     """
+    if not is_owner:
+        return {"status": "forbidden",
+                "message": "Security operations are restricted to the verified owner."}
     await _set_lockdown_db(True)
     timestamp = datetime.now(timezone.utc).isoformat()
 
@@ -217,8 +230,14 @@ async def initiate_lockdown(reason: str = "voice command") -> dict:
     }
 
 
-async def lift_lockdown() -> dict:
-    """Deactivate lockdown mode and notify owner."""
+async def lift_lockdown(*, is_owner: bool = False) -> dict:
+    """Deactivate lockdown mode and notify owner.
+
+    Owner-only and FAIL-CLOSED (defense-in-depth, independent of the caller's gate).
+    """
+    if not is_owner:
+        return {"status": "forbidden",
+                "message": "Security operations are restricted to the verified owner."}
     await _set_lockdown_db(False)
     timestamp = datetime.now(timezone.utc).isoformat()
 
@@ -236,8 +255,15 @@ async def lift_lockdown() -> dict:
 
 # ── Tool 3: Dispatch Secure Message ──────────────────────────────────────────
 
-async def dispatch_secure_message(message: str) -> dict:
-    """Send a voice-dictated message directly to the owner's Telegram."""
+async def dispatch_secure_message(message: str, *, is_owner: bool = False) -> dict:
+    """Send a voice-dictated message directly to the owner's Telegram.
+
+    Owner-only and FAIL-CLOSED: this is an outbound action, so the tool re-checks
+    identity itself (defense-in-depth, independent of the caller's gate).
+    """
+    if not is_owner:
+        return {"status": "forbidden",
+                "message": "Security operations are restricted to the verified owner."}
     from config import get_settings
     cfg = get_settings()
 

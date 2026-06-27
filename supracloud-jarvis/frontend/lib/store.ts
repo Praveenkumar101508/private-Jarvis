@@ -32,6 +32,7 @@ export interface Message {
   expertPanelOpen?: boolean;
   imageDataUrl?: string;
   generatedImageB64?: string;
+  generatedImagePrompt?: string;
   usedLiveX?: boolean;
   isEngineer?: boolean;
   isThink?: boolean;
@@ -42,8 +43,14 @@ export interface Message {
   isArchitect?: boolean;
   pendingApply?: boolean;
   videoUrl?: string;
+  videoPrompt?: string;
   documentUrl?: string;
+  documentFilename?: string;
+  documentFormat?: string;
+  designUrl?: string;
+  designFilename?: string;
   audioUrl?: string;
+  audioType?: string;
 }
 
 // ── Auth Store (persisted in sessionStorage) ──────────────────────────────
@@ -138,7 +145,8 @@ export const useChatStore = create<ChatState>()((set) => ({
 
 // ── UI Store ──────────────────────────────────────────────────────────────
 
-type AppMode = "assistant" | "tutor" | "bodyguard";
+// Fix #95: bodyguard mode removed — keep this in sync with components/Sidebar AppMode.
+type AppMode = "assistant" | "tutor";
 
 interface UIState {
   mode: AppMode;

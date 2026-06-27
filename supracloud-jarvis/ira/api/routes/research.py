@@ -23,7 +23,7 @@ from sse_starlette.sse import EventSourceResponse
 
 import channels
 from api.middleware.auth import require_auth, is_owner
-from channels.guard import guard_outbound
+from utils.net_safety import guard_outbound
 from memory.store import ensure_conversation
 from utils.llm import stream_tokens
 from utils.security_events import classify_guard_refusal, emit_event

@@ -1,0 +1,18 @@
+# OmniVoice sidecar venv ONLY — never install into IRA's main env or requirements-test.
+# These deliberately conflict with IRA's pins (transformers<5 via sentence-transformers;
+# CPU torch 2.4.1), which is exactly why OmniVoice runs out-of-process in its own venv.
+#
+# Setup (Python >=3.10, NVIDIA GPU e.g. RTX A4500):
+#   python3.10 -m venv .venv-omnivoice
+#   .venv-omnivoice/bin/pip install torch==2.8.0+cu128 torchaudio==2.8.0+cu128 \
+#       --extra-index-url https://download.pytorch.org/whl/cu128
+#   .venv-omnivoice/bin/pip install -r voice/omnivoice_sidecar.requirements.txt
+# Then set IRA_OMNIVOICE_PYTHON=/abs/path/.venv-omnivoice/bin/python and
+# IRA_VOICE_ENGINE=omnivoice.
+
+omnivoice                 # k2-fsa OmniVoice (Apache-2.0)
+transformers>=5.3.0       # required by omnivoice (conflicts with IRA's <5 — hence the sidecar)
+accelerate
+numpy
+soundfile
+# torch / torchaudio are installed separately with the CUDA wheel index (see above).

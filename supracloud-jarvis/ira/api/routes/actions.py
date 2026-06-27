@@ -13,6 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from actions import action_status
+from actions.email_triage import fetch_recent
 from api.middleware.auth import require_auth, is_owner
 from utils.approval import owner_gated_action
 from utils.email_send import send_email
@@ -31,6 +32,23 @@ class EmailRequest(BaseModel):
 async def list_action_status(_user: str = Depends(require_auth)):
     """Report which v1 actions are configured (fail-soft introspection)."""
     return {"actions": action_status()}
+
+
+@router.get("/email/triage")
+async def email_triage(
+    limit: int = 10,
+    _user: str = Depends(require_auth),
+):
+    """Read-only IMAP inbox triage. Owner-only; sanitises all fetched content.
+
+    Returns recent messages with each field wrapped as untrusted external data,
+    plus any prompt-injection patterns detected (audit). Never marks, moves,
+    deletes, or replies — sending stays behind POST /actions/email.
+    """
+    if not is_owner(_user):
+        raise HTTPException(status_code=403, detail="Inbox triage is restricted to the verified owner.")
+    limit = max(1, min(int(limit), 50))
+    return await fetch_recent(limit=limit, is_owner=is_owner(_user))
 
 
 @router.post("/email")

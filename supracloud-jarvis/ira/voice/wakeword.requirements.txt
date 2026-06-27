@@ -1,0 +1,13 @@
+# Optional extras for the wake-word feature (voice/wakeword.py), OFF by default.
+# Kept OUT of IRA's pinned requirements.txt so they cannot disturb its carefully
+# managed resolution (cf. the torch/torchaudio pinning note there). The feature is
+# fully fail-soft: if these are absent, the listener disables itself and IRA runs.
+#
+# Install on the Shadow box (which has the local microphone), then set
+# IRA_WAKEWORD_ENABLED=true:
+#   pip install -r voice/wakeword.requirements.txt
+# Needs the PortAudio system lib for sounddevice (e.g. `apt-get install libportaudio2`).
+
+openwakeword         # Apache-2.0, local CPU wake-word detection (ONNX)
+onnxruntime          # openWakeWord inference backend (CPU)
+sounddevice          # local microphone capture (PortAudio)

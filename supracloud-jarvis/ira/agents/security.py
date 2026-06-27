@@ -110,16 +110,21 @@ async def security_guardian(state: IRAState) -> IRAState:
             dispatch_secure_message,
         )
 
+        # Thread the verified-owner flag from graph state into each tool so they
+        # re-check identity independently (defense-in-depth). The node already
+        # refused non-owners above, so this is True here, but we never re-derive it.
+        owner = bool(state.get("is_owner"))
+
         if _LOCKDOWN_RE.search(query):
-            result = await initiate_lockdown(reason=f"voice/chat command: {query[:80]}")
+            result = await initiate_lockdown(reason=f"voice/chat command: {query[:80]}", is_owner=owner)
             tool_output = f"[LOCKDOWN TOOL RESULT]\n{json.dumps(result, indent=2)}"
 
         elif _LIFT_RE.search(query):
-            result = await lift_lockdown()
+            result = await lift_lockdown(is_owner=owner)
             tool_output = f"[LIFT LOCKDOWN RESULT]\n{json.dumps(result, indent=2)}"
 
         elif _SCAN_RE.search(query):
-            result = await scan_threats()
+            result = await scan_threats(is_owner=owner)
             tool_output = f"[NETWORK SCAN RESULT]\n{json.dumps(result, indent=2)}"
 
         elif _DISPATCH_RE.search(query):
@@ -130,7 +135,7 @@ async def security_guardian(state: IRAState) -> IRAState:
                 re.I | re.S,
             )
             msg_body = msg_match.group(1).strip() if msg_match else query
-            result = await dispatch_secure_message(msg_body)
+            result = await dispatch_secure_message(msg_body, is_owner=owner)
             tool_output = f"[DISPATCH RESULT]\n{json.dumps(result, indent=2)}"
 
     except Exception as e:

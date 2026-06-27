@@ -4,7 +4,7 @@
 
 <br/>
 
-[![Built by Praveen Kumar](https://img.shields.io/badge/built_by-Praveen_Kumar-7c8bff?style=for-the-badge&labelColor=0d1220)](https://github.com/Praveenkumar101508)
+[![Built by Praveen Kamineti](https://img.shields.io/badge/built_by-Praveen_Kamineti-7c8bff?style=for-the-badge&labelColor=0d1220)](https://github.com/Praveenkumar101508)
 [![Python](https://img.shields.io/badge/python-3.11-5ee0f0?style=for-the-badge&logo=python&logoColor=white&labelColor=0d1220)](#)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.115-5ee0f0?style=for-the-badge&logo=fastapi&logoColor=white&labelColor=0d1220)](#)
 [![LangGraph](https://img.shields.io/badge/LangGraph-0.2.73-7c8bff?style=for-the-badge&labelColor=0d1220)](#)
@@ -61,7 +61,7 @@ A request is routed to the right specialist automatically — you just talk to I
 | 🌐 **Website** | Runs the SupraCloud site — leads, bookings, reports |
 | 🧭 **Strategy / Expert** | Deliberation, calibration, and look-ahead for hard decisions |
 
-Plus a **voice layer** (speak to it, it speaks back, and only *your* voiceprint unlocks sensitive topics) and **8 background workers** that brief you each morning, watch for issues, heal the system, and back it up — without being asked.
+Plus a **voice layer** (speak to it, it speaks back, an owner-gated wake word, and only *your* voiceprint unlocks sensitive topics), a **local-first actions surface** (IMAP email triage, CalDAV calendar, on-disk notes — every destructive or outbound action gated behind explicit confirmation), an optional **mobile companion** (Expo PWA + push, off by default), and **8 background workers** that brief you each morning, watch for issues, heal the system, and back it up — without being asked.
 
 ---
 
@@ -81,7 +81,7 @@ flowchart TB
     A -. reasoning .-> CX[[Cortex engine · localhost]]
     CX --> OL[(Ollama · Qwen3 8B / 14B)]
     A --> MEM[(PostgreSQL + pgvector · your memory)]
-    API --> VOICE[Voice · Whisper STT · Supertonic TTS · biometrics]
+    API --> VOICE[Voice · Whisper STT · OmniVoice/Supertonic TTS · wake-word · biometrics]
     API --> WRK[Workers · briefings · monitors · self-heal · backup]
 
     classDef accent fill:#10204a,stroke:#5ee0f0,color:#e3ecfb,stroke-width:1.5px;
@@ -101,19 +101,23 @@ IRA is built to be exposed to the internet without flinching. The model isn't "o
 | Layer | Protection | Status |
 |---|---|---|
 | **Identity** | JWT + bcrypt, constant-time login, TOTP 2-factor | ✅ live |
-| **Sessions** | Short-lived tokens, `jti` revocation, instant logout-all | ✅ live |
+| **Sessions** | Short-lived tokens, `jti` revocation, instant logout-all, opt-in fail-closed-on-Redis | ✅ live |
 | **Brute force** | Per-IP rate limiting + per-account exponential lockout | ✅ live |
-| **Outbound (SSRF)** | URL guard with DNS-rebinding defense | ✅ live |
+| **Owner authorization** | Verified-owner checked *inside* every sensitive tool (email, calendar, security) — fail-closed, not just at the classifier | ✅ live |
+| **Self-modification** | Architect apply path owner-gated; protected-paths denylist refuses any patch touching auth / safety / router / config / CI | ✅ live |
+| **Outbound (SSRF)** | Single hardened guard (`net_safety`) — DNS-rebinding, IPv4-mapped IPv6, decimal/hex/`0.0.0.0` literal bypasses all closed | ✅ live |
 | **Exfiltration** | Egress guard blocks secrets / keys / local paths leaving | ✅ live |
-| **Commands** | Two-gate allowlist, shell-free execution | ✅ live |
+| **Reasoning engine** | Reasoning-only skills run the local engine with tools disabled (`--accept-hooks` dropped + enforced no-tools wrapper) | ✅ live |
+| **Commands** | Two-gate allowlist, shell-free execution, allow-roots resolved at call time | ✅ live |
 | **Actions** | Draft → confirm approval for every side-effect | ✅ live |
 | **Prompt injection** | Web & tool output treated as data, never instructions | ✅ live |
 | **Tripwires** | Canary tokens fire instantly on any intruder touch | ✅ live |
 | **Detection** | Live monitor → security events → Telegram/email alerts | ✅ live |
 | **Response** | Bounded auto-playbooks (block IP, rotate, snapshot) | ✅ live |
+| **Exposure guard** | `DEV_MODE` refused on a non-loopback bind host unless explicitly opted in (domain label alone isn't trusted) | ✅ live |
 | **Data at rest** | Owner-held-key vault + encrypted secrets | 🚧 roadmap |
 
-> A CI test **asserts** the self-modifying paths can never `git push` or shell out — the assistant can *propose* changes, never silently ship them.
+> The self-modifying paths can *propose* changes, never silently ship them: an **AST CI check** fails the build on any `git push` — including the `["git", "push"]` arg-vector form a literal string-grep would miss — and the architect's apply pipeline refuses outright to patch its own security surface.
 
 ---
 
@@ -132,11 +136,12 @@ IRA is built to be exposed to the internet without flinching. The model isn't "o
 
 </div>
 
-- **Reasoning** — local Ollama (Qwen3 8B fast / 14B deep) behind the **Cortex** out-of-process engine
+- **Reasoning** — local Ollama (Qwen3 8B fast / 14B deep) behind the **Cortex** out-of-process engine; reasoning-only skills run with the toolset disabled
 - **Memory** — PostgreSQL + pgvector (HNSW), local embeddings + reranker, per-owner isolation
-- **Voice** — Whisper STT, Supertonic/Kokoro TTS, ECAPA voiceprint gate, Indic language support
-- **Frontend** — Next.js 14 PWA (installable on phone or desktop)
-- **Quality** — 200+ tests, CI on every push, Dependabot
+- **Voice** — Whisper STT, OmniVoice / Supertonic / Kokoro TTS, ECAPA voiceprint gate, owner-gated wake word, Indic language support
+- **Actions** — local-first IMAP email triage, CalDAV calendar, on-disk notes — all confirmation-gated
+- **Frontend** — Next.js 14.2 PWA (installable on phone or desktop) + an optional Expo mobile companion
+- **Quality** — 600+ tests (incl. adversarial injection & owner-gate suites), two CI workflows (full suite + prod-deps resolution gate), Dependabot
 
 ---
 
@@ -144,8 +149,8 @@ IRA is built to be exposed to the internet without flinching. The model isn't "o
 
 ```bash
 # 1. clone
-git clone https://github.com/Praveenkumar101508/private-Jarvis.git
-cd private-Jarvis/supracloud-jarvis
+git clone https://github.com/Praveenkumar101508/Supracloud_ira.git
+cd Supracloud_ira/supracloud-jarvis
 
 # 2. configure (copy the template, fill in your values — nothing here phones home)
 cp .env.example .env
@@ -168,14 +173,20 @@ supracloud-jarvis/
 ├─ ira/
 │  ├─ agents/        # the specialist agents + the LangGraph
 │  ├─ api/           # FastAPI routes + auth middleware
+│  ├─ actions/       # local-first email / calendar / notes (confirmation-gated)
+│  ├─ research/      # deep web-research engine (sanitised, egress-guarded)
 │  ├─ memory/        # pgvector store, embeddings, reranker
-│  ├─ voice/         # STT, TTS, voiceprint gate, languages
+│  ├─ voice/         # STT, TTS, voiceprint gate, wake word, languages
 │  ├─ worker/        # briefings, monitors, self-heal, backup
-│  ├─ utils/         # safety, security, playbooks, tools
+│  ├─ utils/         # safety (net_safety, cmd_safety), security, playbooks, tools
 │  ├─ skills/        # per-agent prompts (SKILL.md)
+│  ├─ subagents/     # Expert-Mode deliberation team
+│  ├─ scripts/       # CI guards (e.g. AST no-push check)
 │  └─ cortex_bridge.py   # local reasoning gateway
-├─ frontend/         # Next.js 14 PWA
+├─ frontend/         # Next.js 14.2 PWA
+├─ mobile/           # optional Expo companion app (off by default)
 ├─ postgres/         # schema migrations
+├─ third_party/      # vendored deps + upstream LICENSE/NOTICE
 └─ docs/             # ops + incident runbooks
 ```
 
@@ -185,6 +196,8 @@ supracloud-jarvis/
 
 - [x] Multi-agent core, voice, memory, proactive workers
 - [x] Full defense-in-depth security layer + live monitoring
+- [x] Local-first actions (email · calendar · notes) + optional mobile companion
+- [x] Tool-layer owner authorization + self-modification guardrails
 - [ ] Owner-held-key encryption vault (data at rest)
 - [ ] Passkeys / WebAuthn login
 - [ ] Global lockdown kill-switch
@@ -193,7 +206,7 @@ supracloud-jarvis/
 ---
 
 <div align="center">
-<sub>Built and owned by <b>Praveen Kumar Kamineti</b> · part of the <b>SupraCloud</b> sovereign-AI vision.</sub>
+<sub>Built and owned by <b>Praveen Kamineti</b> · part of the <b>SupraCloud</b> sovereign-AI vision.</sub>
 <br/>
 <sub>Private repository — © all rights reserved.</sub>
 </div>

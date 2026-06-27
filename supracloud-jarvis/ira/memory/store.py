@@ -75,6 +75,18 @@ async def save_message(
     return msg_id
 
 
+async def remember(content: str, *, kind: str = "note", user_id: str = "owner") -> str:
+    """Persist a standalone memory (not tied to a conversation) into the vector store.
+
+    Used by always-on components (e.g. the realtime brain) to write durable
+    thoughts / consolidations straight into ``memory_embeddings``. Awaits the
+    embedding write so the caller can treat it as best-effort and fail soft.
+    """
+    source_id = str(uuid.uuid4())
+    await _store_embedding(source_id, content, kind, user_id=user_id)
+    return source_id
+
+
 async def _store_embedding(
     source_id: str,
     content: str,

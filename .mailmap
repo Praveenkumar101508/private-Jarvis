@@ -1,0 +1,5 @@
+# Normalize all past author/committer identities to a single canonical identity.
+# Format: Canonical Name <canonical@email> Commit Name <commit@email>
+Praveen Kamineti <praveenkamineti2415@gmail.com> Praveen Kumar <praveenkamineti2415@gmail.com>
+Praveen Kamineti <praveenkamineti2415@gmail.com> Praveen Kumar Kamineti <Praveenkumar101508@users.noreply.github.com>
+Praveen Kamineti <praveenkamineti2415@gmail.com> Praveenkumar101508 <praveenkamineti@gmail.com>

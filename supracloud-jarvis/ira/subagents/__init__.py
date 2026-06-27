@@ -15,7 +15,6 @@ from __future__ import annotations
 from typing import List, Optional, Tuple
 
 from cortex_bridge import CortexBridge
-from skills._common import _REASONING_DIRECTIVE
 
 
 def _specialists(owner: str) -> List[Tuple[str, str]]:
@@ -69,14 +68,14 @@ def deliberate(
 
     outputs: List[Tuple[str, str]] = []
     for label, persona in _specialists(owner_name):
-        system = persona + ctx + "\n\n" + _REASONING_DIRECTIVE
-        outputs.append((label, bridge.ask(question, system=system)))
+        system = persona + ctx
+        outputs.append((label, bridge.ask(question, system=system, reasoning_only=True)))
 
     panel = "\n\n".join(f"=== {label} ===\n{text}" for label, text in outputs)
     synthesis = bridge.ask(
         f"Original question: {question}\n\nThe 4 specialist agents produced:\n\n{panel}\n\n"
         "Synthesize the definitive answer.",
-        system=_supervisor(owner_name) + "\n\n" + _REASONING_DIRECTIVE,
+        system=_supervisor(owner_name), reasoning_only=True,
     )
 
     body = "\n\n---\n\n".join(text for _, text in outputs)

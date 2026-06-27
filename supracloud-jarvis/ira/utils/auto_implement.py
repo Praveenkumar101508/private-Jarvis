@@ -176,6 +176,45 @@ def extract_changed_files(diff_text: str) -> list[str]:
     return list(dict.fromkeys(paths))  # deduplicate, preserve order
 
 
+# ── Protected-paths denylist ──────────────────────────────────────────────────
+# IRA's architect pipeline can git-apply any diff the LLM produced once a human
+# types "architect apply". It must never be allowed to rewrite its own security
+# and control surface (auth, approval gate, command/URL safety, biometric gate,
+# router, config) or its CI workflows. A patch touching any of these is refused
+# outright — before validation or apply — regardless of who triggered it.
+#
+# Entries are package-relative paths; matching is by path suffix on component
+# boundaries so it catches both repo-root-relative diff headers
+# (supracloud-jarvis/ira/utils/approval.py) and package-relative ones
+# (utils/approval.py). Anything under a .github/ directory is also protected.
+_PROTECTED_PATHS = (
+    "api/middleware/auth.py",
+    "utils/approval.py",
+    "utils/auto_implement.py",
+    "utils/cmd_safety.py",
+    "utils/net_safety.py",
+    "voice/biometrics.py",
+    "voice/gate.py",
+    "router.py",
+    "config.py",
+)
+
+
+def _is_protected_path(path: str) -> bool:
+    """True if a diff-changed path touches a protected security/control file."""
+    norm = path.strip().replace("\\", "/")
+    if norm.startswith("./"):
+        norm = norm[2:]
+    parts = [p for p in norm.split("/") if p and p != "."]
+    if ".github" in parts:
+        return True
+    for prot in _PROTECTED_PATHS:
+        prot_parts = prot.split("/")
+        if parts[-len(prot_parts):] == prot_parts:
+            return True
+    return False
+
+
 # ── Core apply pipeline ───────────────────────────────────────────────────────
 
 async def apply_implementation(
@@ -214,36 +253,18 @@ async def apply_implementation(
         files_changed.extend(extract_changed_files(diff))
     files_changed = list(dict.fromkeys(files_changed))  # deduplicate, preserve order
 
-    # ── Protected-path screen ─────────────────────────────────────────────────
-    # Refuse before touching the working tree (and before any git author is even
-    # resolved) if the patch would modify / delete / rename a security-critical
-    # module. This is the primary guard the deletion/rename header fix above feeds.
-    blocked = [p for p in files_changed if _is_protected_path(p)]
-    if blocked:
-        return ApplyResult(
-            success=False,
-            message="Refused: patch touches a protected security module.",
-            files_changed=files_changed,
-            commit_hash="",
-            services_restarted=[],
-            error=f"refusing to apply — protected path(s): {', '.join(blocked)}",
-        )
-
-    # Fix #76: derive author name from OWNER_NAME env var so git commits use the
-    # real owner's name rather than a hardcoded constant. Resolved only when the
-    # patch will actually be applied — dry-run validation and refusals need no
-    # git author.
-    if not dry_run:
-        if author_name is None:
-            from config import get_settings
-            author_name = get_settings().owner_name.split()[0]  # first name only
-        if not author_email:
-            author_email = os.getenv("IRA_GIT_AUTHOR_EMAIL", "")
-            if not author_email:
-                raise ValueError(
-                    "IRA_GIT_AUTHOR_EMAIL env var not set — "
-                    "add it to .env before using the architect apply pipeline."
-                )
+    # Refuse outright if the patch touches a protected security/control path.
+    # Runs before validation/apply so even dry_run cannot probe a protected file.
+    for path in files_changed:
+        if _is_protected_path(path):
+            return ApplyResult(
+                success=False,
+                message="Refused — patch touches a protected path.",
+                files_changed=files_changed,
+                commit_hash="",
+                services_restarted=[],
+                error=f"refused: patch touches a protected path: {path}",
+            )
 
     commit_msg = extract_commit_message(implementation_text)
     services = extract_services(implementation_text)

@@ -19,7 +19,7 @@ _st = sys.modules.get("sentence_transformers")
 if _st is not None and not hasattr(_st, "SentenceTransformer"):
     _st.SentenceTransformer = object
 
-from channels.guard import is_public_url, is_safe_query, guard_outbound
+from utils.net_safety import check_url, is_safe_query, guard_outbound
 from config import research_backends_warning
 import api.routes.research as rmod
 from api.routes.research import research, ResearchRequest
@@ -32,7 +32,7 @@ class _Cfg:
 # ── public-only guard ─────────────────────────────────────────────────────────
 
 def test_public_url_allowed():
-    assert is_public_url("https://example.com/page")[0]
+    assert check_url("https://example.com/page", resolve_fn=lambda h: ["93.184.216.34"])[0]
 
 
 def test_private_and_internal_urls_blocked():
@@ -41,7 +41,29 @@ def test_private_and_internal_urls_blocked():
         "http://10.0.0.5/", "http://169.254.1.1/", "file:///etc/passwd",
         "http://server.local/x", "ftp://example.com/x",
     ):
-        ok, _reason = is_public_url(u)
+        ok, _reason = check_url(u, resolve_fn=lambda h: ["93.184.216.34"])
+        assert not ok, f"{u} should be blocked"
+
+
+def test_dns_rebinding_to_private_address_blocked():
+    # A public-looking domain that resolves to an internal/metadata address
+    # must be blocked even though the hostname string itself looks public.
+    for private_ip in ("127.0.0.1", "10.0.0.5", "169.254.169.254", "192.168.1.1"):
+        ok, reason = check_url(
+            "http://rebind.example.com/", resolve_fn=lambda h, ip=private_ip: [ip]
+        )
+        assert not ok, f"resolution to {private_ip} should be blocked"
+        assert "resolves to a private address" in reason
+
+
+def test_alternate_ip_literal_encodings_blocked():
+    for u in (
+        "http://2130706433/",          # decimal encoding of 127.0.0.1
+        "http://0x7f000001/",          # hex encoding of 127.0.0.1
+        "http://017700000001/",        # octal encoding of 127.0.0.1
+        "http://[::ffff:127.0.0.1]/",  # IPv4-mapped IPv6
+    ):
+        ok, _reason = check_url(u, resolve_fn=lambda h: ["93.184.216.34"])
         assert not ok, f"{u} should be blocked"
 
 

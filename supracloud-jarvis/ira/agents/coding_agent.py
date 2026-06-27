@@ -148,14 +148,17 @@ def _run_tests(repo: str) -> tuple[bool | None, str]:
 
 
 def _run_sync(instruction: str, repo: str) -> dict:
+    # Never operate on main/master — check the CURRENT branch BEFORE creating or
+    # modifying anything. (Previously this ran AFTER `checkout -b`, so `cur` was always
+    # the freshly created work branch and the guard could never fire.)
+    cur = _git(repo, "rev-parse", "--abbrev-ref", "HEAD")[1].strip()
+    if cur in ("main", "master"):
+        return {"ok": False, "reason": "refused-main", "summary": "Refusing to edit main/master."}
+
     branch = f"ira/{_slug(instruction)}-{int(time.time())}"
     rc, _out, err = _git(repo, "checkout", "-b", branch)
     if rc != 0:
         return {"ok": False, "reason": "git-branch-failed", "summary": err.strip()[:400], "branch": branch}
-    # Belt-and-braces: never operate on main/master.
-    cur = _git(repo, "rev-parse", "--abbrev-ref", "HEAD")[1].strip()
-    if cur in ("main", "master"):
-        return {"ok": False, "reason": "refused-main", "summary": "Refusing to edit main/master."}
 
     cmd, env, cloud = _aider_cmd(instruction)
     if cloud:
@@ -172,7 +175,10 @@ def _run_sync(instruction: str, repo: str) -> dict:
     files = _changed_files(repo)
     tests_passed, test_out = _run_tests(repo)
 
-    _git(repo, "add", "-A")
+    # Stage ONLY the files Aider changed — `git add -A` would sweep any pre-existing
+    # dirty tree in the repo into this commit.
+    if files:
+        _git(repo, "add", "--", *files)
     _git(repo, "commit", "-m", f"ira: {instruction[:72]}")
     commit = _git(repo, "rev-parse", "HEAD")[1].strip()[:10]
 

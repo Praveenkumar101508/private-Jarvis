@@ -60,6 +60,19 @@ def _default_cortex_bin() -> str:
     return "cortex"  # last resort; surfaces a clear FileNotFoundError if truly absent
 
 
+# Hardened no-tools wrapper for reasoning-only skill calls (see CortexBridge.ask).
+# In hermes-agent 0.15.2 the toolset is disabled at the CONFIG level
+# (`cortex tools disable --platform api_server …`, see CORTEX_OPS.md) — there is no
+# per-invocation no-tools CLI flag. This directive plus omitting --accept-hooks is the
+# per-call defense-in-depth layered on top of that operational config.
+_REASONING_ONLY_DIRECTIVE = (
+    "Operate strictly as a reasoning module. Answer using only the context provided "
+    "above. Do NOT call tools, run commands, read or write files, browse the web, or "
+    "request additional parameters — everything you need is already supplied. Produce "
+    "the final answer text now."
+)
+
+
 @dataclass(frozen=True)
 class CortexConfig:
     # Retained for back-compat with the prior HTTP bridge (UNUSED on this path) ---
@@ -91,6 +104,7 @@ class CortexBridge:
         session_id: Optional[str] = None,
         user_key: Optional[str] = None,
         session_key: Optional[str] = None,
+        reasoning_only: bool = False,
     ) -> str:
         """Run the Cortex agent on ``prompt`` (one-shot) and return the final text.
 
@@ -103,14 +117,30 @@ class CortexBridge:
         loads the recent turns from Postgres and passes them in as context. Per-tenant
         long-term memory isolation remains a later-phase task (AGENTS.md). ``session_key``
         is the deprecated alias for ``user_key``.
+
+        ``reasoning_only`` enforces a no-tools call for Option-A skills (IRA runs every
+        real tool itself and passes results in as context). hermes-agent 0.15.2 exposes
+        NO per-invocation no-tools flag — the toolset is disabled at the config level
+        (``cortex tools disable --platform api_server …``, see CORTEX_OPS.md). So the
+        per-call enforcement here is two-fold: (1) OMIT ``--accept-hooks`` so Cortex
+        cannot auto-accept a hook/tool invocation (a non-interactive subprocess has no
+        stdin to confirm one), and (2) prepend a hardened no-tools directive. This is a
+        moved-up-from-soft-prompt constraint, layered on the operational config gate.
         """
         _ = (session_id, user_key, session_key)  # accepted for call-site compat; see note
 
         full_prompt = f"{system.strip()}\n\n{prompt}" if system else prompt
+        if reasoning_only:
+            full_prompt = f"{_REASONING_ONLY_DIRECTIVE}\n\n{full_prompt}"
 
         # Stateless one-shot — each call is isolated. We do NOT pass --continue (it
         # doesn't persist/resume across one-shots and bleeds the most-recent session).
-        cmd: List[str] = [self.cfg.cortex_bin, "--accept-hooks", "-z", full_prompt]
+        # --accept-hooks auto-accepts Cortex hook/tool execution; in reasoning_only mode
+        # we OMIT it so no tool/hook can auto-run for a pure-reasoning skill call.
+        cmd: List[str] = [self.cfg.cortex_bin]
+        if not reasoning_only:
+            cmd.append("--accept-hooks")
+        cmd += ["-z", full_prompt]
 
         try:
             proc = subprocess.run(

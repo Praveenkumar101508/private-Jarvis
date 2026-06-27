@@ -34,10 +34,17 @@ _ACTIONS: dict[str, ActionSpec] = {
     "reminders": ActionSpec("reminders", "", _always),   # Postgres (core, local)
     "briefings": ActionSpec("briefings", "", _always),   # local LLM
     "files":     ActionSpec("files", "", _always),       # local disk
+    "notes":     ActionSpec("notes", "", _always),       # local disk (markdown)
     "calendar":  ActionSpec("calendar", "CALCOM_API_KEY (Cal.com)",
                             lambda c: bool(getattr(c, "calcom_api_key", ""))),
+    "calendar_dav": ActionSpec("calendar_dav", "CALDAV_URL (CalDAV)",
+                               lambda c: bool(getattr(c, "caldav_url", ""))),
     "email":     ActionSpec("email", "SMTP_HOST (SMTP)",
                             lambda c: bool(getattr(c, "smtp_host", ""))),
+    "email_triage": ActionSpec("email_triage", "IMAP_HOST (IMAP, read-only)",
+                               lambda c: bool(getattr(c, "imap_host", ""))),
+    "android":   ActionSpec("android", "ANDROID_ACTUATOR_ENABLED (experimental, OFF)",
+                            lambda c: bool(getattr(c, "android_actuator_enabled", False))),
 }
 
 # The canonical v1 action set.

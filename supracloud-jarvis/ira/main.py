@@ -167,10 +167,25 @@ async def lifespan(app: FastAPI):
 
     await _validate_config(cfg)
 
+    # Continuous realtime brain — persistent background loop (OFF by default).
+    from api.routes.brain import start_brain, stop_brain
+    await start_brain(app)
+
+    # Local voice output — speak brain replies aloud (OFF by default). After the brain.
+    from voice.voice_output import start_voice_output, stop_voice_output
+    await start_voice_output(app, getattr(app.state, "brain", None))
+
+    # Always-on, owner-gated wake-word listener (OFF by default).
+    from voice.wakeword import start_wakeword, stop_wakeword
+    await start_wakeword(app)
+
     logger.info("IRA is online. Good morning.")
     yield
 
     # Graceful shutdown
+    await stop_wakeword(app)
+    await stop_voice_output(app)
+    await stop_brain(app)
     await close_checkpointer()
     await close_pool()
     await close_redis()
@@ -434,6 +449,21 @@ def create_app() -> FastAPI:
 
     from api.routes.research import router as research_router
     app.include_router(research_router, prefix="/api/v1")        # v1 3B.2: /research (web search/read) + doctor
+
+    from api.routes.notes import router as notes_router
+    app.include_router(notes_router, prefix="/api/v1")           # Phase 3: /notes (local-first markdown, delete gated)
+
+    from api.routes.calendar_dav import router as calendar_dav_router
+    app.include_router(calendar_dav_router, prefix="/api/v1")    # Phase 3: /calendar/dav (local-first CalDAV, create/delete gated)
+
+    from api.routes.android import router as android_router
+    app.include_router(android_router, prefix="/api/v1")         # Phase 5: /android (experimental actuator, OFF by default)
+
+    from api.routes.brain import router as brain_router
+    app.include_router(brain_router)                             # /ws/brain (continuous brain, OFF by default)
+
+    from api.routes.mobile import router as mobile_router
+    app.include_router(mobile_router)                            # /mobile/* (mobile app support, push OFF by default)
 
     # ── Global error handler ──────────────────────────────────────────────────
     @app.exception_handler(Exception)

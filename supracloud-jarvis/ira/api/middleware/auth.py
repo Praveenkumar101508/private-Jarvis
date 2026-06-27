@@ -80,14 +80,33 @@ def hash_password(plain: str) -> str:
 
 # ── Redis revocation helpers ──────────────────────────────────────────────────
 
+def _auth_fail_closed() -> bool:
+    """When true, a Redis error in a revocation/version check DENIES access.
+
+    Defaults to False (fail open, current behaviour). Set AUTH_FAIL_CLOSED_ON_REDIS=true
+    for a hardened, security-over-availability posture.
+    """
+    try:
+        return bool(get_settings().auth_fail_closed_on_redis)
+    except Exception:
+        return False
+
+
 async def _is_revoked(jti: str) -> bool:
-    """True if the jti is in the Redis revocation set. Fail-open on Redis error."""
+    """True if the jti is in the Redis revocation set.
+
+    On a Redis error this fails OPEN (returns not-revoked) by default; with
+    AUTH_FAIL_CLOSED_ON_REDIS=true it fails CLOSED (treats the token as revoked).
+    """
     if not jti:
         return False
     try:
         from utils.redis_client import get_redis
         return bool(await get_redis().exists(f"{_REVOKED_PREFIX}{jti}"))
     except Exception as e:
+        if _auth_fail_closed():
+            logger.error("Redis revocation check failed — failing CLOSED (token treated as revoked): %s", e)
+            return True
         logger.warning("Redis revocation check failed (fail-open): %s", e)
         return False
 
@@ -104,12 +123,25 @@ async def revoke_token(jti: str, ttl_seconds: int) -> None:
 
 
 async def _get_token_version(username: str) -> int:
-    """Current per-user token version (0 = never bumped)."""
+    """Current per-user token version (0 = never bumped).
+
+    On a Redis error this returns 0 (fail open) by default; with
+    AUTH_FAIL_CLOSED_ON_REDIS=true it raises 503 so access is denied (fail closed)
+    rather than silently treating every token as current.
+    """
     try:
         from utils.redis_client import get_redis
         v = await get_redis().get(f"{_TOKEN_VER_PREFIX}{username}")
         return int(v) if v else 0
-    except Exception:
+    except HTTPException:
+        raise
+    except Exception as e:
+        if _auth_fail_closed():
+            logger.error("Redis token-version check failed — failing CLOSED: %s", e)
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Authentication backend unavailable",
+            )
         return 0
 
 
