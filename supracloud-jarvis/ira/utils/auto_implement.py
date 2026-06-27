@@ -164,10 +164,16 @@ _PROTECTED_PATHS = (
     "utils/auto_implement.py",
     "utils/cmd_safety.py",
     "utils/net_safety.py",
+    "utils/security_tools.py",      # owner-gated security actions
+    "utils/prompt_safety.py",       # prompt-injection screening
+    "utils/account_lockout.py",     # brute-force lockout
+    "utils/browser_tools.py",       # browser-fetch SSRF guard
     "voice/biometrics.py",
     "voice/gate.py",
+    "voice/challenge.py",           # voice owner challenge
     "router.py",
     "config.py",
+    "scripts/check_no_push.py",     # the no-push CI guard itself
 )
 
 

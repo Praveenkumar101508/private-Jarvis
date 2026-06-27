@@ -45,6 +45,20 @@ def test_normal_paths_allowed(path):
     assert _is_protected_path(path) is False
 
 
+@pytest.mark.parametrize("path", [
+    "utils/security_tools.py",     # owner-gated security actions
+    "utils/prompt_safety.py",      # prompt-injection screening
+    "utils/account_lockout.py",    # brute-force lockout
+    "utils/browser_tools.py",      # browser SSRF guard
+    "voice/challenge.py",          # voice owner challenge
+    "scripts/check_no_push.py",    # the no-push CI guard itself
+    "supracloud-jarvis/ira/utils/security_tools.py",
+])
+def test_extended_protected_paths_detected(path):
+    """Security-critical modules the original denylist omitted must be protected."""
+    assert _is_protected_path(path) is True
+
+
 def _impl_text(file_path: str) -> str:
     return (
         "Here is the patch:\n\n"
