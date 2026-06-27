@@ -6,18 +6,14 @@ Navigates to any URL, extracts visible text, answers the user's specific query.
 """
 from __future__ import annotations
 
-import ipaddress
 import logging
 import re
-import socket
 from urllib.parse import urlparse, urlunparse
+
+from utils.net_safety import check_url
 
 logger = logging.getLogger("ira.browser_tools")
 
-# Block SSRF: deny private/link-local/loopback IPs and non-HTTP schemes
-_BLOCKED_HOSTS = re.compile(
-    r"^(localhost|.*\.local|.*\.internal|.*\.corp)$", re.I
-)
 
 def _sanitize_url(url: str) -> str:
     """Fix #41: strip embedded credentials and URL fragments before use.
@@ -37,41 +33,6 @@ def _sanitize_url(url: str) -> str:
         return url
 
 
-def _is_safe_url(url: str) -> bool:
-    """Return True only for publicly routable HTTP/HTTPS URLs.
-
-    Fix #39: resolves the hostname to an IP address before approving the
-    request — a DNS rebinding attack can make a safe-looking hostname resolve
-    to an internal IP at the moment Playwright opens the connection. Checking
-    the resolved IP here closes that window by blocking the request before
-    the browser is even launched.
-    """
-    try:
-        parsed = urlparse(url)
-        if parsed.scheme not in ("http", "https"):
-            return False
-        host = parsed.hostname or ""
-        if not host:
-            return False
-        if _BLOCKED_HOSTS.match(host):
-            return False
-        # Determine the IP — either the host is already an IP literal, or we
-        # resolve it synchronously (Fix #39: DNS rebinding protection).
-        try:
-            addr = ipaddress.ip_address(host)
-        except ValueError:
-            # Hostname — resolve and check the returned IP
-            try:
-                resolved = socket.gethostbyname(host)
-                addr = ipaddress.ip_address(resolved)
-            except (socket.gaierror, ValueError):
-                return False  # Unresolvable → deny
-        if addr.is_private or addr.is_loopback or addr.is_link_local or addr.is_reserved or addr.is_multicast:
-            return False
-        return True
-    except Exception:
-        return False
-
 _MAX_PAGE_TEXT = 8_000  # characters fed to LLM
 
 
@@ -90,9 +51,13 @@ async def browse_and_summarize_website(url: str, query: str) -> dict:
     """
     # Fix #41: strip embedded credentials and fragments before any checks or logging
     url = _sanitize_url(url)
-    if not _is_safe_url(url):
+    # Route through the consolidated SSRF guard (utils.net_safety) rather than a
+    # divergent local copy: it resolves ALL A/AAAA records (not IPv4-only) and
+    # rejects IPv4-mapped IPv6 / non-standard IP literals before the browser launches.
+    ok, reason = check_url(url)
+    if not ok:
         return {
-            "error": "URL blocked for security reasons. Only public HTTP/HTTPS URLs are allowed.",
+            "error": f"URL blocked for security reasons: {reason}",
             "url": url,
         }
 
