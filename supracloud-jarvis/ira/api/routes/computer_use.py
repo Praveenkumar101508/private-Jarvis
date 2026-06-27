@@ -182,6 +182,10 @@ async def _execute_browser_task(
         page = await context.new_page()
 
         if start_url:
+            # residual: Playwright re-resolves the host at page.goto, so a
+            # rebinding TOCTOU window remains between this check and connect.
+            # IP-pinning (utils.net_safety.resolve_pinned) can't be threaded into
+            # Playwright's own DNS resolution here — this guard is best-effort.
             if not is_safe_url(start_url):
                 await yield_callback(f"⛔ URL blocked by SSRF policy: {start_url}\n")
                 await browser.close()
@@ -344,6 +348,9 @@ async def computer_screenshot(
     except ImportError:
         raise HTTPException(status_code=503, detail="Playwright not installed. Run: pip install playwright && playwright install chromium")
 
+    # residual: Playwright re-resolves the host at page.goto below, so a rebinding
+    # TOCTOU window remains; IP-pinning isn't supported through Playwright's own
+    # DNS resolution, so this guard is best-effort (see net_safety.resolve_pinned).
     if not is_safe_url(req.url):
         raise HTTPException(status_code=400, detail="URL not permitted")
 

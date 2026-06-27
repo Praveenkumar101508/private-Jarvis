@@ -172,6 +172,13 @@ def resolve_pinned(host: str) -> Optional[str]:
     Closes the TOCTOU gap: validate here, then make the HTTP client connect to the
     returned IP (passing Host: header) so the name can't rebind between check and
     connect. Returns None if the host has no safe address.
+
+    NOTE: there is no in-tree caller today — IRA does not directly fetch arbitrary
+    user/content URLs with its own HTTP client. Arbitrary-URL fetching is delegated
+    to trusted self-hosted services (Crawl4AI, SearXNG) that do their own DNS
+    resolution, and the one direct-navigation path (Playwright in
+    api/routes/computer_use.py) re-resolves internally and can't be pinned. This is
+    kept for any future direct fetch+connect caller, which should pin via this fn.
     """
     try:
         addrs = _resolve_all(host)
