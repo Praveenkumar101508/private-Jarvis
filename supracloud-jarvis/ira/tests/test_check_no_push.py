@@ -44,3 +44,26 @@ def test_clean_when_no_push():
 def test_real_auto_implement_is_clean():
     """The shipped auto_implement.py must contain no literal git push."""
     assert scan_files([_IRA_ROOT / "utils" / "auto_implement.py"]) == []
+
+
+def test_flags_push_at_non_default_path(tmp_path):
+    """A push regression must be caught even outside DEFAULT_TARGETS.
+
+    The widened CI step passes every package .py explicitly, so scan_files must
+    flag a literal push in an arbitrary file, not only the three default targets.
+    """
+    rogue = tmp_path / "worker" / "rogue_sync.py"
+    rogue.parent.mkdir(parents=True)
+    rogue.write_text('subprocess.run(["git", "push", "origin", "main"])\n', encoding="utf-8")
+    assert scan_files([rogue])
+
+
+def test_checker_excludes_itself(tmp_path):
+    """Scanning the whole package must not flag the checker's own logic strings.
+
+    check_no_push.py legitimately contains the substring 'git push' in its
+    docstring and detection literals; passing its own path (as the CI glob does)
+    must not produce a violation.
+    """
+    checker = _IRA_ROOT / "scripts" / "check_no_push.py"
+    assert scan_files([checker]) == []

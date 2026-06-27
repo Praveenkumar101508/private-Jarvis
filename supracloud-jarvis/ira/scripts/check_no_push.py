@@ -18,6 +18,9 @@ It deliberately does NOT flag a dynamic runner like ``["git", *args]`` (no liter
 
 Usage:
   python scripts/check_no_push.py [FILE ...]
+With no args it scans DEFAULT_TARGETS; CI passes every package .py explicitly so
+a push regression is caught anywhere, not only in the default git helpers. The
+checker skips its own file (it contains the literal for detection purposes).
 Exit 0 = clean, 1 = a literal git push was found.
 """
 from __future__ import annotations
@@ -75,8 +78,14 @@ def find_git_push_violations(source: str, filename: str = "<src>") -> list[str]:
 
 def scan_files(paths: list[Path]) -> list[str]:
     all_violations: list[str] = []
+    # This checker itself legitimately contains the literal "git push" in its
+    # docstring and detection strings — skip it so a whole-package glob (which
+    # includes this file) does not flag the guard against itself.
+    self_path = Path(__file__).resolve()
     for p in paths:
         if not p.exists():
+            continue
+        if p.resolve() == self_path:
             continue
         all_violations.extend(find_git_push_violations(p.read_text(encoding="utf-8"), str(p)))
     return all_violations

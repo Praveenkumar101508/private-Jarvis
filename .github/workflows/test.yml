@@ -64,8 +64,11 @@ jobs:
         working-directory: supracloud-jarvis/ira
         # The old literal grep could not see ["git", "push"]; this AST check can, and
         # its self-test runs in the suite above. See scripts/check_no_push.py.
+        # Scan the WHOLE package (not just the 3 default targets) so a push
+        # regression in any module is caught; tests carry intentional push
+        # fixtures, and the checker skips its own file.
         run: |
-          python scripts/check_no_push.py
+          python scripts/check_no_push.py $(find . -name '*.py' -not -path './tests/*' -not -path './.venv/*')
 
       - name: Check no hardcoded secrets
         run: |
