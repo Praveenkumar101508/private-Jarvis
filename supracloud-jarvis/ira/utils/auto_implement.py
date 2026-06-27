@@ -90,7 +90,45 @@ _DIFF_BLOCK_RE = re.compile(
     re.DOTALL,
 )
 
-_FILE_HEADER_RE = re.compile(r"^\+\+\+ b/(.+)$", re.MULTILINE)
+# Capture the file path from every header form a unified diff can use:
+#   +++ b/<path>          (additions / modifications)
+#   --- a/<path>          (the only path present for a *deletion*, whose +++ is /dev/null)
+#   rename from/to <path> (pure renames carry no +++ b/ line)
+# Matching only "+++ b/" let a deletion or rename diff yield an empty file list,
+# silently bypassing the protected-path screen below.
+_FILE_HEADER_RE = re.compile(
+    r"^(?:\+\+\+ b/|--- a/|rename (?:from|to) )(.+)$",
+    re.MULTILINE,
+)
+
+# Security-critical modules the architect agent may never modify, delete, or
+# rename. Stored normalized (leading "supracloud-jarvis"/"ira"/"./" stripped) so
+# the screen matches regardless of how the diff spells the path.
+_PROTECTED_PATHS = frozenset({
+    "utils/auto_implement.py",     # the apply pipeline itself
+    "utils/approval.py",           # human-confirmation gate
+    "utils/cmd_safety.py",         # shell-command allow/deny
+    "utils/account_lockout.py",    # brute-force lockout
+    "utils/prompt_safety.py",      # prompt-injection screening
+    "utils/security_tools.py",     # owner-gated security actions
+    "utils/url_safety.py",         # SSRF / outbound URL guard
+    "utils/browser_tools.py",      # browser fetch SSRF guard
+    "voice/challenge.py",          # voice owner challenge
+    "api/middleware/auth.py",      # request authentication
+})
+
+
+def _normalize_diff_path(path: str) -> str:
+    """Strip ./ and leading repo/package components so paths compare uniformly."""
+    parts = [p for p in path.strip().replace("\\", "/").split("/") if p not in ("", ".")]
+    while parts and parts[0] in ("supracloud-jarvis", "ira"):
+        parts.pop(0)
+    return "/".join(parts)
+
+
+def _is_protected_path(path: str) -> bool:
+    """True if ``path`` names one of IRA's security-critical modules."""
+    return _normalize_diff_path(path) in _PROTECTED_PATHS
 
 _COMMIT_MSG_RE = re.compile(
     r"```\s*(?:bash|text|commit)?\s*\n(feat|fix|chore|docs|refactor|style|test|perf).+?```",
@@ -132,8 +170,10 @@ def extract_services(implementation_text: str) -> list[str]:
 
 
 def extract_changed_files(diff_text: str) -> list[str]:
-    """Extract file paths from a unified diff."""
-    return _FILE_HEADER_RE.findall(diff_text)
+    """Extract file paths from a unified diff (additions, deletions, renames)."""
+    paths = [p.strip() for p in _FILE_HEADER_RE.findall(diff_text)]
+    paths = [p for p in paths if p and p != "/dev/null"]
+    return list(dict.fromkeys(paths))  # deduplicate, preserve order
 
 
 # ── Core apply pipeline ───────────────────────────────────────────────────────
@@ -154,18 +194,6 @@ async def apply_implementation(
     NOTE: remote sync is intentionally absent. IRA never pushes to remote
     automatically. Sync to remote manually when you are ready.
     """
-    # Fix #76: derive author name from OWNER_NAME env var so git commits use the
-    # real owner's name rather than a hardcoded constant.
-    if author_name is None:
-        from config import get_settings
-        author_name = get_settings().owner_name.split()[0]  # first name only
-    if not author_email:
-        author_email = os.getenv("IRA_GIT_AUTHOR_EMAIL", "")
-        if not author_email:
-            raise ValueError(
-                "IRA_GIT_AUTHOR_EMAIL env var not set — "
-                "add it to .env before using the architect apply pipeline."
-            )
     repo = _find_repo_root()
     diffs = extract_diffs(implementation_text)
 
@@ -185,6 +213,37 @@ async def apply_implementation(
     for diff in diffs:
         files_changed.extend(extract_changed_files(diff))
     files_changed = list(dict.fromkeys(files_changed))  # deduplicate, preserve order
+
+    # ── Protected-path screen ─────────────────────────────────────────────────
+    # Refuse before touching the working tree (and before any git author is even
+    # resolved) if the patch would modify / delete / rename a security-critical
+    # module. This is the primary guard the deletion/rename header fix above feeds.
+    blocked = [p for p in files_changed if _is_protected_path(p)]
+    if blocked:
+        return ApplyResult(
+            success=False,
+            message="Refused: patch touches a protected security module.",
+            files_changed=files_changed,
+            commit_hash="",
+            services_restarted=[],
+            error=f"refusing to apply — protected path(s): {', '.join(blocked)}",
+        )
+
+    # Fix #76: derive author name from OWNER_NAME env var so git commits use the
+    # real owner's name rather than a hardcoded constant. Resolved only when the
+    # patch will actually be applied — dry-run validation and refusals need no
+    # git author.
+    if not dry_run:
+        if author_name is None:
+            from config import get_settings
+            author_name = get_settings().owner_name.split()[0]  # first name only
+        if not author_email:
+            author_email = os.getenv("IRA_GIT_AUTHOR_EMAIL", "")
+            if not author_email:
+                raise ValueError(
+                    "IRA_GIT_AUTHOR_EMAIL env var not set — "
+                    "add it to .env before using the architect apply pipeline."
+                )
 
     commit_msg = extract_commit_message(implementation_text)
     services = extract_services(implementation_text)
