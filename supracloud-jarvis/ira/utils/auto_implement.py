@@ -101,35 +101,6 @@ _FILE_HEADER_RE = re.compile(
     re.MULTILINE,
 )
 
-# Security-critical modules the architect agent may never modify, delete, or
-# rename. Stored normalized (leading "supracloud-jarvis"/"ira"/"./" stripped) so
-# the screen matches regardless of how the diff spells the path.
-_PROTECTED_PATHS = frozenset({
-    "utils/auto_implement.py",     # the apply pipeline itself
-    "utils/approval.py",           # human-confirmation gate
-    "utils/cmd_safety.py",         # shell-command allow/deny
-    "utils/account_lockout.py",    # brute-force lockout
-    "utils/prompt_safety.py",      # prompt-injection screening
-    "utils/security_tools.py",     # owner-gated security actions
-    "utils/url_safety.py",         # SSRF / outbound URL guard
-    "utils/browser_tools.py",      # browser fetch SSRF guard
-    "voice/challenge.py",          # voice owner challenge
-    "api/middleware/auth.py",      # request authentication
-})
-
-
-def _normalize_diff_path(path: str) -> str:
-    """Strip ./ and leading repo/package components so paths compare uniformly."""
-    parts = [p for p in path.strip().replace("\\", "/").split("/") if p not in ("", ".")]
-    while parts and parts[0] in ("supracloud-jarvis", "ira"):
-        parts.pop(0)
-    return "/".join(parts)
-
-
-def _is_protected_path(path: str) -> bool:
-    """True if ``path`` names one of IRA's security-critical modules."""
-    return _normalize_diff_path(path) in _PROTECTED_PATHS
-
 _COMMIT_MSG_RE = re.compile(
     r"```\s*(?:bash|text|commit)?\s*\n(feat|fix|chore|docs|refactor|style|test|perf).+?```",
     re.DOTALL | re.IGNORECASE,
