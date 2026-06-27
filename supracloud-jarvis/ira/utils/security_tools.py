@@ -119,7 +119,7 @@ async def scan_threats(*, is_owner: bool = False) -> dict:
     """Scan all active TCP/UDP connections for unusual external IPs.
 
     Owner-only and FAIL-CLOSED: exposes host/network telemetry, so the tool
-    re-checks identity itself (defense-in-depth, independent of the caller's gate).
+    re-checks identity itself (defense-in-depth, independent of the message classifier).
     """
     if not is_owner:
         return {"status": "forbidden",
@@ -191,7 +191,7 @@ async def initiate_lockdown(reason: str = "voice command", *, is_owner: bool = F
       3. Sends Telegram alert to owner
 
     Owner-only and FAIL-CLOSED: this is a destructive control action, so the tool
-    re-checks identity itself (defense-in-depth, independent of the caller's gate).
+    re-checks identity itself (defense-in-depth, independent of the message classifier).
     """
     if not is_owner:
         return {"status": "forbidden",
@@ -233,7 +233,7 @@ async def initiate_lockdown(reason: str = "voice command", *, is_owner: bool = F
 async def lift_lockdown(*, is_owner: bool = False) -> dict:
     """Deactivate lockdown mode and notify owner.
 
-    Owner-only and FAIL-CLOSED (defense-in-depth, independent of the caller's gate).
+    Owner-only and FAIL-CLOSED (defense-in-depth, independent of the message classifier).
     """
     if not is_owner:
         return {"status": "forbidden",
@@ -259,7 +259,7 @@ async def dispatch_secure_message(message: str, *, is_owner: bool = False) -> di
     """Send a voice-dictated message directly to the owner's Telegram.
 
     Owner-only and FAIL-CLOSED: this is an outbound action, so the tool re-checks
-    identity itself (defense-in-depth, independent of the caller's gate).
+    identity itself (defense-in-depth, independent of the message classifier).
     """
     if not is_owner:
         return {"status": "forbidden",

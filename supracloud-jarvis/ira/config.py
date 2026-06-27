@@ -349,6 +349,8 @@ class Settings(BaseSettings):
     # DENIES access (fail CLOSED) instead of allowing it. Default false preserves the
     # current availability behaviour (fail open). Enable for a hardened, security-over-
     # availability posture. Env: AUTH_FAIL_CLOSED_ON_REDIS.
+    # Fail-open is the deliberate availability default for a single-owner local box
+    # (a Redis blip shouldn't lock the owner out); flipping it is a separate decision.
     auth_fail_closed_on_redis: bool = False
 
     # Phase 5(d): the interface the API server binds to. DEV_MODE bypasses auth, so the
