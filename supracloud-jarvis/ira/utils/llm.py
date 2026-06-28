@@ -117,6 +117,7 @@ async def _complete_no_stream(
     messages: list[dict],
     max_tokens: int,
     temperature: float,
+    response_format: dict | None = None,
 ) -> str:
     """
     Non-streaming completion with automatic Tenacity retry (up to 3 attempts).
@@ -124,13 +125,22 @@ async def _complete_no_stream(
     Kept as a private helper so the retry decorator is NEVER applied to
     streaming requests — retrying a broken stream would restart the generation
     from scratch and send duplicate tokens to the client.
+
+    ``response_format`` is the OpenAI-compatible structured-output hint (e.g.
+    ``{"type": "json_object"}``). Both backends honour it on the /v1 surface
+    (Ollama maps it to its native ``format``; vLLM to guided decoding), so the
+    single client path stays backend-agnostic. Passed through only when set.
     """
+    extra: dict = {}
+    if response_format is not None:
+        extra["response_format"] = response_format
     response = await client.chat.completions.create(
         model=model,
         messages=messages,
         max_tokens=max_tokens,
         temperature=temperature,
         stream=False,
+        **extra,
     )
     return response.choices[0].message.content or ""
 
@@ -143,10 +153,15 @@ async def chat_complete(
     max_tokens: int | None = None,
     temperature: float | None = None,
     stream: bool = False,
+    response_format: dict | None = None,
 ) -> str | AsyncIterator:
     """
     Send messages to the appropriate LLM endpoint (fast / deep / reasoning).
     Returns the full response string (stream=False) or an async iterator (stream=True).
+
+    ``response_format`` (non-streaming only) requests structured output, e.g.
+    ``{"type": "json_object"}`` — used by the Reflexion critic to get a parseable
+    Critique. Ignored for streaming calls (token streams can't be schema-bound).
 
     Tier selection (first match wins):
       use_reasoning=True → reasoning tier (Qwen3-32B or DeepSeek-R1)
@@ -194,7 +209,9 @@ async def chat_complete(
     tier = "reasoning" if use_reasoning else ("deep" if use_deep else "fast")
     from utils.telemetry import trace_span
     with trace_span("llm.complete", {"tier": tier, "model": model, "max_tokens": max_tokens}):
-        return await _complete_no_stream(client, model, messages, max_tokens, temperature)
+        return await _complete_no_stream(
+            client, model, messages, max_tokens, temperature, response_format,
+        )
 
 
 async def stream_tokens(
