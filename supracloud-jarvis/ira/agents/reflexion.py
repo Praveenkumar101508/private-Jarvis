@@ -45,7 +45,9 @@ logger = logging.getLogger("ira.reflexion")
 class Critique(BaseModel):
     """A single round's verdict on a draft. Score is normalised to [0, 1]."""
 
-    score: float = Field(default=0.0, ge=0.0, le=1.0)
+    # No ge/le constraint: a model can emit out-of-range scores; clamp() normalises
+    # them rather than raising and discarding an otherwise-usable verdict.
+    score: float = 0.0
     passed: bool = False
     issues: list[str] = Field(default_factory=list)
     suggestion: str = ""
