@@ -57,14 +57,19 @@ async def _fake_embed(_text):
 
 # ── Flag gate ─────────────────────────────────────────────────────────────────
 
-def test_flag_defaults_off(monkeypatch):
+def test_flag_defaults_on(monkeypatch):
     monkeypatch.delenv("IRA_LIFE_GRAPH", raising=False)
+    assert lg.graph_enabled() is True
+
+
+def test_flag_explicitly_disabled(monkeypatch):
+    monkeypatch.setenv("IRA_LIFE_GRAPH", "false")
     assert lg.graph_enabled() is False
 
 
 @pytest.mark.asyncio
 async def test_flag_off_is_noop_and_never_touches_db(monkeypatch):
-    monkeypatch.delenv("IRA_LIFE_GRAPH", raising=False)
+    monkeypatch.setenv("IRA_LIFE_GRAPH", "false")
     # acquire is patched to explode — proving the flag-OFF path never calls it.
     with patch("memory.life_graph.acquire", side_effect=AssertionError("DB touched!")):
         assert await lg.upsert_entity("project", "Lux") is None

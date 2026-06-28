@@ -47,14 +47,19 @@ class _FakeAcquire:
 
 # ── flag gate ─────────────────────────────────────────────────────────────────
 
-def test_flag_defaults_off(monkeypatch):
+def test_flag_defaults_on(monkeypatch):
     monkeypatch.delenv("IRA_REFLECTION", raising=False)
+    assert rf.reflection_enabled() is True
+
+
+def test_flag_explicitly_disabled(monkeypatch):
+    monkeypatch.setenv("IRA_REFLECTION", "false")
     assert rf.reflection_enabled() is False
 
 
 @pytest.mark.asyncio
 async def test_flag_off_is_noop(monkeypatch):
-    monkeypatch.delenv("IRA_REFLECTION", raising=False)
+    monkeypatch.setenv("IRA_REFLECTION", "false")
     spoken = []
 
     async def boom(_m):
@@ -65,7 +70,7 @@ async def test_flag_off_is_noop(monkeypatch):
 
 
 def test_flag_off_never_schedules(monkeypatch):
-    monkeypatch.delenv("IRA_REFLECTION", raising=False)
+    monkeypatch.setenv("IRA_REFLECTION", "false")
 
     class _Sched:
         def __init__(self):

@@ -59,21 +59,26 @@ def _ledger_patch(claimed):
 
 # ── flag gate ─────────────────────────────────────────────────────────────────
 
-def test_flag_defaults_off(monkeypatch):
+def test_flag_defaults_on(monkeypatch):
     monkeypatch.delenv("IRA_HEARTBEAT", raising=False)
+    assert hb.heartbeat_enabled() is True
+
+
+def test_flag_explicitly_disabled(monkeypatch):
+    monkeypatch.setenv("IRA_HEARTBEAT", "false")
     assert hb.heartbeat_enabled() is False
 
 
 @pytest.mark.asyncio
 async def test_flag_off_tick_is_noop(monkeypatch):
-    monkeypatch.delenv("IRA_HEARTBEAT", raising=False)
+    monkeypatch.setenv("IRA_HEARTBEAT", "false")
     spoken = []
     out = await hb.run_heartbeat_tick(NOW, speak=spoken.append)
     assert out == [] and spoken == []
 
 
 def test_flag_off_never_schedules(monkeypatch):
-    monkeypatch.delenv("IRA_HEARTBEAT", raising=False)
+    monkeypatch.setenv("IRA_HEARTBEAT", "false")
 
     class _Sched:
         def __init__(self):

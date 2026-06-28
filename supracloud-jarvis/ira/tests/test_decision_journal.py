@@ -60,14 +60,19 @@ NOW = datetime(2026, 6, 28, 12, 0, tzinfo=timezone.utc)
 
 # ── flag gate ─────────────────────────────────────────────────────────────────
 
-def test_flag_defaults_off(monkeypatch):
+def test_flag_defaults_on(monkeypatch):
     monkeypatch.delenv("IRA_DECISION_JOURNAL", raising=False)
+    assert dj.journal_enabled() is True
+
+
+def test_flag_explicitly_disabled(monkeypatch):
+    monkeypatch.setenv("IRA_DECISION_JOURNAL", "false")
     assert dj.journal_enabled() is False
 
 
 @pytest.mark.asyncio
 async def test_flag_off_is_noop(monkeypatch):
-    monkeypatch.delenv("IRA_DECISION_JOURNAL", raising=False)
+    monkeypatch.setenv("IRA_DECISION_JOURNAL", "false")
     with patch("memory.decision_journal.acquire", side_effect=AssertionError("DB touched")):
         assert await dj.log_decision("x", review_at=NOW) is None
         assert await dj.list_pending_reviews(NOW) == []
@@ -178,7 +183,7 @@ async def test_log_decision_links_graph_when_both_flags_on(monkeypatch):
 @pytest.mark.asyncio
 async def test_log_decision_skips_graph_when_graph_flag_off(monkeypatch):
     _enable(monkeypatch)
-    monkeypatch.delenv("IRA_LIFE_GRAPH", raising=False)
+    monkeypatch.setenv("IRA_LIFE_GRAPH", "false")
     conn = _FakeConn(fetchrow_rows=[{"id": "55555555-5555-5555-5555-555555555555"}])
 
     def _boom(*a, **k):

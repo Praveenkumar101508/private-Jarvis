@@ -29,7 +29,7 @@ from utils.db import acquire
 
 logger = logging.getLogger("ira.memory.life_graph")
 
-# Truthy set mirrors IRA_USE_CORTEX exactly (config.py). New OFF-by-default flag.
+# Truthy set mirrors IRA_USE_CORTEX exactly (config.py). Flag defaults ON.
 _TRUTHY = ("1", "true", "yes", "on")
 
 
@@ -41,8 +41,8 @@ async def embed_one(text: str) -> list[float]:
 
 
 def graph_enabled() -> bool:
-    """True only when IRA_LIFE_GRAPH is explicitly enabled. Defaults OFF."""
-    return os.getenv("IRA_LIFE_GRAPH", "false").strip().lower() in _TRUTHY
+    """Whether the Life Graph is active. Defaults ON; set IRA_LIFE_GRAPH=false to disable."""
+    return os.getenv("IRA_LIFE_GRAPH", "true").strip().lower() in _TRUTHY
 
 
 def _vector_literal(vec: list[float]) -> str:

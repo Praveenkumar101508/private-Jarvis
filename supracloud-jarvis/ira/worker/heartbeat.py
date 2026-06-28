@@ -9,7 +9,7 @@ unavailable it falls back to a logged message and exits cleanly — it never cra
 loop, and it never modifies user data.
 
 Gating:
-  * IRA_HEARTBEAT (default OFF, read via the IRA_USE_CORTEX mechanism). When OFF the
+  * IRA_HEARTBEAT (default ON, read via the IRA_USE_CORTEX mechanism). When OFF the
     job is never scheduled and run_heartbeat_tick() is a no-op.
   * IRA_HEARTBEAT_INTERVAL_HOURS (default 6) — tick cadence.
   * IRA_HEARTBEAT_STALE_DAYS (default 14) — how old a memory commitment must be to
@@ -37,8 +37,10 @@ _TRUTHY = ("1", "true", "yes", "on")
 
 
 def heartbeat_enabled() -> bool:
-    """True only when IRA_HEARTBEAT is explicitly enabled. Defaults OFF."""
-    return os.getenv("IRA_HEARTBEAT", "false").strip().lower() in _TRUTHY
+    """Whether the Heartbeat is active. Defaults ON; set IRA_HEARTBEAT=false to disable.
+    Note: surfaced items are spoken aloud only when IRA_VOICE_OUTPUT=local; otherwise
+    they are logged."""
+    return os.getenv("IRA_HEARTBEAT", "true").strip().lower() in _TRUTHY
 
 
 def heartbeat_interval_hours() -> float:

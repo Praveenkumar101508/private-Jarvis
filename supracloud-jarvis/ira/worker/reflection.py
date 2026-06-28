@@ -11,7 +11,7 @@ Deliberately NOT here: cameras, biometrics, mood/body inference, or any predicti
 only retrospective summary over self-reported, already-logged signals.
 
 Gating:
-  * IRA_REFLECTION (default OFF, read via the IRA_USE_CORTEX mechanism).
+  * IRA_REFLECTION (default ON, read via the IRA_USE_CORTEX mechanism).
   * IRA_REFLECTION_REPO — repo path for git history (defaults to the IRA repo root).
   * IRA_REFLECTION_DAYS — look-back window (default 7).
 
@@ -37,8 +37,9 @@ _TRUTHY = ("1", "true", "yes", "on")
 
 
 def reflection_enabled() -> bool:
-    """True only when IRA_REFLECTION is explicitly enabled. Defaults OFF."""
-    return os.getenv("IRA_REFLECTION", "false").strip().lower() in _TRUTHY
+    """Whether weekly Self-Reflection is active. Defaults ON; set IRA_REFLECTION=false
+    to disable."""
+    return os.getenv("IRA_REFLECTION", "true").strip().lower() in _TRUTHY
 
 
 def _window_days() -> int:

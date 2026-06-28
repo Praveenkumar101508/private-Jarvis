@@ -6,7 +6,7 @@ record what actually happened. No prediction is made — the owner supplies the 
 outcome, and the journal lets IRA calibrate expectation vs. reality over time.
 
 Reuses the Memory SQL layer (``utils.db.acquire``, parameterized SQL). Gated by
-IRA_DECISION_JOURNAL (default OFF, read via the IRA_USE_CORTEX mechanism). When a
+IRA_DECISION_JOURNAL (default ON, read via the IRA_USE_CORTEX mechanism). When a
 decision concerns a Life-Graph entity AND IRA_LIFE_GRAPH is ON, the decision is
 optionally linked into the graph with a ``decision_about`` edge — but the graph is a
 soft dependency: if that flag is OFF (or the link fails) the decision still logs.
@@ -31,8 +31,9 @@ _TRUTHY = ("1", "true", "yes", "on")
 
 
 def journal_enabled() -> bool:
-    """True only when IRA_DECISION_JOURNAL is explicitly enabled. Defaults OFF."""
-    return os.getenv("IRA_DECISION_JOURNAL", "false").strip().lower() in _TRUTHY
+    """Whether the Decision Journal is active. Defaults ON; set
+    IRA_DECISION_JOURNAL=false to disable."""
+    return os.getenv("IRA_DECISION_JOURNAL", "true").strip().lower() in _TRUTHY
 
 
 async def log_decision(
