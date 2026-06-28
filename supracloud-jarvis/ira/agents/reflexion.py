@@ -69,6 +69,7 @@ class ReflexionState(TypedDict, total=False):
     task_kind: str            # "code" | "factual" | "general" (selects the verifier)
     user_id: str              # scopes factual grounding against the owner's memory
     verifier_cmd: str         # pytest invocation used to ground code tasks
+    verifier_test: str        # pytest source (imports `solution`) for code grounding
     use_deep: bool            # generator/adjudicator tier (default True → qwen3:14b)
 
     draft: str                # current candidate answer
@@ -268,6 +269,7 @@ async def run_reflexion(
     task_kind: str = "general",
     user_id: str = "owner",
     verifier_cmd: str | None = None,
+    verifier_test: str | None = None,
     use_deep: bool = True,
     pass_threshold: float | None = None,
     max_revisions: int | None = None,
@@ -280,11 +282,22 @@ async def run_reflexion(
     threshold = cfg.reflexion_pass_threshold if pass_threshold is None else pass_threshold
     max_rev = cfg.reflexion_max_revisions if max_revisions is None else max_revisions
 
+    # Lazily install the grounded verifiers (code → tests, factual → memory) on
+    # first use. Kept out of module import so reflexion.py never pulls in the DB /
+    # executor stack. A test that cleared the verifier keeps it cleared (the import
+    # is cached, so re-import won't reinstall).
+    if _VERIFIER is None:
+        try:
+            import agents.reflexion_ground  # noqa: F401  (installs grounded_verifier)
+        except Exception as exc:  # noqa: BLE001 — degrade to the LLM critic
+            logger.debug("reflexion: grounded verifiers unavailable: %s", exc)
+
     initial: ReflexionState = {
         "task": task,
         "task_kind": task_kind,
         "user_id": user_id,
         "verifier_cmd": verifier_cmd or "",
+        "verifier_test": verifier_test or "",
         "use_deep": use_deep,
         "draft": "",
         "round": 0,
