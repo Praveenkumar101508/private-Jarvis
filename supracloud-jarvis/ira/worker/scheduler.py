@@ -231,6 +231,11 @@ def build_scheduler() -> AsyncIOScheduler:
     from worker.heartbeat import register_heartbeat
     register_heartbeat(scheduler)
 
+    # Weekly Self-Reflection — retrospective summary over already-logged activity,
+    # spoken through the same surface. Only scheduled when IRA_REFLECTION=true.
+    from worker.reflection import register_reflection
+    register_reflection(scheduler)
+
     return scheduler
 
 
