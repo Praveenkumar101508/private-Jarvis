@@ -226,6 +226,11 @@ def build_scheduler() -> AsyncIOScheduler:
         replace_existing=True,
     )
 
+    # Heartbeat — proactive read-only pass that surfaces pending decision reviews
+    # and stale commitments via the voice path. Only scheduled when IRA_HEARTBEAT=true.
+    from worker.heartbeat import register_heartbeat
+    register_heartbeat(scheduler)
+
     return scheduler
 
 
