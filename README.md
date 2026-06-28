@@ -116,7 +116,7 @@ REFLEXION_PASS_THRESHOLD=0.75     # critique score in [0,1] needed to PASS
 REFLEXION_MAX_REVISIONS=3         # hard cap on revise rounds
 ```
 
-Code: `ira/agents/reflexion.py` (subgraph) · `ira/agents/reflexion_ground.py` (verifiers) · wired into `ira/api/routes/document_create.py`.
+Code: `ira/agents/reflexion.py` (subgraph) · `ira/agents/reflexion_ground.py` (verifiers) · wired into `ira/api/routes/document_create.py` and the Actions drafting path `ira/actions/drafting.py` (`POST /actions/email/draft` — reply drafting where the incoming message is isolation-wrapped and injection-scanned; drafting never sends).
 
 ---
 

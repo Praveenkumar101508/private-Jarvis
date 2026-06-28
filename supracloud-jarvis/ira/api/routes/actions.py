@@ -28,6 +28,11 @@ class EmailRequest(BaseModel):
     confirm_token: str | None = None
 
 
+class EmailDraftRequest(BaseModel):
+    instruction: str
+    incoming: str = ""      # the message being replied to (untrusted; isolation-wrapped)
+
+
 @router.get("")
 async def list_action_status(_user: str = Depends(require_auth)):
     """Report which v1 actions are configured (fail-soft introspection)."""
@@ -72,3 +77,27 @@ async def send_email_action(body: EmailRequest, _user: str = Depends(require_aut
     if outcome["status"] == "executed":
         return outcome["result"]      # {"status": "sent" | "not_configured" | "error", ...}
     return outcome                    # confirmation_required
+
+
+@router.post("/email/draft")
+async def draft_email_action(body: EmailDraftRequest, _user: str = Depends(require_auth)):
+    """Draft an email reply (owner-only). Reflexion-refined when enabled.
+
+    Drafting NEVER sends — the incoming message is treated as untrusted data
+    (isolation-wrapped + injection-scanned). To send the result, POST /actions/email
+    with the body and complete the confirm_token flow.
+    """
+    if not is_owner(_user):
+        raise HTTPException(status_code=403, detail="Drafting replies is restricted to the verified owner.")
+
+    from actions.drafting import draft_email_reply
+
+    draft, reflexion_meta, injection_flags = await draft_email_reply(
+        body.instruction, body.incoming, user_id=_user,
+    )
+    return {
+        "draft_body": draft,
+        "injection_flags": injection_flags,    # audit: patterns found in the incoming message
+        "reflexion": reflexion_meta,           # None unless reflexion is enabled
+        "note": "Draft only — nothing sent. POST /actions/email with confirm_token to send.",
+    }
