@@ -339,6 +339,17 @@ class Settings(BaseSettings):
     strategy_deep_synthesis: bool = True    # use the deep (qwen3:14b) tier for the analysis
     strategy_calibration_enabled: bool = True  # Phase 6: calibrate success estimates vs the owner's recorded outcomes
 
+    # ── Reflexion (grounded self-correction) ──────────────────────────────────
+    # A flag-gated generate→critique→revise loop for the Actions/drafting path
+    # ONLY (never conversational/voice turns — the extra round-trips hurt the
+    # voice loop). The critic is GROUNDED where a real verifier exists (run the
+    # test suite for code tasks; check pgvector memory for factual claims) and
+    # falls back to an LLM critic otherwise. reflexion_enabled=False => drafting
+    # behaves exactly as today.
+    reflexion_enabled: bool = False
+    reflexion_pass_threshold: float = 0.75   # critique score in [0,1] needed to PASS
+    reflexion_max_revisions: int = 3         # hard cap on revise rounds (bounded loop)
+
     # ── Dev Mode (Shadow PC / local development) ──────────────────────────────
     # DEV_MODE=true routes LLM calls to a local Ollama instance,
     # bypasses biometric gate, and auto-authenticates as admin.

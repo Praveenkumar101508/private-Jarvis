@@ -145,18 +145,43 @@ Generate COMPLETE content — do not truncate or say "continue...".
 """
 
 
+_DOC_FMT_HINTS = {
+    "pdf": "Create a professional PDF report/document.",
+    "docx": "Create a professional Word document.",
+    "pptx": "Create a presentation with clear slide titles and content. Format each slide as '## Slide N: [Title]' followed by content.",
+    "xlsx": "Create a spreadsheet. Format data as a proper Markdown table with headers. Include multiple sections if needed.",
+}
+
+
 async def _generate_doc_content(prompt: str, fmt: str) -> str:
-    fmt_hints = {
-        "pdf": "Create a professional PDF report/document.",
-        "docx": "Create a professional Word document.",
-        "pptx": "Create a presentation with clear slide titles and content. Format each slide as '## Slide N: [Title]' followed by content.",
-        "xlsx": "Create a spreadsheet. Format data as a proper Markdown table with headers. Include multiple sections if needed.",
-    }
     msgs = [
         {"role": "system", "content": _DOC_SYSTEM},
-        {"role": "user", "content": f"{fmt_hints.get(fmt, '')}\n\n{prompt}"},
+        {"role": "user", "content": f"{_DOC_FMT_HINTS.get(fmt, '')}\n\n{prompt}"},
     ]
     return await chat_complete(msgs, use_deep=True, max_tokens=4096, temperature=0.4)
+
+
+async def _draft_doc_content(prompt: str, fmt: str) -> tuple[str, Optional[dict]]:
+    """Drafting entry point. When reflexion is enabled it refines the document
+    through the grounded self-correction loop (this is a non-voice, non-conversational
+    drafting task, so the latency guard in should_reflect() permits it); otherwise it
+    falls back to the single-shot generation — behaviour is byte-identical with the
+    flag OFF. Returns (content, reflexion_meta-or-None)."""
+    from agents.reflexion import should_reflect, run_reflexion
+
+    if not should_reflect(is_voice=False, is_conversational=False):
+        return await _generate_doc_content(prompt, fmt), None
+
+    task = f"{_DOC_SYSTEM}\n\n{_DOC_FMT_HINTS.get(fmt, '')}\n\n{prompt}"
+    result = await run_reflexion(task, task_kind="general", use_deep=True)
+    meta = {
+        "reflexion": True,
+        "passed": result.passed,
+        "rounds": result.rounds,
+        "scores": result.scores,        # the score curve, for plotting
+        "grounded_by": result.grounded_by,
+    }
+    return (result.final or ""), meta
 
 
 # ── PDF generation ────────────────────────────────────────────────────────────
@@ -401,8 +426,10 @@ async def document_create(
         yield {"data": _json.dumps({"token": f"📄 Generating {fmt.upper()} document…\n\n"})}
 
         try:
-            # Step 1: Generate content with LLM
-            content = await _generate_doc_content(req.prompt, fmt)
+            # Step 1: Generate content with LLM (reflexion-refined when enabled)
+            content, reflexion_meta = await _draft_doc_content(req.prompt, fmt)
+            if reflexion_meta is not None:
+                yield {"data": _json.dumps({"reflexion": reflexion_meta})}
             yield {"data": _json.dumps({"token": "✅ Content generated — building document…\n"})}
 
             # Step 2: Convert to file bytes

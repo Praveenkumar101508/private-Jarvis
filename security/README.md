@@ -66,3 +66,12 @@ point-in-time intel — refresh periodically (see `third_party/bumblebee/NOTICE.
   **0 exposure findings** against all catalogs.
 
 No compromised package/version matches were found; nothing required remediation.
+
+## Re-verification (2026-06-28, Bumblebee v0.1.2)
+
+- `make security` over the populated tree: **378 files considered, 241 package
+  records → 0 exposure findings** against the vendored catalogs.
+- `bumblebee selftest`: OK. The scan remains read-only (never executes install
+  scripts, never invokes package managers).
+
+Still clean — no remediation required.

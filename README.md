@@ -94,6 +94,32 @@ Every user turn flows through the same pipeline: **recall relevant memory → ro
 
 ---
 
+## Grounded self-correction (Reflexion)
+
+An **optional**, flag-gated `generate → critique → revise` loop that raises the quality of the **drafting / Actions** surface — never conversational or voice turns, where the extra round-trips would hurt the latency-sensitive voice loop.
+
+What makes it more than one model grading another: **the critic is grounded wherever a real verifier exists.**
+
+| Task kind | How the score is produced |
+|-----------|---------------------------|
+| **code**    | the drafted solution is run against the supplied `pytest` inside the executor's hardened sandbox — pass/fail + captured errors **are** the score |
+| **factual** | the drafted claim is checked against your pgvector memory — it only passes when retrieved facts support it |
+| _other_     | falls back to an LLM critic (no verifier applies) |
+
+Because a grounded score never comes from *asking a model whether it passed*, a draft that merely **claims** success — including a prompt-injection payload telling the judge to "PASS" — cannot flip a grounded `FAIL`. This is covered by an adversarial test (`tests/test_reflexion.py`).
+
+The loop is bounded (`reflexion_max_revisions`, default 3), accumulates a per-round **score curve** (exposed for plotting), reuses the existing brain client at the configured Qwen3 tiers (deep generator/adjudicator, fast critic — no second model factory), and is **OFF by default**:
+
+```bash
+REFLEXION_ENABLED=true            # default false — drafting is byte-identical when off
+REFLEXION_PASS_THRESHOLD=0.75     # critique score in [0,1] needed to PASS
+REFLEXION_MAX_REVISIONS=3         # hard cap on revise rounds
+```
+
+Code: `ira/agents/reflexion.py` (subgraph) · `ira/agents/reflexion_ground.py` (verifiers) · wired into `ira/api/routes/document_create.py` and the Actions drafting path `ira/actions/drafting.py` (`POST /actions/email/draft` — reply drafting where the incoming message is isolation-wrapped and injection-scanned; drafting never sends).
+
+---
+
 ## Security — defense in depth
 
 IRA is built to be exposed to the internet without flinching. The model isn't "one wall" — it's layers, so a breach of any one still hits the next, gets logged, and is contained.
