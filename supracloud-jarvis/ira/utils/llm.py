@@ -84,6 +84,76 @@ def _use_ollama() -> bool:
     return cfg.llm_backend == "ollama" or cfg.dev_mode
 
 
+# ── Model-selection wiring (ira/reasoning/model_router) ─────────────────────────
+# When IRA_USE_MODEL_ROUTER is on (default), the Ollama model for each tier is
+# resolved through the smart model-selection layer (profiles + availability +
+# local fallback) instead of the static cfg.ollama_model_* names. Fail-safe: any
+# error, or a model that isn't installed, falls back to the legacy config value,
+# so the existing chat flow is never broken. Only the Ollama path is affected;
+# the vLLM path is untouched.
+
+_TIER_TO_MODE = {"fast": "LOCAL_FAST", "deep": "LOCAL_MAIN", "reasoning": "LOCAL_REASONING"}
+
+
+def _legacy_ollama_model(cfg, tier: str) -> str:
+    return {
+        "fast": cfg.ollama_model_fast,
+        "deep": cfg.ollama_model_deep,
+        "reasoning": cfg.ollama_model_reasoning,
+    }[tier]
+
+
+def resolve_ollama_model(tier: str) -> str:
+    """Resolve the Ollama model for a tier ("fast" | "deep" | "reasoning").
+
+    Routes through the model-selection layer when ``ira_use_model_router`` is on,
+    otherwise returns the legacy ``cfg.ollama_model_*`` value. Never raises.
+    """
+    cfg = get_settings()
+    legacy = _legacy_ollama_model(cfg, tier)
+    if not getattr(cfg, "ira_use_model_router", True):
+        return legacy
+    try:
+        from reasoning.model_profiles import ModelMode
+        from reasoning.model_router import resolve_model
+
+        mode = getattr(ModelMode, _TIER_TO_MODE[tier])
+        _used_mode, model, _fallback = resolve_model(mode)
+        return model or legacy
+    except Exception:  # noqa: BLE001 — model selection must never break the chat flow
+        return legacy
+
+
+def resolve_ollama_vision_model() -> str:
+    """Resolve the Ollama vision model, honouring the profile / IRA_LOCAL_VISION_MODEL.
+
+    Vision must never fall back to a text model, so this does NOT use the chat
+    fallback chain. If the preferred vision model isn't installed but the legacy
+    ``ollama_vision_model`` is, the legacy one is kept (don't break a working box).
+    Never raises.
+    """
+    cfg = get_settings()
+    legacy = getattr(cfg, "ollama_vision_model", "") or ""
+    if not getattr(cfg, "ira_use_model_router", True):
+        return legacy
+    try:
+        from reasoning.model_profiles import ModelMode, model_for
+        from reasoning.model_availability import get_availability, is_available
+
+        preferred = model_for(ModelMode.LOCAL_VISION)
+        avail = get_availability()
+        if not avail.reachable:
+            # Can't probe: keep a working legacy model if one is configured.
+            return legacy or preferred
+        if is_available(preferred, availability=avail):
+            return preferred
+        if legacy and is_available(legacy, availability=avail):
+            return legacy
+        return preferred  # neither installed → let vision_complete fail soft
+    except Exception:  # noqa: BLE001
+        return legacy
+
+
 def get_fast_client() -> AsyncOpenAI:
     cfg = get_settings()
     return _make_ollama_client() if _use_ollama() else _make_vllm_client(cfg.vllm_fast_url)
@@ -179,19 +249,19 @@ async def chat_complete(
         # L2: with Ollama every tier maps to the configured 14B; on vLLM use the
         # dedicated reasoning model only when a reasoning endpoint is configured.
         if ollama:
-            model = cfg.ollama_model_reasoning
+            model = resolve_ollama_model("reasoning")  # M1: smart selection + fallback
         else:
             model = cfg.vllm_reasoning_model if cfg.vllm_reasoning_url else cfg.vllm_deep_model
         max_tokens = max_tokens or cfg.reasoning_max_tokens
         temperature = temperature if temperature is not None else cfg.reasoning_temperature
     elif use_deep:
         client = get_deep_client()
-        model = cfg.ollama_model_deep if ollama else cfg.vllm_deep_model  # L2
+        model = resolve_ollama_model("deep") if ollama else cfg.vllm_deep_model  # L2 + M1
         max_tokens = max_tokens or cfg.deep_max_tokens
         temperature = temperature if temperature is not None else cfg.deep_temperature
     else:
         client = get_fast_client()
-        model = cfg.ollama_model_fast if ollama else cfg.vllm_fast_model  # L2
+        model = resolve_ollama_model("fast") if ollama else cfg.vllm_fast_model  # L2 + M1
         max_tokens = max_tokens or cfg.fast_max_tokens
         temperature = temperature if temperature is not None else cfg.fast_temperature
 
@@ -252,7 +322,7 @@ def _vision_client_and_model() -> tuple[AsyncOpenAI | None, str | None]:
     """Return (client, model) for the vision path, or (None, None) if unconfigured."""
     cfg = get_settings()
     if _use_ollama():
-        model = getattr(cfg, "ollama_vision_model", "") or ""
+        model = resolve_ollama_vision_model()  # M4: profile / IRA_LOCAL_VISION_MODEL
         if not model:
             return None, None
         return _make_ollama_client(), model

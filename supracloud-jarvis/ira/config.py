@@ -159,6 +159,19 @@ class Settings(BaseSettings):
     ollama_model_deep: str = "qwen3:14b"
     ollama_model_reasoning: str = "qwen3:14b"
 
+    # ── Smart model selection (ira/reasoning/model_*) ─────────────────────────
+    # Central, validated surface for the env vars the model-selection layer also
+    # reads directly. Defaults are local-first and safe; the layer keeps reading
+    # the environment so its unit tests stay dependency-light. When
+    # ira_use_model_router is on (default), utils.llm resolves each Ollama tier
+    # through the profile + availability layer, falling back to the static
+    # ollama_model_* names so the existing chat flow is never broken.
+    ira_model_profile: str = "balanced_local"   # IRA_MODEL_PROFILE
+    ira_allow_external_api: bool = False         # IRA_ALLOW_EXTERNAL_API (master off)
+    ira_require_api_consent: bool = True         # IRA_REQUIRE_API_CONSENT
+    ira_privacy_mode: str = "local_first"        # IRA_PRIVACY_MODE
+    ira_use_model_router: bool = True            # IRA_USE_MODEL_ROUTER (live wiring)
+
     # ── Embeddings ────────────────────────────────────────────────────────────
     embedding_model: str = "BAAI/bge-large-en-v1.5"
     embedding_dim: int = 1024

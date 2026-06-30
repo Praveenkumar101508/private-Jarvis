@@ -183,10 +183,41 @@ IRA_LOCAL_VISION_MODEL=gemma3:12b
 IRA_EMBEDDING_MODEL=bge-m3
 IRA_FALLBACK_TINY_MODEL=gemma3n:e4b
 
+IRA_USE_MODEL_ROUTER=true
 IRA_ALLOW_EXTERNAL_API=false
 IRA_REQUIRE_API_CONSENT=true
 IRA_PRIVACY_MODE=local_first
 ```
+
+These are also registered on `config.Settings` (`ira_model_profile`,
+`ira_allow_external_api`, `ira_require_api_consent`, `ira_privacy_mode`,
+`ira_use_model_router`) so they get a validated, central home.
+
+### Live wiring
+
+When `IRA_USE_MODEL_ROUTER=true` (default), `utils.llm.chat_complete` resolves the
+Ollama model for each tier through this layer instead of the static
+`OLLAMA_MODEL_*` names:
+
+| chat tier | mode |
+| --- | --- |
+| fast | `local_fast` |
+| deep | `local_main` |
+| reasoning | `local_reasoning` |
+
+Resolution is fail-safe: any error, or a model that isn't installed, falls back to
+the legacy `OLLAMA_MODEL_*` value, so the existing chat flow never breaks. The
+vision path resolves `local_vision` the same way (but never falls back to a text
+model). Set `IRA_USE_MODEL_ROUTER=false` to pin the old static behaviour.
+
+### Deep Intelligence Mode execution (external)
+
+External execution is guarded twice. `apply_consent(approved=True)` only *names* an
+external target; actually running it goes through `run_decision(...)`, which raises
+`ExternalExecutorNotConfigured` unless **both** `IRA_ALLOW_EXTERNAL_API=true` **and**
+an executor has been registered via `register_external_executor()`. No external
+executor ships by default — Deep Intelligence Mode is decision-only out of the box
+and cannot call out on its own.
 
 ### How to change models
 

@@ -385,6 +385,69 @@ def apply_consent(
     )
 
 
+# ── Execution gate (defence in depth) ───────────────────────────────────────────
+# A second, runtime guard so that an external decision can NEVER reach the network
+# unless: (1) the decision is provider=="external" (only apply_consent(approved)
+# produces it), (2) the IRA_ALLOW_EXTERNAL_API master switch is on, and (3) an
+# external executor has been explicitly registered by the host application. No
+# external executor ships by default, so Deep Intelligence Mode is decision-only
+# out of the box — it cannot call out even if every other check were bypassed.
+
+class ExternalExecutorNotConfigured(RuntimeError):
+    """Raised when an external decision is run without a registered, allowed executor."""
+
+
+_EXTERNAL_EXECUTOR = None  # set via register_external_executor()
+
+
+def register_external_executor(fn) -> None:
+    """Register the callable that performs an external (frontier) call.
+
+    ``fn(decision, system, prompt) -> str``. Registering is an explicit, deliberate
+    act by the host app; until then external execution is impossible.
+    """
+    global _EXTERNAL_EXECUTOR
+    _EXTERNAL_EXECUTOR = fn
+
+
+def clear_external_executor() -> None:
+    """Remove any registered external executor (tests / lockdown)."""
+    global _EXTERNAL_EXECUTOR
+    _EXTERNAL_EXECUTOR = None
+
+
+def run_decision(
+    decision: ModelRouteDecision,
+    *,
+    local_runner,
+    system: str = "",
+    prompt: str = "",
+    env: Optional[Mapping[str, str]] = None,
+) -> str:
+    """Execute a decision. Local decisions call ``local_runner(decision)``.
+
+    External decisions are gated again here: they require the master switch on AND
+    a registered executor, else :class:`ExternalExecutorNotConfigured` is raised.
+    External use is therefore never silent — there is no default code path to it.
+    """
+    env = os.environ if env is None else env
+    if decision.provider == "local":
+        return local_runner(decision)
+
+    # provider == "external" — re-check the master switch at execution time.
+    if not external_api_allowed(env):
+        raise ExternalExecutorNotConfigured(
+            "External execution blocked: IRA_ALLOW_EXTERNAL_API is false."
+        )
+    if _EXTERNAL_EXECUTOR is None:
+        raise ExternalExecutorNotConfigured(
+            "External execution blocked: no external executor is registered. "
+            "Deep Intelligence Mode is decision-only by default; the host app must "
+            "call register_external_executor() to enable it."
+        )
+    return _EXTERNAL_EXECUTOR(decision, system, prompt)
+
+
 __all__ = [
     "ModelRouteDecision",
     "CONSENT_MESSAGE",
@@ -396,4 +459,9 @@ __all__ = [
     "privacy_mode",
     "external_api_allowed",
     "consent_required",
+    # Execution gate (M2).
+    "ExternalExecutorNotConfigured",
+    "register_external_executor",
+    "clear_external_executor",
+    "run_decision",
 ]
