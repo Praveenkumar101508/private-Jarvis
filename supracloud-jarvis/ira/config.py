@@ -138,6 +138,12 @@ class Settings(BaseSettings):
     #   overridden to an unsafe value. It never loosens a security check.
     ira_mode: str = "standard"
 
+    # V2·Phase 5: portable voice second factor. OFF by default — voice is an OPTIONAL
+    # 2FA behind the master password, never a primary unlock (see
+    # portable/BIOMETRIC_AND_VOICE.md). A voiceprint is spoofable, so it can only ADD
+    # to the master-password gate, never replace it.
+    ira_portable_voice_2fa: bool = False
+
     # ── L2: Engine selection (LLM_BACKEND switch) ─────────────────────────────
     # "ollama" → local native Ollama (Shadow PC, Windows, no Docker, 20GB A4500).
     # "vllm"   → the existing GPU/Docker path (kept dormant for the future scale-up).
