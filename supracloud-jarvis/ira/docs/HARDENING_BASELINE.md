@@ -94,6 +94,27 @@ forbids pushing elsewhere without explicit permission. Work proceeds on
 `claude/v1-v2-gate-sequence-6ee58p` (already tracks origin); `hardening/preprint`
 is treated as a logical label. Rename before push is available on request.
 
+## Phase 3 — gate-drift regression evidence (BEFORE)
+
+`tests/security/test_gate_consistency.py` run against pre-Phase-3 code (the two
+gate paths still using different vocabularies):
+
+```
+7 failed, 4 passed
+FAILED ...[run the command: docker ps]   router_blocks=True  graph_blocks=False
+FAILED ...[open vs code for me]          router_blocks=True  graph_blocks=False
+FAILED ...[show me this week's leads]    router_blocks=True  graph_blocks=False
+FAILED ...[architect apply]              router_blocks=True  graph_blocks=False
+FAILED ...[show me my credentials]       router_blocks=False graph_blocks=True
+FAILED ...[what is my api key for stripe]router_blocks=False graph_blocks=True
+FAILED ...[show logs from nginx]         router_blocks=False graph_blocks=True
+```
+
+Both directions of drift are present: executor/system/business/architect intents
+are blocked only by the router; credentials/api-key/log requests are blocked only
+by the graph. The AFTER result (same test, all passing once both paths delegate to
+`ira/security/owner_gate.py`) is recorded in `HARDENING_REPORT.md`.
+
 ## Phase 0 status
 
-No code changed. Baseline + file map recorded. **STOP for review.**
+No code changed. Baseline + file map recorded.

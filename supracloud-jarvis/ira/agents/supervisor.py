@@ -19,7 +19,7 @@ import re
 
 from agents.state import IRAState
 from utils.llm import should_use_deep
-from utils.yaml_config import get_restricted_keywords, get_agent_rules
+from utils.yaml_config import get_agent_rules
 
 _URL_RE = re.compile(r"https?://\S+")
 
@@ -33,18 +33,15 @@ def is_restricted_domain(query: str) -> bool:
     """
     Return True if the query touches any owner-gated restricted domain.
 
-    Fix #76: the owner's first name is checked dynamically (read from
-    cfg.owner_name at call time) rather than being hardcoded in the static
-    keyword set — works for any deployment without a code change.
-    Keywords are loaded from config/routing.yaml at first call (cached).
+    V1·Phase 3: delegated to the unified ``ira.security.owner_gate`` so the graph
+    (biometric) gate and the router gate share ONE classifier and can no longer
+    drift. The owner-only signal is the fail-closed union of regex intent, the
+    config/routing.yaml ``restricted_keywords`` list, and the owner's first name
+    (still read dynamically from Settings at call time, per Fix #76).
     """
-    from config import get_settings
-    q = query.lower()
-    if any(kw in q for kw in get_restricted_keywords()):
-        return True
-    # Owner's first name (read from config at call time) gates personal data queries
-    owner_first = get_settings().owner_name.split()[0].lower()
-    return bool(owner_first and owner_first in q)
+    from security.owner_gate import is_owner_only
+
+    return is_owner_only(query)
 
 
 # ── LLM fallback router ───────────────────────────────────────────────────────
