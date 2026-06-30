@@ -16,62 +16,45 @@ dispatch. The full query→skill dispatch is wired at the LangGraph-router cutov
 """
 from __future__ import annotations
 
-import re
 from typing import Optional
 
-# domain -> intent pattern. Mirrors the owner-sensitive triggers in the agents:
-# security_tools (lockdown/scan/dispatch), website (business data), executor (commands),
-# digital (OS control), architect (apply/implement self-modification).
-_RESTRICTED: dict[str, re.Pattern] = {
-    "security": re.compile(
-        r"(lock\s*down|lockdown|panic|emergency\s+lock|scan.{0,15}(threat|network|intrus)|"
-        r"security\s+event|firewall|intrusion|"
-        r"(text|message|send|notify|alert).{0,20}(my\s+phone|telegram|pocket|secure))", re.I),
-    "business": re.compile(
-        r"\b(lead|leads|booking|bookings|revenue|conversion\s+rate|business\s+metric|"
-        r"investor|client\s*[-→]?\s*agent)\b", re.I),
-    "executor": re.compile(
-        r"\b(run|execute)\b.{0,20}\b(command|shell|terminal|pytest|docker|git)\b", re.I),
-    "system": re.compile(
-        r"\b(open|launch|start)\b.{0,20}\b(app|application|vs\s*code|vscode|terminal|"
-        r"browser|chrome|firefox|powershell|notepad|explorer)\b", re.I),
-    "architect_apply": re.compile(r"\barchitect\s+(apply|implement|dry\s*run)\b", re.I),
-}
+# V1·Phase 3: the owner-gate logic now lives in ONE place. This module keeps its
+# stable public API (restricted_domain / enforce_owner_gate / is_allowed) but
+# delegates every decision to ira.security.owner_gate so the router and the
+# LangGraph biometric gate can never drift apart again.
+from security import owner_gate
 
-OWNER_ONLY_DOMAINS = frozenset(_RESTRICTED)
+#: regex-defined owner-only domains (re-exported for back-compat).
+OWNER_ONLY_DOMAINS = owner_gate.OWNER_ONLY_DOMAINS
 
-_REFUSAL = (
-    "That action is restricted to the verified owner. Please authenticate with your "
-    "voice biometric to proceed."
-)
+#: canonical non-owner refusal (re-exported for back-compat).
+_REFUSAL = owner_gate.REFUSAL
 
 
 def restricted_domain(query: str) -> Optional[str]:
-    """Return the restricted domain a query targets, or None if it's a general query."""
-    q = query or ""
-    for domain, pattern in _RESTRICTED.items():
-        if pattern.search(q):
-            return domain
-    return None
+    """Return the restricted domain a query targets, or None if it's a general query.
+
+    The specific regex domain label (security / business / executor / system /
+    architect_apply); see ``owner_gate.classify_domain``.
+    """
+    return owner_gate.classify_domain(query)
 
 
 def enforce_owner_gate(query: str, is_owner: bool) -> Optional[str]:
-    """Router-level gate. Returns a refusal string if a NON-owner targets a restricted
-    domain (BLOCK); returns None when allowed.
+    """Router-level gate. Returns a refusal string if a NON-owner targets an
+    owner-only query (BLOCK); returns None when allowed.
 
     Fail-closed: the owner flag comes from the biometric gate, which returns False on any
-    uncertainty/error; any restricted-intent match by a non-owner is blocked here.
+    uncertainty/error; any owner-only signal (regex intent, restricted keyword, or owner
+    name) by a non-owner is blocked here via the unified ``owner_gate``.
     """
-    if is_owner:
-        return None
-    if restricted_domain(query) is not None:
-        return _REFUSAL
-    return None
+    decision = owner_gate.evaluate(query, is_owner)
+    return None if decision.allowed else decision.reason
 
 
 def is_allowed(query: str, is_owner: bool) -> bool:
     """True if the (query, is_owner) pair is permitted past the router gate."""
-    return enforce_owner_gate(query, is_owner) is None
+    return owner_gate.evaluate(query, is_owner).allowed
 
 
 __all__ = ["restricted_domain", "enforce_owner_gate", "is_allowed", "OWNER_ONLY_DOMAINS"]

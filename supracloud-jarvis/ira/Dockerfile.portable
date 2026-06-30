@@ -1,0 +1,29 @@
+# IRA API — portable demo image (CPU-only, no GPU/vLLM).
+# Reasoning runs on the local Ollama service; embeddings on CPU.
+FROM python:3.11-slim
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1 \
+    EMBEDDING_DEVICE=cpu
+
+WORKDIR /app
+
+# System deps kept minimal; build tools only for wheels that need them.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends build-essential curl \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY requirements.txt ./
+RUN pip install -r requirements.txt
+
+COPY . .
+
+EXPOSE 8000
+
+# Bind 0.0.0.0 inside the container so the published 127.0.0.1:8000 mapping works.
+# Exposure is constrained to host-loopback by docker-compose.portable.yml.
+HEALTHCHECK --interval=10s --timeout=5s --retries=12 \
+    CMD curl -fsS http://127.0.0.1:8000/health || exit 1
+
+CMD ["python", "-m", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]

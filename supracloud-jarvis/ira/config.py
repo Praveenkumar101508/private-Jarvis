@@ -102,7 +102,12 @@ class Settings(BaseSettings):
         return f"redis://:{self.redis_password}@{self.redis_host}:{self.redis_port}/0"
 
     # ── vLLM Endpoints ────────────────────────────────────────────────────────
-    vllm_api_key: str
+    # Papercut fix (V1·Phase 2): the vLLM key is a *backend* secret, required ONLY
+    # when llm_backend="vllm" is actually selected. On the default Ollama path it is
+    # never used (utils.llm passes the literal "ollama" to the local client), so a
+    # blank default lets IRA start local-first without inventing a fake key. The
+    # model_validator below enforces it when — and only when — vLLM is selected.
+    vllm_api_key: str = ""
     # Fast path — Qwen3-8B (2026: best small model, beats Llama 3.1 8B significantly)
     # Cloud upgrade: set FAST_MODEL=Qwen/Qwen3-30B-A3B (MoE, fits in 2×H100)
     vllm_fast_url: str = "http://vllm-fast:8001/v1"
@@ -124,6 +129,20 @@ class Settings(BaseSettings):
     fast_temperature: float = 0.6
     deep_temperature: float = 0.3    # Lower temp for deterministic reasoning
     reasoning_temperature: float = 0.1  # Near-deterministic for step-by-step thinking
+
+    # ── Deployment mode (V2·Phase 1) ──────────────────────────────────────────
+    # "standard"      → normal deployment; nothing changed.
+    # "portable_demo" → single-click USB demo. A GUARD RAIL, not a new behaviour: it
+    #   re-uses the V1-hardened defaults (egress off, Cortex off, Ollama/mock backend,
+    #   loopback bind, no unsafe actuators) and REFUSES to start if any of them are
+    #   overridden to an unsafe value. It never loosens a security check.
+    ira_mode: str = "standard"
+
+    # V2·Phase 5: portable voice second factor. OFF by default — voice is an OPTIONAL
+    # 2FA behind the master password, never a primary unlock (see
+    # portable/BIOMETRIC_AND_VOICE.md). A voiceprint is spoofable, so it can only ADD
+    # to the master-password gate, never replace it.
+    ira_portable_voice_2fa: bool = False
 
     # ── L2: Engine selection (LLM_BACKEND switch) ─────────────────────────────
     # "ollama" → local native Ollama (Shadow PC, Windows, no Docker, 20GB A4500).
@@ -270,7 +289,9 @@ class Settings(BaseSettings):
     # Provider: "replicate" (cloud, Flux Schnell) | "sd_webui" (local SD WebUI) | "comfyui"
     # Cloud upgrade: "replicate" with REPLICATE_API_TOKEN gives instant Flux Pro access
     image_gen_url: str = ""            # SD WebUI / ComfyUI local endpoint
-    image_gen_provider: str = "replicate"  # "replicate" | "sd_webui" | "comfyui"
+    # V1·Phase 4 (honest defaults): local-first default. "replicate" (cloud) is an
+    # explicit opt-in and still also needs REPLICATE_API_TOKEN to make any call.
+    image_gen_provider: str = "sd_webui"  # "sd_webui" (local) | "comfyui" (local) | "replicate" (cloud)
     replicate_api_token: str = ""
     flux_model: str = "black-forest-labs/flux-schnell"  # Replicate model ID for image gen
     # Fix #73: pix2pix model version as config so it survives Replicate model updates
@@ -312,7 +333,9 @@ class Settings(BaseSettings):
     # "searxng" (self-hosted) keeps it fully private; "duckduckgo" needs no key
     # but queries hit DDG; "tavily"/"serper" need an API key. Only the query
     # string is ever sent — never memory/PII. Disabled => no external calls.
-    web_search_enabled: bool = True
+    # V1·Phase 4 (honest defaults): OFF by default — IRA is local-first, so external
+    # web search is an explicit opt-in (set WEB_SEARCH_ENABLED=true), not a surprise.
+    web_search_enabled: bool = False
     web_search_provider: str = "duckduckgo"   # searxng | duckduckgo | tavily | serper
     searxng_url: str = "http://localhost:8888"
     # Sovereign web-research layer (Phase 3B) — self-hosted backends only.
@@ -424,6 +447,40 @@ class Settings(BaseSettings):
                 "unauthenticated admin endpoint. Bind to 127.0.0.1/::1, set DEV_MODE=false, "
                 "or set ALLOW_DEV_MODE_EXPOSED=true to explicitly accept the risk."
             )
+        # V1·Phase 2: validate backend secrets ONLY for the selected backend. The
+        # vLLM key is mandatory when, and only when, llm_backend="vllm" — on the
+        # default Ollama path it is never read, so requiring it there is a papercut.
+        if self.llm_backend.strip().lower() == "vllm" and not self.vllm_api_key:
+            raise RuntimeError(
+                "LLM_BACKEND=vllm requires VLLM_API_KEY to be set (the vLLM endpoint "
+                "is key-gated). Set VLLM_API_KEY, or use LLM_BACKEND=ollama for the "
+                "local-first default."
+            )
+        # V2·Phase 1: portable_demo is a guard rail — refuse to start if any hardened
+        # default has been overridden to an unsafe value. It never loosens a check.
+        if self.ira_mode.strip().lower() == "portable_demo":
+            import os as _os
+
+            violations: list[str] = []
+            if self.web_search_enabled:
+                violations.append("WEB_SEARCH_ENABLED must be false (egress off)")
+            if self.llm_backend.strip().lower() == "vllm":
+                violations.append("LLM_BACKEND must be 'ollama' (local), not 'vllm'")
+            if _os.getenv("IRA_USE_CORTEX", "false").strip().lower() in ("1", "true", "yes", "on"):
+                violations.append("IRA_USE_CORTEX must be false")
+            if getattr(self, "android_actuator_enabled", False):
+                violations.append("ANDROID_ACTUATOR_ENABLED must be false")
+            if self.dev_mode:
+                violations.append("DEV_MODE must be false (production-like checks on)")
+            if not _is_loopback_host(self.api_bind_host):
+                violations.append(
+                    f"API_BIND_HOST must be loopback (got {self.api_bind_host!r})"
+                )
+            if violations:
+                raise RuntimeError(
+                    "IRA_MODE=portable_demo refuses to start — unsafe overrides:\n  - "
+                    + "\n  - ".join(violations)
+                )
         return self
 
 

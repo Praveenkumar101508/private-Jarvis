@@ -26,7 +26,7 @@ from langchain_core.messages import HumanMessage
 _graph_logger = logging.getLogger("ira.graph")
 
 from agents.state import IRAState
-from agents.supervisor import classify, is_restricted_domain
+from agents.supervisor import classify
 from agents.conversational import conversational
 from agents.researcher import researcher
 from agents.security import security_guardian
@@ -78,11 +78,15 @@ async def biometric_gate(state: IRAState) -> IRAState:
     if cfg.dev_mode:
         return {**state, "is_owner": True, "clearance_level": "admin"}
 
-    # Public query or owner — pass through
-    if not is_restricted_domain(state["user_query"]) or state.get("is_owner", False):
+    # V1·Phase 3: decision comes from the unified owner-gate (single source of truth
+    # shared with the router), so the graph and router paths can never diverge. The
+    # branded refusal below stays a graph-path UX concern.
+    from security.owner_gate import evaluate as _evaluate_gate
+
+    if _evaluate_gate(state["user_query"], state.get("is_owner", False)).allowed:
         return state
 
-    # Restricted domain + not owner → block
+    # Owner-only query + not owner → block
     owner_name = cfg.owner_name
     refusal = (
         f"I'm sorry — I'm an automated assistant for SupraCloud. "
