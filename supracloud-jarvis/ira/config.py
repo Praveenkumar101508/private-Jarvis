@@ -102,7 +102,12 @@ class Settings(BaseSettings):
         return f"redis://:{self.redis_password}@{self.redis_host}:{self.redis_port}/0"
 
     # ── vLLM Endpoints ────────────────────────────────────────────────────────
-    vllm_api_key: str
+    # Papercut fix (V1·Phase 2): the vLLM key is a *backend* secret, required ONLY
+    # when llm_backend="vllm" is actually selected. On the default Ollama path it is
+    # never used (utils.llm passes the literal "ollama" to the local client), so a
+    # blank default lets IRA start local-first without inventing a fake key. The
+    # model_validator below enforces it when — and only when — vLLM is selected.
+    vllm_api_key: str = ""
     # Fast path — Qwen3-8B (2026: best small model, beats Llama 3.1 8B significantly)
     # Cloud upgrade: set FAST_MODEL=Qwen/Qwen3-30B-A3B (MoE, fits in 2×H100)
     vllm_fast_url: str = "http://vllm-fast:8001/v1"
@@ -423,6 +428,15 @@ class Settings(BaseSettings):
                 f"(API_BIND_HOST={self.api_bind_host!r}) is refused: it can expose an "
                 "unauthenticated admin endpoint. Bind to 127.0.0.1/::1, set DEV_MODE=false, "
                 "or set ALLOW_DEV_MODE_EXPOSED=true to explicitly accept the risk."
+            )
+        # V1·Phase 2: validate backend secrets ONLY for the selected backend. The
+        # vLLM key is mandatory when, and only when, llm_backend="vllm" — on the
+        # default Ollama path it is never read, so requiring it there is a papercut.
+        if self.llm_backend.strip().lower() == "vllm" and not self.vllm_api_key:
+            raise RuntimeError(
+                "LLM_BACKEND=vllm requires VLLM_API_KEY to be set (the vLLM endpoint "
+                "is key-gated). Set VLLM_API_KEY, or use LLM_BACKEND=ollama for the "
+                "local-first default."
             )
         return self
 
