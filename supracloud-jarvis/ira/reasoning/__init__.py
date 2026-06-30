@@ -20,6 +20,13 @@ from typing import Optional
 
 from reasoning.base import ReasoningBackend, ReasoningBackendError
 from reasoning.backends import CortexBackend, LocalLLMBackend, MockBackend
+from reasoning.model_profiles import ModelMode, model_for
+from reasoning.model_router import (
+    ModelRouteDecision,
+    apply_consent,
+    consent_message,
+    route,
+)
 
 _LOCAL_KINDS = {"ollama", "vllm"}
 
@@ -80,4 +87,11 @@ __all__ = [
     "make_backend",
     "get_reasoning_backend",
     "available_backends",
+    # Smart model selection (local-first routing).
+    "ModelMode",
+    "model_for",
+    "ModelRouteDecision",
+    "route",
+    "apply_consent",
+    "consent_message",
 ]

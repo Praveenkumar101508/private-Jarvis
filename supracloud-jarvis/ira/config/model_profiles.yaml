@@ -1,0 +1,71 @@
+# IRA model-selection profiles
+# =============================
+# Binds each model MODE to a concrete local (Ollama) model name. Edit these to
+# change which model IRA uses for a task WITHOUT modifying Python code.
+#
+# IRA is local-first: every model here is a local Ollama model. External API
+# models are never listed and are never called without explicit user consent
+# (see docs/MODEL_SELECTION.md).
+#
+# Per-mode environment overrides (env_overrides below) win over these values,
+# and IRA_MODEL_PROFILE selects which profile is active (default: balanced_local).
+
+default_profile: balanced_local
+
+profiles:
+  # Best balance of power and footprint. The recommended default.
+  balanced_local:
+    local_fast: qwen3:8b            # quick chat, small summaries, low-latency
+    local_main: qwen3:14b           # default high-quality answers, planning
+    local_reasoning: deepseek-r1:14b  # deep reasoning, architecture, security
+    local_coding: qwen3-coder-next  # code gen/review/refactor, repo work
+    local_vision: gemma3:12b        # images, screenshots, PDFs-as-images
+    memory_embedding: bge-m3        # RAG / memory retrieval embeddings
+    fallback_tiny: gemma3n:e4b      # weak-machine / emergency fallback
+
+  # Lighter stack for weak machines.
+  low_resource:
+    local_fast: qwen3:4b
+    local_main: qwen3:8b
+    local_reasoning: deepseek-r1:8b
+    local_coding: qwen3-coder-next
+    local_vision: gemma3:4b
+    memory_embedding: nomic-embed-text
+    fallback_tiny: gemma3n:e4b
+
+  # Heavier reasoning for capable machines.
+  strong_local:
+    local_fast: qwen3:8b
+    local_main: qwen3:14b
+    local_reasoning: deepseek-r1:32b
+    local_coding: qwen3-coder-next
+    local_vision: gemma3:12b
+    memory_embedding: bge-m3
+    fallback_tiny: gemma3n:e4b
+
+# Per-mode override variable names, read from the process environment. When set
+# and non-empty, the env value replaces the profile model for that mode.
+env_overrides:
+  local_fast: IRA_LOCAL_FAST_MODEL
+  local_main: IRA_LOCAL_MAIN_MODEL
+  local_reasoning: IRA_LOCAL_REASONING_MODEL
+  local_coding: IRA_LOCAL_CODING_MODEL
+  local_vision: IRA_LOCAL_VISION_MODEL
+  memory_embedding: IRA_EMBEDDING_MODEL
+  fallback_tiny: IRA_FALLBACK_TINY_MODEL
+
+# Local fallback chain used when a mode's preferred model is unavailable. Each
+# chain starts with the mode itself and degrades to progressively smaller local
+# models — never to an external API. The last entry is always reachable.
+fallback_chains:
+  local_reasoning: [local_reasoning, local_main, local_fast, fallback_tiny]
+  local_coding:    [local_coding, local_main, local_fast, fallback_tiny]
+  local_vision:    [local_vision, local_main, fallback_tiny]
+  local_main:      [local_main, local_fast, fallback_tiny]
+  local_fast:      [local_fast, fallback_tiny]
+  memory_embedding: [memory_embedding]
+  fallback_tiny:   [fallback_tiny]
+
+# Embeddings degrade to a lighter embedding model (NOT a chat model), so memory
+# search keeps working on weak machines.
+embedding_fallback_model: nomic-embed-text
