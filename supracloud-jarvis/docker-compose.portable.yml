@@ -1,0 +1,91 @@
+# IRA Portable — self-contained single-click demo stack.
+# All state lives in RELATIVE folders next to this file (./data ./logs ./config
+# ./models) so the whole thing fits on a USB stick and never touches the host's
+# global Docker volumes. Brought up by portable/start_ira_*.{sh,ps1}.
+name: ira-portable
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-jarvis}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-jarvis_db}
+    volumes:
+      - ./data/postgres:/var/lib/postgresql/data
+      - ./postgres:/docker-entrypoint-initdb.d:ro   # init.sql + numbered migrations
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-jarvis} -d ${POSTGRES_DB:-jarvis_db}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD:?set REDIS_PASSWORD in .env}", "--appendonly", "yes"]
+    volumes:
+      - ./data/redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  ollama:
+    image: ollama/ollama:latest
+    volumes:
+      - ./models:/root/.ollama          # pulled models persist on the stick
+    healthcheck:
+      test: ["CMD-SHELL", "ollama list >/dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  ira-api:
+    build:
+      context: ./ira
+      dockerfile: Dockerfile.portable
+    env_file:
+      - ${IRA_ENV_FILE:-./portable/.env}
+    environment:
+      # Wire the API at the in-network service names (override anything in .env).
+      IRA_MODE: portable_demo
+      POSTGRES_HOST: postgres
+      REDIS_HOST: redis
+      OLLAMA_BASE_URL: http://ollama:11434/v1
+      LLM_BACKEND: ollama
+      IRA_USE_CORTEX: "false"
+      WEB_SEARCH_ENABLED: "false"
+      # NOTE: uvicorn binds 0.0.0.0 INSIDE the container (Dockerfile.portable CMD) so
+      # the port can be published; API_BIND_HOST (the Settings guard input) stays the
+      # loopback default. LAN exposure is prevented by the 127.0.0.1 publish below.
+    volumes:
+      - ./data/workspace:/app/data
+      - ./logs:/app/logs
+      - ./config:/app/config
+    ports:
+      - "127.0.0.1:8000:8000"          # never exposed on the LAN
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      ollama:
+        condition: service_started
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    environment:
+      NEXT_PUBLIC_IRA_DEMO_MODE: "true"   # render the visible Demo Mode banner
+      NEXT_PUBLIC_API_BASE: http://127.0.0.1:8000
+    ports:
+      - "127.0.0.1:3000:3000"
+    depends_on:
+      - ira-api
+    restart: unless-stopped

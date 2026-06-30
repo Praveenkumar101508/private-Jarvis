@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { Inter } from "next/font/google";
 import "./globals.css";
 import PWARegister from "@/components/PWARegister";
+import DemoModeBanner from "@/components/DemoModeBanner";
 
 const inter = Inter({ subsets: ["latin"] });
 
@@ -54,6 +55,7 @@ export default function RootLayout({
       </head>
       <body className={`${inter.className} bg-neutral-950 text-white antialiased`}>
         <PWARegister />
+        <DemoModeBanner />
         {children}
       </body>
     </html>

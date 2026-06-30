@@ -43,3 +43,13 @@ Thumbs.db
 .vscode/
 .idea/
 *.swp
+
+# IRA Portable demo — runtime state & secrets (never commit)
+supracloud-jarvis/portable/.env
+supracloud-jarvis/portable/config/
+supracloud-jarvis/data/
+supracloud-jarvis/logs/
+supracloud-jarvis/models/
+supracloud-jarvis/config/
+master.enc
+master.key
