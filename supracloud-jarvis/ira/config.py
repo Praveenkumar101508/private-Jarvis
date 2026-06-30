@@ -130,6 +130,14 @@ class Settings(BaseSettings):
     deep_temperature: float = 0.3    # Lower temp for deterministic reasoning
     reasoning_temperature: float = 0.1  # Near-deterministic for step-by-step thinking
 
+    # ── Deployment mode (V2·Phase 1) ──────────────────────────────────────────
+    # "standard"      → normal deployment; nothing changed.
+    # "portable_demo" → single-click USB demo. A GUARD RAIL, not a new behaviour: it
+    #   re-uses the V1-hardened defaults (egress off, Cortex off, Ollama/mock backend,
+    #   loopback bind, no unsafe actuators) and REFUSES to start if any of them are
+    #   overridden to an unsafe value. It never loosens a security check.
+    ira_mode: str = "standard"
+
     # ── L2: Engine selection (LLM_BACKEND switch) ─────────────────────────────
     # "ollama" → local native Ollama (Shadow PC, Windows, no Docker, 20GB A4500).
     # "vllm"   → the existing GPU/Docker path (kept dormant for the future scale-up).
@@ -442,6 +450,31 @@ class Settings(BaseSettings):
                 "is key-gated). Set VLLM_API_KEY, or use LLM_BACKEND=ollama for the "
                 "local-first default."
             )
+        # V2·Phase 1: portable_demo is a guard rail — refuse to start if any hardened
+        # default has been overridden to an unsafe value. It never loosens a check.
+        if self.ira_mode.strip().lower() == "portable_demo":
+            import os as _os
+
+            violations: list[str] = []
+            if self.web_search_enabled:
+                violations.append("WEB_SEARCH_ENABLED must be false (egress off)")
+            if self.llm_backend.strip().lower() == "vllm":
+                violations.append("LLM_BACKEND must be 'ollama' (local), not 'vllm'")
+            if _os.getenv("IRA_USE_CORTEX", "false").strip().lower() in ("1", "true", "yes", "on"):
+                violations.append("IRA_USE_CORTEX must be false")
+            if getattr(self, "android_actuator_enabled", False):
+                violations.append("ANDROID_ACTUATOR_ENABLED must be false")
+            if self.dev_mode:
+                violations.append("DEV_MODE must be false (production-like checks on)")
+            if not _is_loopback_host(self.api_bind_host):
+                violations.append(
+                    f"API_BIND_HOST must be loopback (got {self.api_bind_host!r})"
+                )
+            if violations:
+                raise RuntimeError(
+                    "IRA_MODE=portable_demo refuses to start — unsafe overrides:\n  - "
+                    + "\n  - ".join(violations)
+                )
         return self
 
 
