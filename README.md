@@ -38,7 +38,7 @@ IRA is a private, sovereign AI assistant that lives entirely on **your own machi
 
 Most "AI assistants" ship your most private data — your email, calendar, voice, and notes — to someone else's servers, behind a monthly bill you don't control. IRA flips that. Every model runs locally on [Ollama](https://ollama.com), every memory lives in your own database, and the reasoning engine is bound to `localhost`. The result is an assistant you fully own — capable enough to be useful, private enough to trust with everything.
 
-> **The one rule the architecture enforces:** nothing leaves your machine unless *you* wire up an integration and turn it on.
+> **The one rule the architecture enforces:** local-first by default — external tools (web search, cloud image gen, third-party APIs) are an explicit opt-in, off until *you* turn them on. Out of the box, web search is disabled and the image generator is local; nothing reaches the network until you set the corresponding flag or key.
 
 ---
 
@@ -131,7 +131,8 @@ IRA is built to be exposed to the internet without flinching. The model isn't "o
 | **Brute force** | Per-IP rate limiting + per-account exponential lockout | ✅ live |
 | **Owner authorization** | Verified-owner checked *inside* every sensitive tool (email, calendar, security) — fail-closed, not just at the classifier | ✅ live |
 | **Self-modification** | Architect apply path owner-gated; protected-paths denylist refuses any patch touching auth / safety / router / config / CI | ✅ live |
-| **Outbound (SSRF)** | Single hardened guard (`net_safety`) — DNS-rebinding, IPv4-mapped IPv6, decimal/hex/`0.0.0.0` literal bypasses all closed | ✅ live |
+| **Outbound (SSRF)** | Single hardened guard (`net_safety`): one allow-check over *all* resolved A/AAAA records — blocks loopback, RFC1918, link-local (cloud metadata), IPv4-mapped IPv6, and decimal/hex/octal/`0.0.0.0` literal bypasses | ✅ live |
+| **SSRF residual (TOCTOU)** | `is_safe_url()` validates at check time but the HTTP client re-resolves at connect time, so a DNS rebind remains possible; high-risk fetches must pin via `resolve_pinned()` (connect to the validated IP) — not yet enforced on every path | ⚠️ documented residual |
 | **Exfiltration** | Egress guard blocks secrets / keys / local paths leaving | ✅ live |
 | **Reasoning engine** | Reasoning-only skills run the local engine with tools disabled (`--accept-hooks` dropped + enforced no-tools wrapper) | ✅ live |
 | **Commands** | Two-gate allowlist, shell-free execution, allow-roots resolved at call time | ✅ live |
