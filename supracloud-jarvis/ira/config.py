@@ -275,7 +275,9 @@ class Settings(BaseSettings):
     # Provider: "replicate" (cloud, Flux Schnell) | "sd_webui" (local SD WebUI) | "comfyui"
     # Cloud upgrade: "replicate" with REPLICATE_API_TOKEN gives instant Flux Pro access
     image_gen_url: str = ""            # SD WebUI / ComfyUI local endpoint
-    image_gen_provider: str = "replicate"  # "replicate" | "sd_webui" | "comfyui"
+    # V1·Phase 4 (honest defaults): local-first default. "replicate" (cloud) is an
+    # explicit opt-in and still also needs REPLICATE_API_TOKEN to make any call.
+    image_gen_provider: str = "sd_webui"  # "sd_webui" (local) | "comfyui" (local) | "replicate" (cloud)
     replicate_api_token: str = ""
     flux_model: str = "black-forest-labs/flux-schnell"  # Replicate model ID for image gen
     # Fix #73: pix2pix model version as config so it survives Replicate model updates
@@ -317,7 +319,9 @@ class Settings(BaseSettings):
     # "searxng" (self-hosted) keeps it fully private; "duckduckgo" needs no key
     # but queries hit DDG; "tavily"/"serper" need an API key. Only the query
     # string is ever sent — never memory/PII. Disabled => no external calls.
-    web_search_enabled: bool = True
+    # V1·Phase 4 (honest defaults): OFF by default — IRA is local-first, so external
+    # web search is an explicit opt-in (set WEB_SEARCH_ENABLED=true), not a surprise.
+    web_search_enabled: bool = False
     web_search_provider: str = "duckduckgo"   # searxng | duckduckgo | tavily | serper
     searxng_url: str = "http://localhost:8888"
     # Sovereign web-research layer (Phase 3B) — self-hosted backends only.
