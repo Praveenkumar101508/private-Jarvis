@@ -93,3 +93,52 @@ def test_fallback_never_selects_external():
     # Even with nothing installed, the fallback path stays local.
     d = route("do a very deep security audit", env=ENV, availability=installed())
     assert d.provider == "local"
+
+
+# ── Coding (qwen3-coder-next) fallback — explicit regression coverage ────────────
+
+def test_missing_coding_falls_back_to_main():
+    # qwen3-coder-next not installed -> local_coding degrades to local_main.
+    avail = installed("qwen3:14b", "qwen3:8b", "gemma3n:e4b")  # no coder
+    used, model, fb = resolve_model(ModelMode.LOCAL_CODING, env=ENV, availability=avail)
+    assert used == ModelMode.LOCAL_MAIN
+    assert model == "qwen3:14b"
+    assert fb == "qwen3:8b"
+
+
+def test_missing_coding_and_main_falls_back_to_fast():
+    # Neither coder nor main installed -> degrade to local_fast (still local).
+    avail = installed("qwen3:8b", "gemma3n:e4b")  # no coder, no main
+    used, model, _ = resolve_model(ModelMode.LOCAL_CODING, env=ENV, availability=avail)
+    assert used == ModelMode.LOCAL_FAST
+    assert model == "qwen3:8b"
+
+
+def test_missing_coding_lands_on_terminal_tiny():
+    # Only the tiny model installed -> local_coding lands on fallback_tiny.
+    avail = installed("gemma3n:e4b")
+    used, model, fb = resolve_model(ModelMode.LOCAL_CODING, env=ENV, availability=avail)
+    assert used == ModelMode.FALLBACK_TINY
+    assert model == "gemma3n:e4b"
+    assert fb is None
+
+
+def test_coding_fallback_never_selects_external():
+    # A coding request whose model is missing must stay local at every step —
+    # local_coding, local_main, local_fast, fallback_tiny are all local.
+    for avail in (
+        installed("qwen3:14b", "qwen3:8b", "gemma3n:e4b"),  # -> local_main
+        installed("qwen3:8b", "gemma3n:e4b"),               # -> local_fast
+        installed("gemma3n:e4b"),                           # -> fallback_tiny
+        installed(),                                        # nothing -> terminal tiny
+    ):
+        d = route("please debug and refactor this function", env=ENV, availability=avail)
+        assert d.provider == "local"
+        assert d.selected_mode in {
+            ModelMode.LOCAL_CODING,
+            ModelMode.LOCAL_MAIN,
+            ModelMode.LOCAL_FAST,
+            ModelMode.FALLBACK_TINY,
+        }
+        # The concrete model is one of the local chain's models, never external.
+        assert d.selected_model in {"qwen3:14b", "qwen3:8b", "gemma3n:e4b", "qwen3-coder-next"}

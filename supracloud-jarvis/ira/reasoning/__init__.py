@@ -22,9 +22,13 @@ from reasoning.base import ReasoningBackend, ReasoningBackendError
 from reasoning.backends import CortexBackend, LocalLLMBackend, MockBackend
 from reasoning.model_profiles import ModelMode, model_for
 from reasoning.model_router import (
+    ConsentAuditEvent,
     ModelRouteDecision,
     apply_consent,
     consent_message,
+    record_consent_event,
+    register_consent_audit_sink,
+    reset_consent_audit_sink,
     route,
 )
 
@@ -94,4 +98,9 @@ __all__ = [
     "route",
     "apply_consent",
     "consent_message",
+    # Structured consent audit hook.
+    "ConsentAuditEvent",
+    "record_consent_event",
+    "register_consent_audit_sink",
+    "reset_consent_audit_sink",
 ]

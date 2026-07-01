@@ -1,5 +1,12 @@
 # IRA model-routing — verification report
 
+> **Superseded / follow-up.** The canonical, most-recent report is
+> `docs/MODEL_ROUTING_VERIFICATION_REPORT.md` at the repo root. Its §12
+> "Follow-up implementation" records the post-audit changes: the `api_consent.py`
+> extraction, the structured consent audit hook, the explicit coding-fallback
+> tests, and the resolved `httpx` test-dependency note. This copy is retained as
+> the original audit snapshot only.
+
 **Audit date:** 2026-06-30
 **Scope:** the model-selection / model-routing implementation (PR #51, merged).
 **Mode:** read-only audit. No code was modified for this report.
