@@ -16,6 +16,11 @@ Local-first, consent-gated, non-breaking:
     and :mod:`reasoning.model_availability` (is it installed) — it does not touch
     the existing ``utils.llm`` chat flow.
 
+The consent gate, privacy switches, execution gate, and structured consent audit
+hook live in :mod:`reasoning.api_consent`; they are re-exported here so existing
+callers (``from reasoning.model_router import apply_consent`` etc.) keep working
+unchanged.
+
 The seven modes and three profiles live in ``config/model_profiles.yaml``; this
 module only decides *which mode* a task needs and resolves the concrete model
 through the profile + availability layers.
@@ -23,7 +28,7 @@ through the profile + availability layers.
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from typing import Mapping, Optional
 
 from reasoning.model_availability import (
@@ -39,26 +44,34 @@ from reasoning.model_profiles import (
     model_for,
 )
 
-# ── Consent / privacy environment switches ──────────────────────────────────────
-ALLOW_EXTERNAL_ENV = "IRA_ALLOW_EXTERNAL_API"      # master off-switch (default false)
-REQUIRE_CONSENT_ENV = "IRA_REQUIRE_API_CONSENT"    # ask before any external (default true)
-PRIVACY_MODE_ENV = "IRA_PRIVACY_MODE"              # local_only | local_first | external_ok
-EXTERNAL_PROVIDER_ENV = "IRA_EXTERNAL_API_PROVIDER"
-EXTERNAL_MODEL_ENV = "IRA_EXTERNAL_API_MODEL"
-
-DEFAULT_PRIVACY_MODE = "local_first"
-
-#: Shown to the user when IRA offers Deep Intelligence Mode for a very hard task.
-CONSENT_MESSAGE = (
-    "IRA can answer this locally, but this request deserves deeper reasoning.\n\n"
-    "For the strongest result, I can activate Deep Intelligence Mode using an "
-    "external frontier model. This may send the necessary prompt/context to the "
-    "selected API provider and may use paid tokens.\n\n"
-    "Your privacy stays in your control.\n\n"
-    "Choose one:\n"
-    "- Approve Deep Intelligence Mode for this request\n"
-    "- Continue with Local Mode only\n\n"
-    "Reply: 'Approve' or 'Local only'."
+# Consent / privacy / execution-gate / audit primitives now live in api_consent
+# and are re-exported here for backward compatibility.
+from reasoning.api_consent import (
+    ALLOW_EXTERNAL_ENV,
+    AuditSink,
+    CONSENT_APPROVED,
+    CONSENT_BLOCKED,
+    CONSENT_DECLINED,
+    CONSENT_MESSAGE,
+    CONSENT_OFFERED,
+    CONSENT_UNAVAILABLE,
+    ConsentAuditEvent,
+    EXTERNAL_MODEL_ENV,
+    EXTERNAL_PROVIDER_ENV,
+    ExternalExecutorNotConfigured,
+    PRIVACY_MODE_ENV,
+    REQUIRE_CONSENT_ENV,
+    apply_consent,
+    clear_external_executor,
+    consent_message,
+    consent_required,
+    external_api_allowed,
+    privacy_mode,
+    record_consent_event,
+    register_consent_audit_sink,
+    register_external_executor,
+    reset_consent_audit_sink,
+    run_decision,
 )
 
 # ── Task-classification vocabulary ──────────────────────────────────────────────
@@ -117,36 +130,6 @@ class ModelRouteDecision:
     @property
     def is_local(self) -> bool:
         return self.provider == "local"
-
-
-# ── Config readers ──────────────────────────────────────────────────────────────
-
-def _bool_env(env: Mapping[str, str], key: str, default: bool) -> bool:
-    raw = env.get(key)
-    if raw is None or not str(raw).strip():
-        return default
-    return str(raw).strip().lower() in {"1", "true", "yes", "on"}
-
-
-def privacy_mode(env: Optional[Mapping[str, str]] = None) -> str:
-    env = os.environ if env is None else env
-    val = (env.get(PRIVACY_MODE_ENV) or "").strip().lower()
-    return val or DEFAULT_PRIVACY_MODE
-
-
-def external_api_allowed(env: Optional[Mapping[str, str]] = None) -> bool:
-    """Master switch: may IRA EVER use an external API (default: no)."""
-    env = os.environ if env is None else env
-    return _bool_env(env, ALLOW_EXTERNAL_ENV, False)
-
-
-def consent_required(env: Optional[Mapping[str, str]] = None) -> bool:
-    env = os.environ if env is None else env
-    return _bool_env(env, REQUIRE_CONSENT_ENV, True)
-
-
-def consent_message() -> str:
-    return CONSENT_MESSAGE
 
 
 # ── Task classification ─────────────────────────────────────────────────────────
@@ -287,7 +270,8 @@ def route(
     The returned decision is always local. ``requires_api_consent`` is True only
     when the task is very hard AND privacy mode permits offering an external
     model — in which case the caller should show :data:`CONSENT_MESSAGE` and call
-    :func:`apply_consent` with the user's answer.
+    :func:`apply_consent` with the user's answer. Offering Deep Intelligence Mode
+    emits a structured consent audit event (safe metadata only).
     """
     env = os.environ if env is None else env
     if availability is None:
@@ -316,7 +300,7 @@ def route(
     if offering:
         reason += "; very hard — offering Deep Intelligence Mode (consent required)"
 
-    return ModelRouteDecision(
+    decision = ModelRouteDecision(
         selected_mode=used_mode,
         selected_model=selected_model,
         fallback_model=fallback_model,
@@ -329,123 +313,20 @@ def route(
         provider="local",
     )
 
-
-# ── Consent gate ────────────────────────────────────────────────────────────────
-
-def _external_target(env: Mapping[str, str]) -> tuple[str, str]:
-    provider = (env.get(EXTERNAL_PROVIDER_ENV) or "anthropic").strip() or "anthropic"
-    model = (env.get(EXTERNAL_MODEL_ENV) or "").strip()
-    if not model:
-        # A neutral placeholder; the actual provider/model is wired by the caller.
-        model = f"{provider}:external-frontier"
-    return provider, model
-
-
-def apply_consent(
-    decision: ModelRouteDecision,
-    approved: bool,
-    *,
-    env: Optional[Mapping[str, str]] = None,
-) -> ModelRouteDecision:
-    """Resolve a consent prompt into a final decision.
-
-    * ``approved=False`` → stay local (continue with the locally-selected model);
-      ``requires_api_consent`` is cleared.
-    * ``approved=True`` but the ``IRA_ALLOW_EXTERNAL_API`` master switch is off →
-      stay local (config forbids external use). External is NEVER used silently.
-    * ``approved=True`` and allowed → switch to the external provider/model.
-    """
-    env = os.environ if env is None else env
-
-    if not approved:
-        return replace(
-            decision,
-            requires_api_consent=False,
-            reason=decision.reason + "; user chose Local Mode only",
-            provider="local",
+    if offering:
+        # Record that Deep Intelligence Mode was offered (consent still pending).
+        record_consent_event(
+            reason_code=CONSENT_OFFERED,
+            privacy_mode=priv,
+            selected_mode=str(used_mode),
+            selected_model=selected_model,
+            consent_required=True,
+            consent_approved=None,
+            provider=None,
+            estimated_cost_level="none",
         )
 
-    if not external_api_allowed(env):
-        return replace(
-            decision,
-            requires_api_consent=False,
-            reason=decision.reason + "; external API disabled by config (IRA_ALLOW_EXTERNAL_API=false) — staying local",
-            provider="local",
-        )
-
-    provider, model = _external_target(env)
-    return replace(
-        decision,
-        provider="external",
-        selected_model=model,
-        fallback_model=decision.selected_model,   # the local model remains the safety net
-        requires_api_consent=False,
-        estimated_cost_level="high",
-        reason=decision.reason + f"; user approved Deep Intelligence Mode -> {provider}",
-    )
-
-
-# ── Execution gate (defence in depth) ───────────────────────────────────────────
-# A second, runtime guard so that an external decision can NEVER reach the network
-# unless: (1) the decision is provider=="external" (only apply_consent(approved)
-# produces it), (2) the IRA_ALLOW_EXTERNAL_API master switch is on, and (3) an
-# external executor has been explicitly registered by the host application. No
-# external executor ships by default, so Deep Intelligence Mode is decision-only
-# out of the box — it cannot call out even if every other check were bypassed.
-
-class ExternalExecutorNotConfigured(RuntimeError):
-    """Raised when an external decision is run without a registered, allowed executor."""
-
-
-_EXTERNAL_EXECUTOR = None  # set via register_external_executor()
-
-
-def register_external_executor(fn) -> None:
-    """Register the callable that performs an external (frontier) call.
-
-    ``fn(decision, system, prompt) -> str``. Registering is an explicit, deliberate
-    act by the host app; until then external execution is impossible.
-    """
-    global _EXTERNAL_EXECUTOR
-    _EXTERNAL_EXECUTOR = fn
-
-
-def clear_external_executor() -> None:
-    """Remove any registered external executor (tests / lockdown)."""
-    global _EXTERNAL_EXECUTOR
-    _EXTERNAL_EXECUTOR = None
-
-
-def run_decision(
-    decision: ModelRouteDecision,
-    *,
-    local_runner,
-    system: str = "",
-    prompt: str = "",
-    env: Optional[Mapping[str, str]] = None,
-) -> str:
-    """Execute a decision. Local decisions call ``local_runner(decision)``.
-
-    External decisions are gated again here: they require the master switch on AND
-    a registered executor, else :class:`ExternalExecutorNotConfigured` is raised.
-    External use is therefore never silent — there is no default code path to it.
-    """
-    env = os.environ if env is None else env
-    if decision.provider == "local":
-        return local_runner(decision)
-
-    # provider == "external" — re-check the master switch at execution time.
-    if not external_api_allowed(env):
-        raise ExternalExecutorNotConfigured(
-            "External execution blocked: IRA_ALLOW_EXTERNAL_API is false."
-        )
-    if _EXTERNAL_EXECUTOR is None:
-        raise ExternalExecutorNotConfigured(
-            "External execution blocked: no external executor is registered. "
-            "Deep Intelligence Mode is decision-only by default; the host app must "
-            "call register_external_executor() to enable it."
-        )
-    return _EXTERNAL_EXECUTOR(decision, system, prompt)
+    return decision
 
 
 __all__ = [
@@ -464,4 +345,21 @@ __all__ = [
     "register_external_executor",
     "clear_external_executor",
     "run_decision",
+    # Structured consent audit hook.
+    "ConsentAuditEvent",
+    "AuditSink",
+    "CONSENT_OFFERED",
+    "CONSENT_APPROVED",
+    "CONSENT_DECLINED",
+    "CONSENT_BLOCKED",
+    "CONSENT_UNAVAILABLE",
+    "record_consent_event",
+    "register_consent_audit_sink",
+    "reset_consent_audit_sink",
+    # Env-var name constants (re-exported).
+    "ALLOW_EXTERNAL_ENV",
+    "REQUIRE_CONSENT_ENV",
+    "PRIVACY_MODE_ENV",
+    "EXTERNAL_PROVIDER_ENV",
+    "EXTERNAL_MODEL_ENV",
 ]
