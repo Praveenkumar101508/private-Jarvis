@@ -379,3 +379,99 @@ report file. No source files were modified.
 - **Coding-fallback test explicitness.** Add a direct `test_missing_coding_falls_back` case
   mirroring the reasoning/main cases, so the `local_coding` chain has a named regression test
   (the chain is exercised indirectly today).
+
+---
+
+## 12. Follow-up implementation (post-audit)
+
+The minor gaps from §10/§11 have now been addressed. Behaviour of the safety
+model is unchanged — external use still requires user approval **plus**
+`IRA_ALLOW_EXTERNAL_API=true` **plus** a registered executor — these changes add
+structure, tests, and observability around the existing gate.
+
+### 12.1 — `httpx` test dependency (§11 P2) — resolved
+`httpx`, `openai`, and `tenacity` (the imports `utils/llm.py` needs, which
+`tests/test_llm_model_wiring.py` pulls in) were **already declared** in both
+`requirements.txt` and `requirements-test.txt`:
+
+| dep | `requirements.txt` | `requirements-test.txt` |
+| --- | --- | --- |
+| `httpx==0.27.2` | line 53 | line 10 |
+| `openai==1.58.1` | line 8 | line 20 |
+| `tenacity==9.0.0` | line 57 | line 45 |
+
+The audit sandbox had only installed `pytest`/`pyyaml`/`pydantic*`, so the module
+failed to import — not a repo defect. After `pip install -r requirements-test.txt`
+(equivalently the three deps above), the wiring test **runs and passes**:
+
+```
+$ python -m pytest tests/test_llm_model_wiring.py -q
+........                                                                  [100%]
+8 passed
+```
+
+No requirements file needed a new entry; the fix is procedural (install the
+declared test requirements in CI).
+
+### 12.2 — Structured consent audit log (§11 P4) — added
+A dependency-free audit hook now lives in `reasoning/api_consent.py`:
+`record_consent_event()` builds a frozen `ConsentAuditEvent` and dispatches it to
+a pluggable sink (default: one structured `INFO` line on
+`ira.reasoning.consent_audit`; swap via `register_consent_audit_sink()` to feed
+the full audit system later). Events fire at all five states — `offered`,
+`approved`, `declined`, `blocked`, `unavailable` — and carry **safe metadata
+only**: `timestamp`, `privacy_mode`, `selected_mode`, `selected_model`,
+`consent_required`, `consent_approved`, `provider` (only when approved),
+`estimated_cost_level`, `reason_code`. There is **no** prompt/context field and no
+secret is passed in; sink dispatch is fail-soft (a broken sink never disturbs
+routing). Covered by the new `tests/reasoning/test_consent_audit.py`, including a
+test asserting neither the prompt body nor an embedded secret appears in any event.
+
+### 12.3 — `api_consent.py` extraction (§11 P3) — done
+The consent gate, privacy/consent env readers, execution gate, and the new audit
+hook were moved into `reasoning/api_consent.py`. `model_router.py` keeps the task
+classifier + local model resolution and **re-exports** every consent symbol, so
+`from reasoning.model_router import apply_consent, run_decision, …` and
+`from reasoning import …` are unchanged (`router.apply_consent is
+api_consent.apply_consent`). No circular import: `api_consent` needs no runtime
+import of `ModelRouteDecision` (`apply_consent` uses `dataclasses.replace`,
+`run_decision` reads attributes). All previously-passing tests still pass.
+
+### 12.4 — Explicit coding-fallback test (§11 P4) — added
+`tests/reasoning/test_model_fallbacks.py` gained named regression tests for the
+`local_coding` chain: `test_missing_coding_falls_back_to_main`,
+`test_missing_coding_and_main_falls_back_to_fast`,
+`test_missing_coding_lands_on_terminal_tiny`, and
+`test_coding_fallback_never_selects_external` (which asserts every step of the
+degraded coding chain stays `provider="local"` and never names an external model).
+
+### 12.5 — Documentation
+`docs/MODEL_SELECTION.md` now documents the `api_consent.py` file layout and a
+"Consent audit log" section (the five `reason_code`s, the safe-metadata fields,
+and how to register a sink). The `IRA_REQUIRE_API_CONSENT` observation from §11 P4
+was intentionally **not** changed — today's always-ask default is the safer stance.
+
+### 12.6 — Test results (post-change)
+
+```
+$ python -m pytest tests/reasoning tests/test_model_selection_settings.py tests/test_llm_model_wiring.py -q
+86 passed
+```
+
+Breakdown: 61 (existing reasoning) + 4 (new coding-fallback) + 11 (new consent
+audit) = 76 in `tests/reasoning`; 2 settings; 8 wiring. The broader
+`python -m pytest -v` still cannot collect 26 unrelated modules in this sandbox
+(missing heavy deps: `fastapi`, `numpy`, `langgraph`, `bcrypt`, `redis`) — none of
+those touch the reasoning layer and none regressed.
+
+### Updated verdict
+| Check | Result |
+| --- | --- |
+| External API can be called without consent | **NO** (unchanged) |
+| Local fallback works | **YES** (now with explicit coding-chain tests) |
+| Default mode is local-first | **YES** (unchanged) |
+| `httpx` dependency issue | **FIXED** (declared in requirements; wiring test passes) |
+| Coding fallback explicit test | **YES** (added) |
+| Consent audit logging | **YES** (structured hook + tests) |
+| Reasoning tests pass | **YES** (76/76 in `tests/reasoning`) |
+| Ready to continue | **YES** |

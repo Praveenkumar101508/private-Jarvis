@@ -157,7 +157,7 @@ When offered, IRA shows:
 >
 > Reply: 'Approve' or 'Local only'.
 
-Rules enforced by `model_router.py`:
+Rules enforced by `reasoning/api_consent.py` (re-exported from `model_router.py`):
 
 - External API is **never** used by default and **never** called silently.
 - A very hard task asks for consent; if you decline, IRA continues with
@@ -165,6 +165,12 @@ Rules enforced by `model_router.py`:
 - Even if you approve, IRA only switches over when the master switch
   `IRA_ALLOW_EXTERNAL_API=true` is set; otherwise it stays local.
 - `IRA_PRIVACY_MODE=local_only` disables the offer entirely.
+
+> **File layout.** The consent gate, privacy switches, execution gate, and the
+> consent audit hook live in `reasoning/api_consent.py`. `model_router.py` keeps
+> the task classifier + local model resolution and **re-exports** every consent
+> symbol, so `from reasoning.model_router import apply_consent, run_decision, …`
+> (and `from reasoning import …`) keep working unchanged.
 
 ---
 
@@ -218,6 +224,40 @@ external target; actually running it goes through `run_decision(...)`, which rai
 an executor has been registered via `register_external_executor()`. No external
 executor ships by default — Deep Intelligence Mode is decision-only out of the box
 and cannot call out on its own.
+
+### Consent audit log
+
+Every Deep Intelligence Mode consent decision emits a structured
+`ConsentAuditEvent` through `record_consent_event()` (in `reasoning/api_consent.py`),
+so external-use choices are independently queryable. Events are emitted at five
+points:
+
+| `reason_code` | When |
+| --- | --- |
+| `offered` | `route()` offered Deep Intelligence Mode (consent still pending) |
+| `approved` | user approved **and** external is allowed → going external |
+| `declined` | user chose Local Mode only |
+| `blocked` | user approved but `IRA_ALLOW_EXTERNAL_API=false` → stayed local |
+| `unavailable` | an external run was attempted but not executable (gate raised) |
+
+Each event carries **safe metadata only** — `timestamp`, `privacy_mode`,
+`selected_mode`, `selected_model`, `consent_required`, `consent_approved`,
+`provider` (only when approved), `estimated_cost_level`, and the `reason_code`.
+There is **no** field for prompt text or context, and no secret is ever passed in.
+
+By default the hook writes one structured `INFO` log line
+(`logging.getLogger("ira.reasoning.consent_audit")`). A host app can forward
+events into the full audit/event system by registering a sink:
+
+```python
+from reasoning import register_consent_audit_sink
+from utils.security_events import emit_event  # example integration target
+
+register_consent_audit_sink(lambda ev: my_audit_backend.write(ev))
+```
+
+Sink dispatch is fail-soft — a broken sink is logged and swallowed, never
+disturbing routing. `reset_consent_audit_sink()` restores the default log sink.
 
 ### How to change models
 
