@@ -32,6 +32,20 @@ from reasoning.model_router import (
     route,
 )
 
+# Answer-quality layer (M5): model-tier voice, task-specific output policy,
+# rule-based verification, and memory-aware context selection. Sits on top of
+# routing/consent above; touches none of it.
+from reasoning.model_system_prompts import system_prompt_for
+from reasoning.answer_policy import (
+    AnswerPolicy,
+    classify_task_type,
+    get_policy,
+    local_fallback_notice,
+    policy_for_prompt,
+)
+from reasoning.answer_verifier import VerificationResult, verify_answer
+from reasoning.memory_context import select_memory_context
+
 _LOCAL_KINDS = {"ollama", "vllm"}
 
 
@@ -103,4 +117,14 @@ __all__ = [
     "record_consent_event",
     "register_consent_audit_sink",
     "reset_consent_audit_sink",
+    # Answer-quality layer.
+    "system_prompt_for",
+    "AnswerPolicy",
+    "classify_task_type",
+    "get_policy",
+    "policy_for_prompt",
+    "local_fallback_notice",
+    "VerificationResult",
+    "verify_answer",
+    "select_memory_context",
 ]

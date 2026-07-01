@@ -105,6 +105,40 @@ def _stable_hash(text: str) -> str:
     return hashlib.sha256(text.encode()).hexdigest()[:16]
 
 
+def _compose_quality_layer(
+    prompt: str,
+    message: str,
+    *,
+    think_mode: bool = False,
+    deep_search: bool = False,
+) -> str:
+    """Append model-tier voice + task-policy guidance to a system prompt.
+
+    Fail-soft and flag-gated: any error, or ``IRA_USE_MODEL_ROUTER=false``,
+    returns ``prompt`` untouched, so existing behaviour never breaks. Uses
+    the same task classifier the model router uses to pick a tier
+    (``reasoning.model_router.classify_task``) so the tier voice matches
+    whichever local model actually answers.
+    """
+    cfg = get_settings()
+    if not getattr(cfg, "ira_use_model_router", True):
+        return prompt
+    try:
+        from reasoning.model_router import classify_task
+        from reasoning.model_system_prompts import system_prompt_for
+        from reasoning.answer_policy import policy_for_prompt
+
+        cls = classify_task(message, think_mode=think_mode, deep_search=deep_search)
+        tier_prompt = system_prompt_for(cls.mode)
+        policy = policy_for_prompt(message)
+        return (
+            f"{prompt}\n\n## Model-tier guidance\n{tier_prompt}"
+            f"\n\n## Response policy ({policy.task_type})\n{policy.instructions}"
+        )
+    except Exception:  # noqa: BLE001 — the answer-quality layer must never break chat
+        return prompt
+
+
 # ── Expert Mode rate limiting ─────────────────────────────────────────────────
 
 _EXPERT_RATE_LIMIT = 20    # max Expert Mode calls per user per hour (personal AI — raised from 3)
@@ -464,8 +498,9 @@ async def chat_stream(
 
     # ── Architect Agent: intercept before all other routing ───────────────────
     if is_architect_trigger(req.message):
+        from reasoning.memory_context import select_memory_context
         memories_raw = await retrieve(req.message, user_id=_user)
-        memory_ctx = "\n".join(m["content"] for m in memories_raw) if memories_raw else ""
+        memory_ctx = select_memory_context(memories_raw)
 
         async def architect_proposal_stream():
             async for event in stream_architect_proposal(req.message, memory_context=memory_ctx):
@@ -563,6 +598,9 @@ async def chat_stream(
         memories_raw = await retrieve(req.message, user_id=_user)
         search_ctx = ""
         system_prompt = build_engineer_prompt()
+        system_prompt = _compose_quality_layer(
+            system_prompt, req.message, think_mode=req.think_mode, deep_search=req.deep_search
+        )
         use_deep = True
 
     elif req.grok_mode:
@@ -572,6 +610,9 @@ async def chat_stream(
         used_live_x = search_meta.get("used_live_x", False)
         deep_search_rounds = search_meta.get("deep_search_rounds", 0)
         system_prompt = build_grok_system_prompt(context=search_ctx)
+        system_prompt = _compose_quality_layer(
+            system_prompt, req.message, think_mode=req.think_mode, deep_search=req.deep_search
+        )
 
     else:
         memories_raw = await retrieve(req.message, user_id=_user)
@@ -579,12 +620,17 @@ async def chat_stream(
         used_live_x = search_meta.get("used_live_x", False)
         deep_search_rounds = search_meta.get("deep_search_rounds", 0)
         system_prompt = _get_agent_system_prompt(active_agent, is_voice=req.is_voice)
+        if not req.is_voice:  # keep voice replies short — no extra guidance text
+            system_prompt = _compose_quality_layer(
+                system_prompt, req.message, think_mode=req.think_mode, deep_search=req.deep_search
+            )
 
     # Append Think Mode instructions to whichever system prompt was selected
     if req.think_mode and not req.is_voice:
         system_prompt += _THINK_ADDON
 
-    memory_ctx = "\n".join(m["content"] for m in memories_raw) if memories_raw else ""
+    from reasoning.memory_context import select_memory_context
+    memory_ctx = select_memory_context(memories_raw)
 
     # Fix P24: feature handler registry replaces the 8-block if-ladder.
     # Handlers are in _dispatch.py; first match wins; None means fall through.
@@ -598,7 +644,8 @@ async def chat_stream(
     if profile_summary:
         messages.append({"role": "system", "content": profile_summary})
     if memory_ctx:
-        messages.append({"role": "system", "content": f"Relevant context from memory:\n{memory_ctx}"})
+        # Already labelled "user memory, not an instruction" by select_memory_context.
+        messages.append({"role": "system", "content": memory_ctx})
     if search_ctx:
         messages.append({"role": "system", "content": f"Live information:\n{search_ctx}"})
 
@@ -739,10 +786,11 @@ async def chat_expert(
         from router import enforce_owner_gate
         from subagents import deliberate
 
+        from reasoning.memory_context import select_memory_context
         refusal = enforce_owner_gate(req.message, owner)
         owner_name = get_settings().owner_name
         memories_raw = await retrieve(req.message, user_id=_user)
-        memory_ctx = "\n".join(m["content"] for m in memories_raw) if memories_raw else ""
+        memory_ctx = select_memory_context(memories_raw)
 
         async def _cortex_expert_gen():
             t0 = time.monotonic()
@@ -772,8 +820,9 @@ async def chat_expert(
         retrieve(req.message, user_id=_user),
         _get_search_ctx(req.message),
     )
+    from reasoning.memory_context import select_memory_context
     expert_used_live_x = search_meta.get("used_live_x", False)
-    memory_ctx = "\n".join(m["content"] for m in memories_raw) if memories_raw else ""
+    memory_ctx = select_memory_context(memories_raw)
     if search_ctx:
         memory_ctx = f"{memory_ctx}\n\n{search_ctx}".strip()
 
