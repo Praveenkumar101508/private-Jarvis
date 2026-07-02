@@ -1,9 +1,18 @@
 #!/usr/bin/env bash
-# Run IRA integration tests in Docker
+# Run IRA integration tests in Docker (LEGACY — requires the retired base
+# docker-compose.yml; the stack now runs native, see start-ira.ps1).
+# For the supported test path use:  cd ira && python -m pytest tests/
 # Usage: bash scripts/test.sh [pytest-args]
 set -euo pipefail
 
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
+
+if [ ! -f docker-compose.yml ]; then
+    echo "❌ docker-compose.yml not found — the Docker test path was retired when the"
+    echo "   stack moved native (see Makefile 'up' target and start-ira.ps1)."
+    echo "   Run the suite directly instead:  cd ira && python -m pytest tests/"
+    exit 1
+fi
 
 echo "=== IRA Integration Test Runner ==="
 echo ""
@@ -18,7 +27,7 @@ docker compose -f docker-compose.yml -f docker-compose.test.yml --profile test u
 
 # Wait for postgres
 echo "Waiting for postgres..."
-timeout 30 bash -c 'until docker compose exec postgres pg_isready -U jarvis -d jarvis_test 2>/dev/null; do sleep 1; done'
+timeout 30 bash -c 'until docker compose exec postgres pg_isready -U "${POSTGRES_USER:-jarvis}" -d ira_test 2>/dev/null; do sleep 1; done'
 
 # Run tests
 echo ""
