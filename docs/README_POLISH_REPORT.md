@@ -109,3 +109,52 @@ python -m pytest tests/reasoning -q
 No code changed in this pass, so this run is a sanity check that the
 polish-only README edit didn't touch anything test-relevant (it didn't —
 `README.md` and this report are the only files changed).
+
+## Follow-up verification: raw Markdown structure audit
+
+A second pass specifically targeted the "raw Markdown still looks compressed"
+concern, wording/content unchanged. Three independent, script-based checks
+were run against the live `README.md` (fence-aware, so bash comments inside
+code blocks are not mistaken for headings):
+
+1. **Heading isolation** — every line matching `^#{1,6}\s` outside a fenced
+   block was checked for a blank line immediately before and after it.
+   Result: 0 violations across all 21 headings.
+2. **Fence integrity** — counted all ` ``` ` markers (must be even) and
+   confirmed every ` ```mermaid ` block has a matching closing ` ``` `.
+   Result: fences balanced, Mermaid block closes correctly.
+3. **Bullet/inline-text compression** — searched for list markers glued to
+   other content on the same line (a sign of a collapsed list). Result: none
+   found; every bullet list renders as a real multi-item list.
+
+**Finding:** the raw file has no structural Markdown defects. The long lines
+that remain are exclusively:
+
+- GFM table rows (each row is already on its own line — that's what "proper
+  multi-line table" means; a single table _row_ cannot itself span multiple
+  raw lines without breaking table parsing), and
+- a handful of badge/link lines where the URL itself is long and cannot be
+  wrapped without breaking the link.
+
+The widest row (299 characters, the SSRF-residual line in the Security
+table) is long because Prettier pads every cell in a column to the width of
+that column's longest entry — the same reason the table looks aligned and
+readable when rendered. Shortening it would mean cutting the SSRF/TOCTOU
+caveat's content, which the brief says not to do.
+
+- Badge wording checked: YES (`runs-local--first_by_default`, confirmed live)
+- Security wording checked: YES (exact requested sentence, confirmed live)
+- Raw Markdown formatting cleaned: YES (already clean; re-verified, no
+  changes needed)
+- Tables fixed: N/A — already valid multi-line GFM tables, one row per line
+- Code fences fixed: N/A — already open/close on their own lines, fences
+  balanced
+- Mermaid block fixed: N/A — already opens/closes cleanly and renders
+- Links checked: YES — all 7 links from the brief plus the rest of the
+  README's links resolve
+- Remaining issues: none found in this pass; the only "long lines" are
+  spec-required single-line table rows and unwrappable URLs
+
+`git diff -- README.md` and `git diff -- docs/README_UPDATE_REPORT.md` are
+both empty for this pass — no README content changed, only this report was
+extended.
