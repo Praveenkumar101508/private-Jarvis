@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 // Fix #95: Shield import removed along with bodyguard mode
 import { GraduationCap, Bot, ChevronLeft, ChevronRight, Clock, Download, HardDrive, Upload, RefreshCw } from "lucide-react";
 import clsx from "clsx";
@@ -54,6 +54,11 @@ function formatRelative(date: Date): string {
 
 export default function Sidebar({ mode, onModeChange, onNewChat, recentChats = [], token = "" }: Props) {
   const [collapsed, setCollapsed] = useState(false);
+  // Auto-collapse on small screens after mount (post-hydration, so SSR markup
+  // matches the initial client render and no hydration warning fires).
+  useEffect(() => {
+    if (window.innerWidth < 640) setCollapsed(true);
+  }, []);
   const [backupStatus, setBackupStatus] = useState<string>("");
   const [backupLoading, setBackupLoading] = useState(false);
   const restoreInputRef = useRef<HTMLInputElement>(null);
@@ -134,7 +139,7 @@ export default function Sidebar({ mode, onModeChange, onNewChat, recentChats = [
   return (
     <aside
       className={clsx(
-        "flex flex-col h-full border-r border-neutral-800 bg-neutral-950 transition-all duration-300 flex-shrink-0",
+        "flex flex-col h-full border-r border-white/[0.06] bg-neutral-950/60 backdrop-blur-md transition-all duration-300 flex-shrink-0",
         collapsed ? "w-12" : "w-56",
       )}
     >
@@ -147,6 +152,8 @@ export default function Sidebar({ mode, onModeChange, onNewChat, recentChats = [
           onClick={() => setCollapsed((c) => !c)}
           className="ml-auto text-neutral-600 hover:text-neutral-300 transition-colors"
           title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+          aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+          aria-expanded={!collapsed}
         >
           {collapsed ? <ChevronRight className="w-4 h-4" /> : <ChevronLeft className="w-4 h-4" />}
         </button>

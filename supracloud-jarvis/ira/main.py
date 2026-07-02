@@ -61,7 +61,7 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s %(name)s — %(message)s",
 )
-logger = logging.getLogger("jarvis")
+logger = logging.getLogger("ira")
 
 
 # ── Rate limiter ───────────────────────────────────────────────────────────────
@@ -137,7 +137,7 @@ async def lifespan(app: FastAPI):
         logger.warning("   - All LLM calls routed to local Ollama")
         logger.warning("   NEVER USE IN PRODUCTION!")
         logger.warning("=" * 70)
-    logger.info(f"Jarvis {cfg.ira_version} starting up...")
+    logger.info(f"IRA {cfg.ira_version} starting up...")
 
     # Initialise connections
     await init_pool()

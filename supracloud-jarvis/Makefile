@@ -1,5 +1,5 @@
 .PHONY: secrets-encrypt secrets-decrypt secrets-edit secrets-view \
-        up down logs up-secure test test-unit test-coverage security
+        up down logs up-secure test test-docker test-unit test-coverage security
 
 # ── Secrets management (sops + age) ──────────────────────────────────────────
 
@@ -72,8 +72,13 @@ security:
 
 # ── Tests ─────────────────────────────────────────────────────────────────────
 
-# Run all tests in Docker
+# Run the full suite natively (same path CI uses). The old Docker runner
+# (scripts/test.sh) needs the retired base docker-compose.yml — see test-docker.
 test:
+	cd ira && python -m pytest tests/ --tb=short
+
+# Legacy Docker test runner — requires the retired docker-compose.yml
+test-docker:
 	bash scripts/test.sh
 
 # Run quick unit tests locally (no Docker)

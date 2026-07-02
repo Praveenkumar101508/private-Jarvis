@@ -1,5 +1,5 @@
 -- =============================================================================
--- SupraCloud Jarvis — PostgreSQL Schema
+-- SupraCloud IRA — PostgreSQL Schema
 -- Runs once on first container start (via docker-entrypoint-initdb.d)
 -- =============================================================================
 
@@ -115,7 +115,7 @@ CREATE TABLE IF NOT EXISTS agents (
 
 -- =============================================================================
 -- SECURITY EVENTS
--- Security Guardian writes here; Jarvis reads for alerting
+-- Security Guardian writes here; IRA reads for alerting
 -- =============================================================================
 
 CREATE TABLE IF NOT EXISTS security_events (
@@ -195,7 +195,7 @@ CREATE TRIGGER trg_agents_updated_at
     FOR EACH ROW EXECUTE FUNCTION update_updated_at();
 
 -- =============================================================================
--- Seed: system conversation for Jarvis bootstrap messages
+-- Seed: system conversation for IRA bootstrap messages
 --
 -- The UUID '00000000-0000-0000-0000-000000000001' is a fixed sentinel value.
 -- Hard-coding it (rather than uuid_generate_v4()) lets application code and
@@ -208,5 +208,5 @@ INSERT INTO conversations (id, session_id, title)
 VALUES (
     '00000000-0000-0000-0000-000000000001',
     'system',
-    'Jarvis System Bootstrap'
+    'IRA System Bootstrap'
 ) ON CONFLICT (id) DO NOTHING;

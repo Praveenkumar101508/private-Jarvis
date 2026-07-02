@@ -47,9 +47,29 @@ The biometric gate blocks non-owner access to:
 - Replicate, Apify, and Telegram integrations send data to third-party services when configured
 - Computer use (Playwright) runs in a container with `--no-sandbox` — isolate from sensitive data
 
+## Supported Versions
+
+Only the current `supracloud_ira` branch (v1.0.x) receives fixes. The `ira` branch is a
+frozen pre-restructure archive and is not maintained.
+
+## Secrets Policy
+
+- All secrets live in `.env` (never committed — CI fails the build if `.env` appears in git).
+- `supracloud-jarvis/.env.example` contains only `CHANGE_ME_*` placeholders; generate real
+  values with `openssl rand -hex 32`.
+- Optional encrypted-at-rest handling via sops + age (`make secrets-encrypt` /
+  `secrets-decrypt` in `supracloud-jarvis/Makefile`).
+- No API keys, tokens, or passwords in code, tests, or fixtures — an automated scan is part
+  of CI, and the portable profile ships a no-plaintext-secrets test.
+
 ## Reporting Security Issues
 
-This is a personal project. If you find a security issue, please open a private GitHub issue or email the owner directly.
+This is a personal project maintained by Praveen Kamineti. If you find a security issue,
+please use **GitHub private vulnerability reporting** on this repository (Security →
+"Report a vulnerability") rather than a public issue. If that's unavailable, contact the
+maintainer directly via the GitHub profile. Please include reproduction steps; you can
+expect an acknowledgement, but there is no bug-bounty program and no guaranteed SLA — this
+is best-effort, honestly stated.
 
 ## Security Checklist (Before Production Deployment)
 

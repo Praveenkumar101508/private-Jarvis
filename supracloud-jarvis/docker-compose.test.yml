@@ -1,4 +1,6 @@
 # Integration test environment — no vLLM, no LiveKit, no GPU required
+# LEGACY: overlays the retired base docker-compose.yml (stack runs native now —
+# see start-ira.ps1). Kept for the future re-dockerized upgrade path.
 # Usage: docker compose -f docker-compose.yml -f docker-compose.test.yml --profile test up -d
 # Then: docker compose exec ira-api pytest tests/ -v
 
@@ -8,7 +10,7 @@ services:
   postgres:
     profiles: ["test"]
     environment:
-      POSTGRES_DB: jarvis_test
+      POSTGRES_DB: ira_test
     tmpfs:
       - /var/lib/postgresql/data   # in-memory DB for fast tests, no persistence
 
@@ -20,7 +22,7 @@ services:
     profiles: ["test"]
     environment:
       DEV_MODE: "true"
-      POSTGRES_DB: jarvis_test
+      POSTGRES_DB: ira_test
       POSTGRES_PASSWORD: testpassword
       REDIS_PASSWORD: testpassword
       IRA_SECRET_KEY: test-secret-key-for-ci-only-not-production

@@ -30,7 +30,7 @@ from typing import NamedTuple
 logger = logging.getLogger("ira.auto_implement")
 
 # The repo root is assumed to be 3 levels up from this file:
-# ira/utils/auto_implement.py → ira/ → supracloud-jarvis/ → private-Jarvis-main/
+# ira/utils/auto_implement.py → ira/ → supracloud-jarvis/ → <repo root>/
 # We find it at runtime so it works in both Docker (mounted) and local dev.
 _REPO_ROOT: Path | None = None
 

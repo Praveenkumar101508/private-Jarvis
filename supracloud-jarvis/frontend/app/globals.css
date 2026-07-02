@@ -2,6 +2,16 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ── SupraCloud IRA design tokens ─────────────────────────────────────────────
+   Dark-first premium surface system. Three depth levels:
+   canvas (page) → panel (sidebar/header) → card (bubbles, inputs, modals).   */
+:root {
+  --ira-canvas: #060608;
+  --ira-accent: #f97316; /* saffron-500 */
+  --ira-accent-soft: rgba(249, 115, 22, 0.14);
+  --ira-indigo-soft: rgba(99, 102, 241, 0.1);
+}
+
 * {
   box-sizing: border-box;
 }
@@ -12,19 +22,69 @@ body {
   overflow: hidden;
 }
 
+body {
+  background-color: var(--ira-canvas);
+}
+
+/* Aurora canvas — two soft radial washes anchored to the corners give the
+   page depth without competing with content. Pure CSS, zero JS cost. */
+.ira-aurora {
+  background-color: var(--ira-canvas);
+  background-image:
+    radial-gradient(1100px 620px at 85% -10%, var(--ira-accent-soft), transparent 62%),
+    radial-gradient(900px 560px at -10% 108%, var(--ira-indigo-soft), transparent 60%);
+  background-attachment: fixed;
+}
+
+/* Glass panel — frosted surface used for the header, sidebar and cards. */
+.ira-glass {
+  background: rgba(255, 255, 255, 0.035);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
+
+/* Brand gradient text (login heading, empty state). */
+.ira-gradient-text {
+  background: linear-gradient(92deg, #fdba74 0%, #f97316 45%, #a5b4fc 110%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* Soft outer glow for the brand orb. */
+.ira-orb-glow {
+  box-shadow:
+    0 0 32px rgba(249, 115, 22, 0.28),
+    0 0 90px rgba(249, 115, 22, 0.12);
+}
+
 /* Thin, tasteful scrollbar */
 ::-webkit-scrollbar {
   width: 4px;
+  height: 4px;
 }
 ::-webkit-scrollbar-track {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: #404040;
+  background: #3a3a3f;
   border-radius: 2px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #525252;
+  background: #55555c;
+}
+
+/* Keyboard-visible focus ring everywhere — a11y for buttons, inputs, links.
+   Mouse clicks don't trigger it (that's what :focus-visible is for). */
+:focus-visible {
+  outline: 2px solid rgba(249, 115, 22, 0.65);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+::selection {
+  background: rgba(249, 115, 22, 0.35);
 }
 
 /* Blinking cursor for streaming messages */
@@ -34,4 +94,15 @@ body {
 }
 .cursor-blink {
   animation: blink 1s step-end infinite;
+}
+
+/* Respect users who ask for less motion. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }
