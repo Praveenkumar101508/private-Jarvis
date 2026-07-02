@@ -34,6 +34,13 @@ local.</sub>
 <!-- Want a real screen recording instead? Record your running app, drag the .mp4/.gif into a GitHub issue,
      copy the uploaded URL, and replace the <img> above with it. -->
 
+<br/>
+
+<img src="assets/screenshots/login-desktop.png" alt="SupraCloud IRA — sign-in screen (desktop)" width="72%"/>
+<img src="assets/screenshots/login-mobile.png" alt="SupraCloud IRA — sign-in screen (mobile)" width="19.5%"/>
+
+<sub>Real screenshots of the redesigned interface — desktop and mobile, dark-first, fully responsive.</sub>
+
 </div>
 
 ---
@@ -537,6 +544,11 @@ supracloud-jarvis/
 
 ## Documentation
 
+- [`ARCHITECTURE.md`](ARCHITECTURE.md) — components, data flow, local-first model, extension points
+- [`SECURITY.md`](SECURITY.md) — threat model, auth, secrets policy, how to report issues
+- [`CONTRIBUTING.md`](CONTRIBUTING.md) — setup, branch workflow, test expectations
+- [`CITATION.cff`](CITATION.cff) — citation metadata
+- [`docs/IRA_FULL_REPO_AUDIT.md`](docs/IRA_FULL_REPO_AUDIT.md) — full publication-readiness audit
 - [`ira/docs/MODEL_SELECTION.md`](supracloud-jarvis/ira/docs/MODEL_SELECTION.md) — model roles,
   profiles, fallback chains, consent behaviour
 - [`docs/MODEL_ROUTING_VERIFICATION_REPORT.md`](docs/MODEL_ROUTING_VERIFICATION_REPORT.md) —
@@ -567,8 +579,17 @@ supracloud-jarvis/
 
 ---
 
+## License
+
+Currently **all rights reserved** (no open-source license granted yet). A license will be
+chosen at publication time — until then, the code is source-visible but not licensed for
+reuse. Third-party components under `third_party/` keep their own upstream licenses
+(Apache-2.0 and others), which remain in full force.
+
+---
+
 <div align="center">
-<sub>Built and owned by <b>Praveen Kamineti</b> · part of the <b>SupraCloud</b> sovereign-AI vision.</sub>
+<sub>Built and owned by <b>Praveen Kamineti</b> (Praveen Kumar) · part of the <b>SupraCloud</b> sovereign-AI vision.</sub>
 <br/>
-<sub>Private repository — © all rights reserved.</sub>
+<sub>© Praveen Kamineti — all rights reserved.</sub>
 </div>

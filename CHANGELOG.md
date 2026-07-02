@@ -7,6 +7,32 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added — Publication preparation
+- Full repository audit and release-readiness documentation set under `docs/`
+  (inventory, audit, UI redesign, branding cleanup, publication readiness,
+  verification, branch cleanup reports)
+- `CONTRIBUTING.md`, `CITATION.cff`; expanded `SECURITY.md` (supported versions,
+  secrets policy, private vulnerability reporting)
+- Real UI screenshots under `assets/screenshots/` (desktop + mobile)
+
+### Changed — UI redesign (frontend)
+- Premium dark-first design system: aurora canvas, glass surfaces, brand gradient,
+  saffron glow accents — zero new dependencies
+- Local-first identity surfaced in the UI: "100% local & private" badge on sign-in,
+  🔒 Local indicator in the header, "Running locally" badge on the empty state
+- Responsive fixes: sidebar auto-collapses on phones; mode-toggle row wraps instead of
+  overflowing
+- Accessibility: global keyboard focus ring, `aria-label`s on icon buttons, labeled
+  login inputs with autocomplete, dialog semantics, `prefers-reduced-motion` support
+
+### Changed — Branding & hygiene
+- Old assistant name removed from runtime strings and templates (logger, startup log,
+  default domain `ira.local`, SQL seeds/comments, test DB name); DB role/name defaults
+  kept for data compatibility and documented in `.env.example`
+- `ARCHITECTURE.md` rewritten to match the current native Ollama + Cortex stack
+- `make test` now runs the native pytest suite; the legacy Docker runner moved to
+  `make test-docker` with an explicit guard for the retired base compose file
+
 ### Added — Security hardening
 - TOTP 2FA enforcement: enrol at `POST /auth/totp/enroll`; once a secret is enrolled and enabled, login at `/auth/token` refuses the token without a valid TOTP code; TOTP failures count toward account lockout
 - jti-based token revocation on logout; per-user revoke-all by incrementing a Redis token version counter (all outstanding access tokens invalidated instantly)

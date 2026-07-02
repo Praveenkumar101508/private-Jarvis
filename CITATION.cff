@@ -1,0 +1,23 @@
+cff-version: 1.2.0
+message: "If you reference SupraCloud IRA in your work, please cite it as below."
+title: "SupraCloud IRA: a local-first personal AI assistant"
+type: software
+authors:
+  - family-names: "Kamineti"
+    given-names: "Praveen"
+    alias: "Praveen Kumar"
+repository-code: "https://github.com/Praveenkumar101508/Supracloud_ira"
+abstract: >-
+  SupraCloud IRA is a private, local-first AI assistant that runs local models by
+  default (Ollama-native tiers), routes each request to the right model for the job,
+  uses ranked reference-only memory, and gates every external API call and destructive
+  action behind explicit owner consent. Chat, voice, memory, research, and actions run
+  on the owner's own hardware.
+keywords:
+  - local-first
+  - ai-assistant
+  - privacy
+  - llm
+  - fastapi
+  - langgraph
+version: "1.0.0"
