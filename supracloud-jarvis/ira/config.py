@@ -50,7 +50,7 @@ class Settings(BaseSettings):
 
     # ── Identity ──────────────────────────────────────────────────────────────
     ira_version: str = "1.0.0"
-    ira_domain: str = "jarvis.local"
+    ira_domain: str = "ira.local"
     # Tailscale Serve host (e.g. shadow.tailnet-name.ts.net) — set so the phone PWA's
     # HTTPS origin is allowed by CORS. Mobile getUserMedia (mic) requires HTTPS, which
     # `tailscale serve` provides with a valid *.ts.net cert. Blank = not used.
@@ -241,7 +241,7 @@ class Settings(BaseSettings):
     livekit_api_secret: str = ""
     livekit_room_name: str = "ira-voice"
     # Public WebSocket URL returned to the frontend browser client
-    # e.g. wss://jarvis.yourdomain.com  or  ws://localhost:7880
+    # e.g. wss://ira.yourdomain.com  or  ws://localhost:7880
     # Falls back to wss://{ira_domain}/livekit if not set
     livekit_public_url: str = ""
 
@@ -444,7 +444,7 @@ class Settings(BaseSettings):
                 f"DEV_MODE is forbidden on a non-local domain "
                 f"(IRA_DOMAIN={self.ira_domain!r}). "
                 "Set DEV_MODE=false or point IRA_DOMAIN at a local address "
-                "(jarvis.local, localhost, 127.0.0.1, ::1, or *.local)."
+                "(ira.local, localhost, 127.0.0.1, ::1, or *.local)."
             )
         # Phase 5(d): don't trust the domain label alone. DEV_MODE bypasses auth, so a
         # non-loopback API bind host can expose an unauthenticated admin endpoint even

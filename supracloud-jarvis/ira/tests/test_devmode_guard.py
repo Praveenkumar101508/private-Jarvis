@@ -28,7 +28,7 @@ def _clear():
 @pytest.mark.parametrize("domain,expected", [
     ("localhost", True),
     ("127.0.0.1", True),
-    ("jarvis.local", True),
+    ("ira.local", True),
     ("shadow.local", True),
     ("192.168.1.10", True),
     ("10.0.0.1", True),
@@ -52,7 +52,7 @@ def test_is_local_domain(domain, expected):
 @pytest.mark.parametrize("domain", [
     "localhost",
     "127.0.0.1",
-    "jarvis.local",
+    "ira.local",
     "192.168.0.100",
 ])
 def test_dev_mode_on_local_domain_boots(domain):

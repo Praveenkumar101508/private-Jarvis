@@ -1,7 +1,7 @@
 """
 Memory store — persists conversations and retrieves relevant memories via pgvector.
 
-Two operations drive Jarvis's memory:
+Two operations drive IRA's memory:
   store_message()  — saves each exchange and its embedding asynchronously
   retrieve()       — finds the top-K most relevant past memories for a given query
 """
