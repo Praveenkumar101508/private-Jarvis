@@ -137,8 +137,9 @@ function CopyButton({ text }: { text: string }) {
   return (
     <button
       onClick={copy}
-      className="opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded text-neutral-600 hover:text-neutral-300"
+      className="opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity p-1 rounded text-neutral-600 hover:text-neutral-300"
       title="Copy"
+      aria-label="Copy message"
     >
       {copied ? <Check className="w-3 h-3 text-green-400" /> : <Copy className="w-3 h-3" />}
     </button>
@@ -886,7 +887,7 @@ export default function ChatInterface({ sessionId, token, mode = "assistant" }: 
       {/* Cost Guard confirmation modal */}
       {showCostConfirm && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-          <div className="bg-neutral-900 border border-violet-500/30 rounded-2xl p-6 max-w-sm mx-4 shadow-2xl">
+          <div role="dialog" aria-modal="true" aria-label="Cost Guard confirmation" className="ira-glass border-violet-500/30 rounded-2xl p-6 max-w-sm mx-4 shadow-panel">
             <div className="flex items-center gap-2 mb-3">
               <AlertCircle className="w-5 h-5 text-amber-400" />
               <h3 className="text-white font-semibold">Cost Guard</h3>
@@ -923,27 +924,33 @@ export default function ChatInterface({ sessionId, token, mode = "assistant" }: 
       {/* Message list */}
       <div className="flex-1 overflow-y-auto px-4 py-6">
         {messages.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-full text-center select-none">
+          <div className="flex flex-col items-center justify-center h-full text-center select-none animate-fade-in">
             <div
               className={clsx(
-                "w-20 h-20 rounded-full flex items-center justify-center mb-5 border",
+                "w-20 h-20 rounded-full flex items-center justify-center mb-5 border animate-float-soft",
                 isTutor
                   ? "bg-indigo-500/10 border-indigo-500/20"
-                  : "bg-saffron-500/10 border-saffron-500/20"
+                  : "bg-saffron-500/10 border-saffron-500/20 ira-orb-glow"
               )}
             >
-              <span className="text-4xl">
+              <span className="text-4xl" aria-hidden="true">
                 {isTutor ? "🎓" : "✦"}
               </span>
             </div>
-            <h2 className="text-xl font-semibold text-white mb-1">
+            <h2 className={clsx("text-2xl font-semibold mb-1 tracking-tight", isTutor ? "text-white" : "ira-gradient-text")}>
               {isTutor ? "Supracloud Tutor" : "Hello, I am IRA"}
             </h2>
-            <p className="text-neutral-500 text-sm max-w-xs leading-relaxed mb-6">
+            <p className={clsx("text-neutral-500 text-sm max-w-xs leading-relaxed", isTutor ? "mb-6" : "mb-3")}>
               {isTutor
                 ? "I won't give you the answer — I'll help you find it. What are you learning today?"
                 : "Your Intelligent Responsive Assistant. Paste a URL, ask anything, or use the mic."}
             </p>
+            {!isTutor && (
+              <span className="inline-flex items-center gap-1.5 mb-6 px-2.5 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/25 text-emerald-400 text-[11px] font-medium">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" aria-hidden="true" />
+                Running locally — private by default
+              </span>
+            )}
             {/* Suggestion chips */}
             <div className="flex flex-wrap justify-center gap-2 max-w-sm">
               {suggestions.map((s) => (
@@ -982,8 +989,8 @@ export default function ChatInterface({ sessionId, token, mode = "assistant" }: 
                     className={clsx(
                       "rounded-2xl px-4 py-3 text-sm leading-relaxed break-words",
                       msg.role === "user"
-                        ? "bg-saffron-500 text-white rounded-br-sm"
-                        : "bg-neutral-800/80 text-neutral-100 rounded-bl-sm border border-neutral-700/60"
+                        ? "bg-gradient-to-br from-saffron-500 to-saffron-600 text-white rounded-br-sm shadow-glow-saffron"
+                        : "ira-glass text-neutral-100 rounded-bl-sm"
                     )}
                   >
                     {msg.role === "assistant" ? (
@@ -1270,7 +1277,7 @@ export default function ChatInterface({ sessionId, token, mode = "assistant" }: 
           )}
           <div
             className={clsx(
-              "flex items-end gap-2 bg-neutral-900/80 rounded-2xl border border-neutral-700 px-4 py-2 transition-colors",
+              "flex items-end gap-2 ira-glass rounded-2xl px-4 py-2 transition-colors shadow-panel",
               accentBorder
             )}
           >
@@ -1292,6 +1299,7 @@ export default function ChatInterface({ sessionId, token, mode = "assistant" }: 
               onClick={() => fileInputRef.current?.click()}
               disabled={isStreaming}
               title="Attach image for vision analysis"
+              aria-label="Attach a file"
               className={clsx(
                 "flex-shrink-0 w-7 h-7 rounded-lg flex items-center justify-center transition-all mb-0.5",
                 attachedFile
@@ -1306,6 +1314,7 @@ export default function ChatInterface({ sessionId, token, mode = "assistant" }: 
                 onClick={stopStreaming}
                 className="flex-shrink-0 w-8 h-8 rounded-xl flex items-center justify-center bg-red-500/20 border border-red-500/50 text-red-400 hover:bg-red-500/30 transition-all mb-0.5"
                 title="Stop"
+                aria-label="Stop generating"
               >
                 <Square className="w-3.5 h-3.5" />
               </button>
@@ -1313,10 +1322,11 @@ export default function ChatInterface({ sessionId, token, mode = "assistant" }: 
               <button
                 onClick={() => sendMessage()}
                 disabled={!input.trim()}
+                aria-label="Send message"
                 className={clsx(
                   "flex-shrink-0 w-8 h-8 rounded-xl flex items-center justify-center transition-all mb-0.5",
                   input.trim()
-                    ? `${accentSend} shadow-md`
+                    ? `${accentSend} shadow-glow-saffron`
                     : "bg-neutral-800 text-neutral-600 cursor-not-allowed"
                 )}
               >
@@ -1324,12 +1334,13 @@ export default function ChatInterface({ sessionId, token, mode = "assistant" }: 
               </button>
             )}
           </div>
-          <div className="flex items-center justify-between mt-1.5">
-            <p className="text-[11px] text-neutral-700">
+          <div className="flex items-center justify-between gap-2 mt-1.5">
+            <p className="text-[11px] text-neutral-700 hidden md:block flex-shrink-0">
               Enter to send · Shift+Enter for new line
               {isTutor && " · Tutor mode enabled"}
             </p>
-            <div className="flex items-center gap-1.5">
+            {/* Mode toggles — wrap on small screens instead of overflowing */}
+            <div className="flex items-center gap-1.5 flex-wrap justify-end">
               <button
                 onClick={toggleExpertMode}
                 title="Expert Mode: 5 agents collaborate in parallel"

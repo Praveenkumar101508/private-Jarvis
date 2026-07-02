@@ -7,9 +7,10 @@ import DemoModeBanner from "@/components/DemoModeBanner";
 const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "IRA",
-  description: "Private Sovereign AI Assistant",
-  applicationName: "IRA",
+  title: "SupraCloud IRA — Private, Local-First AI Assistant",
+  description:
+    "IRA is a private, local-first AI assistant by Praveen Kamineti. Your AI. Your hardware. Your rules.",
+  applicationName: "SupraCloud IRA",
   appleWebApp: {
     capable: true,
     title: "IRA",
@@ -53,7 +54,7 @@ export default function RootLayout({
             <link rel="apple-touch-icon" href="/icons/icon-180x180.png" />
         */}
       </head>
-      <body className={`${inter.className} bg-neutral-950 text-white antialiased`}>
+      <body className={`${inter.className} ira-aurora text-white antialiased`}>
         <PWARegister />
         <DemoModeBanner />
         {children}

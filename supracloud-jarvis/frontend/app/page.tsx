@@ -92,69 +92,80 @@ export default function Home() {
 
   if (!isAuthenticated) {
     return (
-      <div className="min-h-screen bg-neutral-950 flex items-center justify-center px-4">
-        <div className="w-full max-w-sm">
+      <div className="min-h-screen flex items-center justify-center px-4">
+        <div className="w-full max-w-sm animate-fade-in">
           <div className="text-center mb-8">
-            <div className="relative w-20 h-20 rounded-full bg-saffron-500/10 border border-saffron-500/30 flex items-center justify-center mx-auto mb-4">
-              <span className="text-4xl select-none">✦</span>
+            <div className="relative w-20 h-20 rounded-full bg-saffron-500/10 border border-saffron-500/30 ira-orb-glow animate-float-soft flex items-center justify-center mx-auto mb-5">
+              <span className="text-4xl select-none" aria-hidden="true">✦</span>
               {/* Live pulse ring */}
-              <span className="absolute -top-0.5 -right-0.5 flex h-3 w-3">
+              <span className="absolute -top-0.5 -right-0.5 flex h-3 w-3" aria-hidden="true">
                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-60" />
                 <span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-500 border-2 border-neutral-950" />
               </span>
             </div>
-            <h1 className="text-2xl font-bold text-white tracking-tight">SupraCloud IRA</h1>
-            <p className="text-neutral-400 text-sm mt-1">Private Sovereign AI — v1.0.0</p>
+            <h1 className="text-3xl font-bold tracking-tight ira-gradient-text">SupraCloud IRA</h1>
+            <p className="text-neutral-400 text-sm mt-1.5">
+              Your AI. Your hardware. Your rules.
+            </p>
+            {/* Local-first identity badge */}
+            <div className="inline-flex items-center gap-1.5 mt-3 px-2.5 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/25 text-emerald-400 text-[11px] font-medium">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" aria-hidden="true" />
+              100% local &amp; private — nothing leaves this machine
+            </div>
             {/* Capability pills */}
             <div className="flex flex-wrap justify-center gap-1.5 mt-3">
               {["Qwen3 · Reasoning", "Real-time Search", "Expert Mode", "Voice", "Vision", "DeepSearch"].map((cap) => (
-                <span key={cap} className="px-2 py-0.5 rounded-full text-[10px] bg-neutral-800 border border-neutral-700 text-neutral-500">
+                <span key={cap} className="px-2 py-0.5 rounded-full text-[10px] ira-glass text-neutral-400">
                   {cap}
                 </span>
               ))}
             </div>
           </div>
 
-          <div className="bg-neutral-900 rounded-2xl p-6 border border-neutral-800 shadow-2xl">
+          <div className="ira-glass rounded-2xl p-6 shadow-panel">
             {loginError && (
-              <div className="mb-4 p-3 rounded-lg bg-red-500/10 border border-red-500/30 text-red-400 text-sm flex items-start gap-2">
-                <span className="text-base leading-none mt-0.5">⚠</span>
+              <div role="alert" className="mb-4 p-3 rounded-lg bg-red-500/10 border border-red-500/30 text-red-400 text-sm flex items-start gap-2">
+                <span className="text-base leading-none mt-0.5" aria-hidden="true">⚠</span>
                 <span>{loginError}</span>
               </div>
             )}
             <div className="space-y-4">
               <div>
-                <label className="block text-xs text-neutral-400 mb-1.5 font-medium tracking-wide uppercase">
+                <label htmlFor="ira-username" className="block text-xs text-neutral-400 mb-1.5 font-medium tracking-wide uppercase">
                   Username
                 </label>
                 <input
+                  id="ira-username"
                   type="text"
+                  autoComplete="username"
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
-                  className="w-full bg-neutral-800 rounded-xl px-4 py-2.5 text-white text-sm border border-neutral-700 focus:border-saffron-500/60 focus:outline-none transition-colors"
+                  className="w-full bg-neutral-900/70 rounded-xl px-4 py-2.5 text-white text-sm border border-neutral-700/80 focus:border-saffron-500/60 focus:outline-none transition-colors"
                 />
               </div>
               <div>
-                <label className="block text-xs text-neutral-400 mb-1.5 font-medium tracking-wide uppercase">
+                <label htmlFor="ira-password" className="block text-xs text-neutral-400 mb-1.5 font-medium tracking-wide uppercase">
                   Password
                 </label>
                 <input
+                  id="ira-password"
                   type="password"
+                  autoComplete="current-password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   onKeyDown={(e) => e.key === "Enter" && login()}
                   autoFocus
-                  className="w-full bg-neutral-800 rounded-xl px-4 py-2.5 text-white text-sm border border-neutral-700 focus:border-saffron-500/60 focus:outline-none transition-colors"
+                  className="w-full bg-neutral-900/70 rounded-xl px-4 py-2.5 text-white text-sm border border-neutral-700/80 focus:border-saffron-500/60 focus:outline-none transition-colors"
                 />
               </div>
               <button
                 onClick={login}
                 disabled={loggingIn || !password.trim()}
-                className="w-full bg-saffron-500 hover:bg-saffron-600 active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-xl py-2.5 text-sm font-semibold transition-all"
+                className="w-full bg-gradient-to-r from-saffron-500 to-saffron-600 hover:from-saffron-400 hover:to-saffron-500 shadow-glow-saffron active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed disabled:shadow-none text-white rounded-xl py-2.5 text-sm font-semibold transition-all"
               >
                 {loggingIn ? (
                   <span className="flex items-center justify-center gap-2">
-                    <svg className="animate-spin h-3.5 w-3.5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <svg className="animate-spin h-3.5 w-3.5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" aria-hidden="true">
                       <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
                       <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
                     </svg>
@@ -163,8 +174,8 @@ export default function Home() {
                 ) : "Sign In"}
               </button>
             </div>
-            <p className="text-center text-[11px] text-neutral-700 mt-4">
-              Sovereign • Private • Self-Hosted
+            <p className="text-center text-[11px] text-neutral-600 mt-4">
+              Sovereign · Private · Self-Hosted — built by Praveen Kamineti
             </p>
           </div>
         </div>
@@ -173,7 +184,7 @@ export default function Home() {
   }
 
   return (
-    <div className="h-screen flex bg-neutral-950 overflow-hidden">
+    <div className="h-screen flex overflow-hidden">
       {/* Collapsible sidebar */}
       <Sidebar
         mode={mode}
@@ -185,7 +196,7 @@ export default function Home() {
       {/* Main column: top bar + chat */}
       <div className="flex-1 flex flex-col min-w-0">
         {/* Slim top bar */}
-        <header className="flex items-center justify-between px-4 py-2 border-b border-neutral-800 flex-shrink-0">
+        <header className="flex items-center justify-between px-4 py-2 border-b border-white/[0.06] bg-neutral-950/60 backdrop-blur-md flex-shrink-0">
           <div className="flex items-center gap-2.5">
             {/* Brand mark */}
             <div className="w-6 h-6 rounded-full bg-saffron-500/15 border border-saffron-500/30 flex items-center justify-center select-none flex-shrink-0">
@@ -203,8 +214,15 @@ export default function Home() {
               <span className="text-[10px] text-emerald-600 font-medium hidden lg:block">live</span>
             </span>
             {/* Model badge */}
-            <span className="hidden md:inline-flex items-center px-1.5 py-0.5 rounded-md text-[10px] bg-neutral-800 border border-neutral-700 text-neutral-500 font-mono">
+            <span className="hidden md:inline-flex items-center px-1.5 py-0.5 rounded-md text-[10px] ira-glass text-neutral-500 font-mono">
               Qwen3 · v1.0
+            </span>
+            {/* Local-first privacy indicator */}
+            <span
+              className="hidden md:inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[10px] bg-emerald-500/10 border border-emerald-500/25 text-emerald-500"
+              title="All inference runs on this machine — no cloud calls without your consent"
+            >
+              🔒 Local
             </span>
             <span className="text-xs text-neutral-600 hidden xl:block">
               Intelligent Responsive Assistant
